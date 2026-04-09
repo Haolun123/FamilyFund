@@ -318,10 +318,15 @@ FamilyFund/
 │   ├── output_allocation.csv       # [程序生成] 资产配置快照
 │   ├── output_nav_log.csv          # [程序生成] 旧版净值底稿
 │   ├── output_asset_breakdown.csv  # [程序生成] 逐笔持仓明细
-│   └── output_asset_summary.csv    # [程序生成] 资产类别汇总
+│   ├── output_asset_summary.csv    # [程序生成] 资产类别汇总
+│   ├── own_sap.csv                 # [手动/UI 维护] Own SAP (ESPP) 交易记录
+│   └── move_sap.csv                # [手动/UI 维护] Move SAP (RSU) 交易记录
 │
 ├── src/                            # 核心逻辑层
 │   ├── nav_engine.py               # ★ 统一多级净值核算引擎
+│   ├── sap_stock.py                # SAP 股票成本核算引擎
+│   ├── import_sap_xlsx.py          # XLSX → own_sap/move_sap CSV 迁移工具
+│   ├── fx_service.py               # 实时汇率获取（frankfurter.app）
 │   ├── migrate_xlsx.py             # XLSX → portfolio.csv 迁移工具
 │   ├── fund_calculator.py          # [历史] 旧版净值核算
 │   └── asset_breakdown.py          # XLSX 资产配置解析
@@ -335,8 +340,9 @@ FamilyFund/
 │   ├── asset_allocation.png        # 资产配置饼图
 │   └── nav_trend_chart.png         # [历史] 旧版净值走势图
 │
-└── tests/                          # 测试（共 68 项）
+└── tests/                          # 测试（共 98 项）
     ├── test_nav_engine.py          # 统一引擎测试（32 项）
+    ├── test_sap_stock.py           # SAP 股票测试（22 项）
     ├── test_fund_calculator.py     # 旧版净值测试（16 项）
     └── test_asset_breakdown.py     # 资产配置测试（20 项）
 ```
@@ -350,6 +356,11 @@ FamilyFund/
 | `input_fund_data.csv` | 历史数据 | 已归档 | 纳入 Git |
 | `CurrentAsset.xlsx` | 历史数据 | 已归档 | 可选 |
 | `nav_engine.py` | 开发维护 | 按需修改 | 必须纳入 Git |
+| `sap_stock.py` | 开发维护 | 按需修改 | 纳入 Git |
+| `import_sap_xlsx.py` | 开发维护 | 一次性工具 | 纳入 Git |
+| `fx_service.py` | 开发维护 | 按需修改 | 纳入 Git |
+| `own_sap.csv` | CIO/UI | 追加行 | **不纳入 Git**（私人数据） |
+| `move_sap.csv` | CIO/UI | 追加行 | **不纳入 Git**（私人数据） |
 | `dashboard/app.py` | 开发维护 | 按需修改 | 纳入 Git |
 | `migrate_xlsx.py` | 开发维护 | 一次性工具 | 纳入 Git |
 | `fund_calculator.py` | 历史代码 | 已归档 | 纳入 Git |
@@ -400,7 +411,7 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 | `Shares` | float | 是 | 持有份额/股数 |
 | `Current_Price` | float | 是 | 当前单价（原始币种） |
 | `Total_Value` | float | 是 | 当前总市值（CNY），= Shares × Price × Exchange_Rate |
-| `Net_Cash_Flow` | float | 是 | 本期外部资金变动（建仓日 = Total_Value，正常周 = 0） |
+| `Net_Cash_Flow` | float | 是 | 本期外部资金变动。建仓日 = Total_Value，正常周 = 0。特殊情况：现金存取 → Cash 行 NCF；SAP Own SAP 归属 → Company_Stock 行 NCF = 归属成本（Cost_CNY）；SAP Move SAP 归属 → NCF = 0（免费获得）；内部调仓 → NCF = 0 |
 
 #### 资产类别
 
@@ -505,6 +516,59 @@ python src/migrate_xlsx.py
 | `output/fund_nav_trend.png` | 基金整体净值走势图 |
 | `output/class_nav_trend.png` | 7 条线的分类净值对比图 |
 | `output/asset_allocation.png` | 甜甜圈配置饼图 |
+
+### 6.5.7 SAP 股票工作流
+
+SAP 公司股票由两个独立计划组成，各有独立的 CSV 和录入流程。SAP Stock tab 的价格和汇率由用户手动输入，**不依赖 portfolio.csv**。
+
+#### Monthly — Own SAP (ESPP)
+
+```mermaid
+sequenceDiagram
+    actor CIO as 家庭 CIO
+    participant BROKER as 券商账户
+    participant DASH as Dashboard SAP Tab
+    participant CSV as own_sap.csv
+    participant PORT as portfolio.csv
+
+    Note over CIO: 每月 5 号左右
+    CIO->>BROKER: 1. 查看本月 ESPP 归属明细
+    BROKER-->>CIO: Date, Price, Type(Match/Purchase), CNY, Qty
+    CIO->>DASH: 2. 打开 SAP Stock → Add Own SAP Transaction
+    CIO->>DASH: 3. 填写 Date, Price, Tax Rate, 逐行录入 Type/CNY/Qty
+    DASH->>CSV: 4. Save → 追加行到 own_sap.csv
+    Note over CIO: 下一个周末对账时
+    CIO->>PORT: 5. 更新 Company_Stock "Own SAP" 行
+    Note right of PORT: Shares = sap_stock 总股数<br/>Total_Value = Shares × Price × FX<br/>NCF = 本月新交易 Cost_CNY 之和
+```
+
+#### Quarterly — Move SAP (RSU)
+
+```mermaid
+sequenceDiagram
+    actor CIO as 家庭 CIO
+    participant HR as HR/Equity Portal
+    participant DASH as Dashboard SAP Tab
+    participant CSV as move_sap.csv
+    participant PORT as portfolio.csv
+
+    Note over CIO: 每季 11 号 (Mar/Jun/Sep/Dec)
+    CIO->>HR: 1. 查看本季 RSU 归属明细
+    HR-->>CIO: Date, Price, FX Rate, Qty per tranche
+    CIO->>DASH: 2. 打开 SAP Stock → Add Move SAP Transaction
+    CIO->>DASH: 3. 填写 Date, Price, FX Rate, 逐行录入 Qty
+    DASH->>CSV: 4. Save → 追加行到 move_sap.csv
+    Note over CIO: 下一个周末对账时
+    CIO->>PORT: 5. 更新 Company_Stock "Move SAP" 行
+    Note right of PORT: Shares = sap_stock 总股数<br/>Total_Value = Shares × Price × FX<br/>NCF = 0（免费获得）
+```
+
+#### Annual — Dividends (~May)
+
+两个计划的分红均以股票形式再投资。收到分红后：
+1. 在 SAP Stock tab 添加 Dividend 交易（Date, Price, Qty）
+2. 下次对账：更新对应 Company_Stock 行的 Shares 和 Total_Value
+3. Own SAP Dividend: NCF = Cost_CNY（全额成本）; Move SAP Dividend: NCF = 0
 
 ---
 

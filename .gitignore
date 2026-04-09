@@ -8,6 +8,8 @@ __pycache__/
 data/portfolio.csv
 data/input_fund_data.csv
 data/output_*.csv
+data/own_sap.csv
+data/move_sap.csv
 CurrentAsset.xlsx
 ~$*.xlsx
 

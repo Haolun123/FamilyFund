@@ -77,7 +77,14 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 
 ### Cash Flow Convention
 
-All external cash flows (salary deposits, spending withdrawals) are recorded **only on Cash rows**. Rebalancing between holdings (sell ETF → buy bonds) uses `Net_Cash_Flow = 0` on all rows — it's an internal transfer, not new money entering or leaving the fund.
+External cash flows go on the row where the value enters:
+
+- **Salary, spending** → Cash row NCF
+- **SAP Own SAP vesting** → Company_Stock "Own SAP" row NCF = Cost_CNY (the cash you sacrificed by opting in)
+- **SAP Move SAP vesting** → Company_Stock "Move SAP" row NCF = 0 (free shares, no cost)
+- **Internal rebalancing** (sell ETF → buy bonds) → NCF = 0 on all rows
+
+This ensures NAV reflects the employer subsidy as investment performance (NAV growth) rather than external cash inflow.
 
 ## How NAV Works
 
@@ -94,15 +101,17 @@ Cash flows only change **shares**, not **NAV**. This means NAV purely reflects i
 ## Project Structure
 
 ```
-├── dashboard/app.py          # Streamlit dashboard (3 tabs)
+├── dashboard/app.py          # Streamlit dashboard (4 tabs: Dashboard, Weekly Update, History, SAP Stock)
 ├── src/
 │   ├── nav_engine.py         # Core NAV engine, cost basis, file I/O
+│   ├── sap_stock.py          # SAP stock cost basis engine (Own SAP / Move SAP)
+│   ├── import_sap_xlsx.py    # XLSX → own_sap/move_sap CSV migration
 │   ├── fx_service.py         # Live exchange rate fetcher
 │   ├── asset_breakdown.py    # XLSX parser
 │   └── migrate_xlsx.py       # XLSX → CSV migration tool
 ├── data/
 │   └── portfolio_sample.csv  # Sample data (3 weeks × 3 assets)
-├── tests/                    # 40 pytest tests
+├── tests/                    # 98 pytest tests
 ├── Dockerfile
 ├── docker-compose.yml
 └── .streamlit/config.toml

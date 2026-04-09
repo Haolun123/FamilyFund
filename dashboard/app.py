@@ -16,6 +16,7 @@ from nav_engine import (
     _atomic_write_csv, update_snapshot, delete_snapshot,
 )
 from fx_service import get_exchange_rate
+from sap_stock import load_own_sap, load_move_sap, own_sap_summary, move_sap_summary
 
 # ─── Page Config ───
 
@@ -30,6 +31,8 @@ st.set_page_config(
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_CSV = os.path.join(BASE_DIR, 'data', 'portfolio.csv')
 SAMPLE_CSV = os.path.join(BASE_DIR, 'data', 'portfolio_sample.csv')
+OWN_SAP_CSV = os.path.join(BASE_DIR, 'data', 'own_sap.csv')
+MOVE_SAP_CSV = os.path.join(BASE_DIR, 'data', 'move_sap.csv')
 
 
 @st.cache_data
@@ -43,7 +46,11 @@ def load_data(csv_path):
     fund_nav = compute_fund_nav(df)
     class_nav = compute_class_nav(df)
     allocation = compute_allocation(df)
-    cost_basis = compute_cost_basis(df)
+    cost_basis = compute_cost_basis(
+        df,
+        own_sap_csv=OWN_SAP_CSV if os.path.exists(OWN_SAP_CSV) else None,
+        move_sap_csv=MOVE_SAP_CSV if os.path.exists(MOVE_SAP_CSV) else None,
+    )
     return df, fund_nav, class_nav, allocation, cost_basis
 
 
@@ -106,7 +113,7 @@ filtered_fund = fund_nav_df[(fund_nav_df['Date'] >= date_start) & (fund_nav_df['
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_history = st.tabs(["Dashboard", "Weekly Update", "History"])
+tab_dashboard, tab_update, tab_history, tab_sap = st.tabs(["Dashboard", "Weekly Update", "History", "SAP Stock"])
 
 # ═══════════════════════════════════════════════════════════
 # Tab 1: Dashboard
@@ -383,6 +390,85 @@ with tab_update:
         template['Net_Cash_Flow'] = 0.0
         st.session_state['update_template'] = template
 
+    # ─── Batch CSV Import ───
+
+    def _parse_csv_input(text, prev_template):
+        """Parse CSV/TSV text into a DataFrame matching portfolio schema."""
+        from io import StringIO
+
+        text = text.strip()
+        if not text:
+            return None, "输入为空"
+
+        # Auto-detect separator: tab vs comma
+        first_line = text.split('\n')[0]
+        sep = '\t' if '\t' in first_line else ','
+
+        # Check if first line is a header
+        expected_cols = {'Asset_Class', 'Platform', 'Name', 'Code', 'Currency',
+                         'Exchange_Rate', 'Shares', 'Current_Price', 'Total_Value', 'Net_Cash_Flow'}
+        first_fields = {f.strip() for f in first_line.split(sep)}
+        has_header = len(first_fields & expected_cols) >= 3
+
+        try:
+            if has_header:
+                df = pd.read_csv(StringIO(text), sep=sep)
+            else:
+                df = pd.read_csv(StringIO(text), sep=sep, header=None,
+                                 names=list(prev_template.columns))
+        except Exception as e:
+            return None, f"解析失败: {e}"
+
+        # Ensure all expected columns exist
+        for col in expected_cols:
+            if col not in df.columns:
+                df[col] = None
+
+        # Fill missing fields from previous template by matching on Name
+        prev_by_name = prev_template.set_index('Name')
+        for i, row in df.iterrows():
+            name = row.get('Name')
+            if name and name in prev_by_name.index:
+                prev_row = prev_by_name.loc[name]
+                for col in ['Asset_Class', 'Platform', 'Code', 'Currency', 'Exchange_Rate']:
+                    if pd.isna(row.get(col)) or str(row.get(col, '')).strip() == '':
+                        df.at[i, col] = prev_row[col]
+
+        # Defaults
+        df['Net_Cash_Flow'] = df['Net_Cash_Flow'].fillna(0.0)
+        df['Code'] = df['Code'].fillna('')
+        df['Exchange_Rate'] = pd.to_numeric(df['Exchange_Rate'], errors='coerce').fillna(1.0)
+
+        # Ensure numeric columns
+        for col in ['Shares', 'Current_Price', 'Total_Value', 'Net_Cash_Flow', 'Exchange_Rate']:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+
+        # Reorder to match template columns
+        df = df[list(prev_template.columns)]
+        return df, None
+
+    with st.expander("批量导入 (Paste CSV)", expanded=False):
+        st.caption(
+            "粘贴 CSV 或 Tab 分隔文本。表头可选。"
+            "至少需要: Name, Shares, Current_Price, Total_Value。"
+            "缺失字段将从上周模板补全。"
+        )
+        csv_input = st.text_area(
+            "粘贴数据",
+            height=200,
+            placeholder="Asset_Class\tPlatform\tName\tCode\tCurrency\tExchange_Rate\tShares\tCurrent_Price\tTotal_Value\tNet_Cash_Flow\n"
+                        "US_Index_Fund\t标普场外\t摩根标普500\tQDII A\tCNY\t1.0\t13108.21\t1.62\t21235.30\t0",
+            key="csv_batch_input",
+        )
+        if st.button("解析", key="parse_csv_batch"):
+            parsed_df, err = _parse_csv_input(csv_input, st.session_state['update_template'])
+            if err:
+                st.error(err)
+            else:
+                st.session_state['update_template'] = parsed_df
+                st.success(f"已解析 {len(parsed_df)} 行")
+                st.rerun()
+
     # ─── Reset button + FX refresh ───
     btn_col1, btn_col2 = st.columns(2)
     with btn_col1:
@@ -497,12 +583,15 @@ with tab_update:
         if len(df) != prev_count:
             warnings.append(f"持仓数变化: 上周 {prev_count} 条 -> 本周 {len(df)} 条，请确认是否有新增/删除")
 
-        # Non-Cash rows should have NCF = 0 (external cash flows go through Cash only)
-        non_cash_ncf = df[(df['Asset_Class'] != 'Cash') & (df['Net_Cash_Flow'].fillna(0) != 0)]
+        # Non-Cash/Company_Stock rows should have NCF = 0
+        non_cash_ncf = df[
+            ~df['Asset_Class'].isin(['Cash', 'Company_Stock']) &
+            (df['Net_Cash_Flow'].fillna(0) != 0)
+        ]
         if len(non_cash_ncf) > 0:
             names = non_cash_ncf['Name'].tolist()
             warnings.append(f"非现金持仓有 Net_Cash_Flow ≠ 0: {', '.join(str(n) for n in names)}。"
-                            f"外部资金进出应仅记录在 Cash 行，内部调仓 NCF 应为 0")
+                            f"外部资金进出应记录在 Cash 行（SAP 归属记录在 Company_Stock 行），内部调仓 NCF 应为 0")
 
         # Cash rows with NCF (informational)
         cash_ncf = df[(df['Asset_Class'] == 'Cash') & (df['Net_Cash_Flow'].fillna(0) != 0)]
@@ -671,4 +760,325 @@ with tab_history:
                     st.cache_data.clear()
                     if 'update_template' in st.session_state:
                         del st.session_state['update_template']
+                    st.rerun()
+
+# ═══════════════════════════════════════════════════════════
+# Tab 4: SAP Stock
+# ═══════════════════════════════════════════════════════════
+
+with tab_sap:
+
+    st.header("SAP 公司股票")
+
+    own_df = load_own_sap(OWN_SAP_CSV) if os.path.exists(OWN_SAP_CSV) else None
+    move_df = load_move_sap(MOVE_SAP_CSV) if os.path.exists(MOVE_SAP_CSV) else None
+
+    if own_df is None and move_df is None:
+        st.info("未找到 SAP 股票数据。请先运行 `python src/import_sap_xlsx.py CurrentAsset.xlsx data/` 导入数据。")
+    else:
+
+        # ─── Section 1: Summary KPIs ───
+
+        st.subheader("持仓概览")
+
+        # Handle FX refresh: must set session_state BEFORE widget renders
+        if st.session_state.get('_sap_fx_do_refresh'):
+            st.session_state['_sap_fx_do_refresh'] = False
+            rate = get_exchange_rate('EUR', 'CNY')
+            if rate:
+                st.session_state['sap_fx_rate'] = round(rate, 4)
+
+        # User-input price & FX (decoupled from portfolio.csv)
+        price_col, fx_col, refresh_col = st.columns([2, 2, 1])
+        with price_col:
+            sap_price_eur = st.number_input(
+                "SAP Price (EUR)", value=170.0, min_value=0.01,
+                format="%.2f", key="sap_current_price")
+        with fx_col:
+            sap_fx_rate = st.number_input(
+                "EUR/CNY Rate", value=8.0, min_value=0.01,
+                format="%.4f", key="sap_fx_rate")
+        with refresh_col:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Refresh FX", key="sap_fx_refresh"):
+                st.session_state['_sap_fx_do_refresh'] = True
+                st.rerun()
+
+        kpi_cols = st.columns(3)
+
+        if own_df is not None:
+            own_sum = own_sap_summary(own_df, fx_rate=sap_fx_rate)
+            own_value = own_sum['total_shares'] * sap_price_eur * sap_fx_rate
+            own_pl = own_value - own_sum['total_cost']
+            with kpi_cols[0]:
+                st.markdown("**Own SAP (ESPP)**")
+                st.metric("持股", f"{own_sum['total_shares']:.2f} 股")
+                st.metric("成本", f"¥{own_sum['total_cost']:,.2f}")
+                st.metric("市值", f"¥{own_value:,.2f}")
+                st.metric("盈亏", f"¥{own_pl:+,.2f}")
+                if own_sum['break_even_eur']:
+                    st.caption(f"盈亏平衡价: {own_sum['break_even_eur']:.2f} EUR")
+
+        if move_df is not None:
+            move_sum = move_sap_summary(move_df, fx_rate=sap_fx_rate)
+            move_value = move_sum['total_shares'] * sap_price_eur * sap_fx_rate
+            move_pl = move_value - move_sum['total_cost']
+            with kpi_cols[1]:
+                st.markdown("**Move SAP (RSU)**")
+                st.metric("持股", f"{move_sum['total_shares']:.2f} 股")
+                st.metric("成本", f"¥{move_sum['total_cost']:,.2f}")
+                st.metric("市值", f"¥{move_value:,.2f}")
+                st.metric("盈亏", f"¥{move_pl:+,.2f}")
+                if move_sum['break_even_eur']:
+                    st.caption(f"盈亏平衡价: {move_sum['break_even_eur']:.2f} EUR")
+
+        with kpi_cols[2]:
+            combined_shares = (own_sum['total_shares'] if own_df is not None else 0) + \
+                              (move_sum['total_shares'] if move_df is not None else 0)
+            combined_cost = (own_sum['total_cost'] if own_df is not None else 0) + \
+                            (move_sum['total_cost'] if move_df is not None else 0)
+            combined_value = combined_shares * sap_price_eur * sap_fx_rate
+            combined_pl = combined_value - combined_cost
+            st.markdown("**Combined**")
+            st.metric("总持股", f"{combined_shares:.2f} 股")
+            st.metric("总成本", f"¥{combined_cost:,.2f}")
+            st.metric("总市值", f"¥{combined_value:,.2f}")
+            st.metric("总盈亏", f"¥{combined_pl:+,.2f}")
+            st.caption(f"当前股价: {sap_price_eur:.2f} EUR")
+
+        st.divider()
+
+        # ─── Section 2: Transaction History ───
+
+        st.subheader("交易记录")
+
+        history_program = st.selectbox("选择计划", ["Own SAP", "Move SAP"], key="sap_history_select")
+
+        if history_program == "Own SAP" and own_df is not None:
+            st.dataframe(
+                own_df.sort_values('Date', ascending=False),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Price_EUR": st.column_config.NumberColumn(format="%.4f"),
+                    "Quantity": st.column_config.NumberColumn(format="%.4f"),
+                    "Discount_Ratio": st.column_config.NumberColumn(format="%.2f"),
+                    "CNY": st.column_config.NumberColumn(format="¥%.2f"),
+                    "Cost_CNY": st.column_config.NumberColumn(format="¥%.2f"),
+                },
+            )
+            st.caption(f"共 {len(own_df)} 条记录")
+        elif history_program == "Move SAP" and move_df is not None:
+            st.dataframe(
+                move_df.sort_values('Date', ascending=False),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Price_EUR": st.column_config.NumberColumn(format="%.4f"),
+                    "Quantity": st.column_config.NumberColumn(format="%.4f"),
+                    "FX_Rate": st.column_config.NumberColumn(format="%.4f"),
+                    "CNY": st.column_config.NumberColumn(format="¥%.2f"),
+                },
+            )
+            st.caption(f"共 {len(move_df)} 条记录")
+        else:
+            st.info("无数据")
+
+        st.divider()
+
+        # ─── Section 3: Add New Transaction ───
+
+        st.subheader("新增交易")
+
+        add_program = st.selectbox("选择计划", ["Own SAP", "Move SAP"], key="sap_add_select")
+
+        # ── Own SAP Form ──
+        if add_program == "Own SAP":
+
+            own_col1, own_col2, own_col3 = st.columns(3)
+            with own_col1:
+                own_date = st.date_input("交易日期", value=date.today(), key="own_sap_date")
+            with own_col2:
+                own_price = st.number_input("Price (EUR)", value=170.0, min_value=0.01, format="%.5f", key="own_sap_price")
+            with own_col3:
+                own_tax_rate = st.number_input("Tax Rate", value=0.25, min_value=0.0, max_value=1.0,
+                                               step=0.05, format="%.2f", key="own_sap_tax")
+
+            # Dynamic rows
+            if 'own_sap_rows' not in st.session_state:
+                st.session_state['own_sap_rows'] = [
+                    {'type': 'Match', 'cny': 0.0, 'qty': 0.0},
+                    {'type': 'Purchase', 'cny': 0.0, 'qty': 0.0},
+                ]
+
+            rows_to_display = []
+            for i, row_data in enumerate(st.session_state['own_sap_rows']):
+                c1, c2, c3, c4, c5 = st.columns([1.5, 1.5, 1.5, 1, 1.5])
+                with c1:
+                    rtype = st.selectbox("Type", ["Match", "Purchase", "Dividend", "Sell"],
+                                         index=["Match", "Purchase", "Dividend", "Sell"].index(row_data['type']),
+                                         key=f"own_type_{i}")
+                with c2:
+                    cny = st.number_input("CNY", value=row_data['cny'], format="%.2f", key=f"own_cny_{i}")
+                with c3:
+                    qty = st.number_input("Quantity", value=row_data['qty'], format="%.6f", key=f"own_qty_{i}")
+
+                # Derive discount and cost
+                if rtype == 'Match':
+                    discount = own_tax_rate
+                elif rtype == 'Purchase':
+                    discount = 1.0 - own_tax_rate
+                else:
+                    discount = 1.0
+                cost = round(cny * discount, 2)
+
+                with c4:
+                    st.text_input("Discount", value=f"{discount:.2f}", disabled=True, key=f"own_disc_{i}")
+                with c5:
+                    st.text_input("Cost CNY", value=f"{cost:.2f}", disabled=True, key=f"own_cost_{i}")
+
+                rows_to_display.append({
+                    'type': rtype, 'cny': cny, 'qty': qty,
+                    'discount': discount, 'cost': cost,
+                })
+
+            # Update session state with current values
+            st.session_state['own_sap_rows'] = [
+                {'type': r['type'], 'cny': r['cny'], 'qty': r['qty']} for r in rows_to_display
+            ]
+
+            btn_own_col1, btn_own_col2 = st.columns(2)
+            with btn_own_col1:
+                if st.button("+ Add Row", key="own_add_row"):
+                    st.session_state['own_sap_rows'].append({'type': 'Purchase', 'cny': 0.0, 'qty': 0.0})
+                    st.rerun()
+            with btn_own_col2:
+                if len(st.session_state['own_sap_rows']) > 1:
+                    if st.button("- Remove Last", key="own_remove_row"):
+                        st.session_state['own_sap_rows'].pop()
+                        st.rerun()
+
+            # Summary
+            total_qty = sum(r['qty'] for r in rows_to_display)
+            total_cost = sum(r['cost'] for r in rows_to_display)
+            st.markdown(f"**Total: {total_qty:.4f} shares, Cost: ¥{total_cost:,.2f}**")
+
+            # Save
+            if st.button("Save to own_sap.csv", type="primary", key="own_sap_save"):
+                if total_qty == 0 and total_cost == 0:
+                    st.error("No data to save")
+                else:
+                    new_rows = []
+                    date_str = own_date.strftime('%Y-%m-%d')
+                    for r in rows_to_display:
+                        if r['qty'] != 0 or r['cny'] != 0:
+                            new_rows.append({
+                                'Date': date_str,
+                                'Activity': r['type'],
+                                'Price_EUR': round(own_price, 6),
+                                'Quantity': round(r['qty'], 6),
+                                'Discount_Ratio': round(r['discount'], 4),
+                                'CNY': round(r['cny'], 2),
+                                'Cost_CNY': round(r['cost'], 2),
+                            })
+                    new_df = pd.DataFrame(new_rows)
+                    if os.path.exists(OWN_SAP_CSV):
+                        existing = pd.read_csv(OWN_SAP_CSV)
+                        combined = pd.concat([existing, new_df], ignore_index=True)
+                    else:
+                        combined = new_df
+                    _atomic_write_csv(combined, OWN_SAP_CSV)
+                    st.success(f"Saved {len(new_rows)} rows to own_sap.csv")
+                    st.cache_data.clear()
+                    st.session_state.pop('own_sap_rows', None)
+                    st.rerun()
+
+        # ── Move SAP Form ──
+        else:
+
+            # Handle FX refresh: must set session_state BEFORE widget renders
+            if st.session_state.get('_move_fx_do_refresh'):
+                st.session_state['_move_fx_do_refresh'] = False
+                try:
+                    rate = get_exchange_rate('EUR', 'CNY')
+                    st.session_state['move_sap_fx'] = round(rate, 4)
+                except Exception as e:
+                    st.error(f"FX fetch failed: {e}")
+
+            move_col1, move_col2, move_col3 = st.columns(3)
+            with move_col1:
+                move_date = st.date_input("交易日期", value=date.today(), key="move_sap_date")
+            with move_col2:
+                move_price = st.number_input("Price (EUR)", value=170.0, min_value=0.01, format="%.2f", key="move_sap_price")
+            with move_col3:
+                move_fx_col1, move_fx_col2 = st.columns([3, 1])
+                with move_fx_col1:
+                    move_fx = st.number_input("EUR/CNY Rate", value=8.0, min_value=0.01,
+                                              format="%.4f", key="move_sap_fx")
+                with move_fx_col2:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("Refresh", key="move_fx_refresh"):
+                        st.session_state['_move_fx_do_refresh'] = True
+                        st.rerun()
+
+            # Dynamic rows
+            if 'move_sap_rows' not in st.session_state:
+                st.session_state['move_sap_rows'] = [{'qty': 0.0}]
+
+            move_rows = []
+            for i, row_data in enumerate(st.session_state['move_sap_rows']):
+                mc1, mc2 = st.columns([2, 2])
+                with mc1:
+                    mqty = st.number_input(f"Tranche {i+1} Qty", value=row_data['qty'],
+                                           format="%.4f", key=f"move_qty_{i}")
+                cny_val = round(move_price * mqty * move_fx, 2)
+                with mc2:
+                    st.text_input(f"CNY", value=f"¥{cny_val:,.2f}", disabled=True, key=f"move_cny_{i}")
+                move_rows.append({'qty': mqty, 'cny': cny_val})
+
+            st.session_state['move_sap_rows'] = [{'qty': r['qty']} for r in move_rows]
+
+            btn_move_col1, btn_move_col2 = st.columns(2)
+            with btn_move_col1:
+                if st.button("+ Add Row", key="move_add_row"):
+                    st.session_state['move_sap_rows'].append({'qty': 0.0})
+                    st.rerun()
+            with btn_move_col2:
+                if len(st.session_state['move_sap_rows']) > 1:
+                    if st.button("- Remove Last", key="move_remove_row"):
+                        st.session_state['move_sap_rows'].pop()
+                        st.rerun()
+
+            # Summary
+            move_total_qty = sum(r['qty'] for r in move_rows)
+            move_total_cny = sum(r['cny'] for r in move_rows)
+            st.markdown(f"**Total: {move_total_qty:.4f} shares, CNY: ¥{move_total_cny:,.2f}**")
+
+            # Save
+            if st.button("Save to move_sap.csv", type="primary", key="move_sap_save"):
+                if move_total_qty == 0:
+                    st.error("No data to save")
+                else:
+                    new_rows = []
+                    date_str = move_date.strftime('%Y-%m-%d')
+                    for r in move_rows:
+                        if r['qty'] != 0:
+                            new_rows.append({
+                                'Date': date_str,
+                                'Activity': 'Award',
+                                'Price_EUR': round(move_price, 6),
+                                'Quantity': round(r['qty'], 6),
+                                'FX_Rate': round(move_fx, 4),
+                                'CNY': round(r['cny'], 2),
+                            })
+                    new_df = pd.DataFrame(new_rows)
+                    if os.path.exists(MOVE_SAP_CSV):
+                        existing = pd.read_csv(MOVE_SAP_CSV)
+                        combined = pd.concat([existing, new_df], ignore_index=True)
+                    else:
+                        combined = new_df
+                    _atomic_write_csv(combined, MOVE_SAP_CSV)
+                    st.success(f"Saved {len(new_rows)} rows to move_sap.csv")
+                    st.cache_data.clear()
+                    st.session_state.pop('move_sap_rows', None)
                     st.rerun()

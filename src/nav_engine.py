@@ -222,11 +222,14 @@ def compute_allocation(df, date=None):
 # Cost Basis & P/L
 # ============================================================
 
-def compute_cost_basis(df):
+def compute_cost_basis(df, own_sap_csv=None, move_sap_csv=None):
     """计算每个持仓的成本基础和盈亏。
 
     Cost_Basis = 该资产所有历史 Net_Cash_Flow 之和
     P/L = 最新市值 - Cost_Basis
+
+    For Company_Stock rows, if SAP CSV paths are provided,
+    the cost basis is overridden with values from SAP transaction history.
 
     Returns:
         DataFrame with: Asset_Class, Platform, Name, Cost_Basis,
@@ -244,6 +247,19 @@ def compute_cost_basis(df):
 
     result = pd.merge(market, cost, on=group_cols, how='left')
     result['Cost_Basis'] = result['Cost_Basis'].fillna(0)
+
+    # Override Company_Stock cost basis with SAP transaction data
+    if own_sap_csv or move_sap_csv:
+        from sap_stock import compute_sap_cost_basis
+        sap = compute_sap_cost_basis(own_sap_csv, move_sap_csv)
+        for idx, row in result.iterrows():
+            if row['Asset_Class'] == 'Company_Stock':
+                name = str(row['Name']).lower()
+                if 'own' in name and 'own_sap' in sap:
+                    result.at[idx, 'Cost_Basis'] = sap['own_sap']['total_cost']
+                elif 'move' in name and 'move_sap' in sap:
+                    result.at[idx, 'Cost_Basis'] = sap['move_sap']['total_cost']
+
     result['Profit_Loss'] = result['Market_Value'] - result['Cost_Basis']
     result['Profit_Loss_Rate'] = result.apply(
         lambda r: round(r['Profit_Loss'] / r['Cost_Basis'] * 100, 2)
