@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import os
 import sys
+import fcntl
 
 matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'PingFang SC']
 matplotlib.rcParams['axes.unicode_minus'] = False
@@ -215,6 +216,77 @@ def compute_allocation(df, date=None):
     agg['Display_Name'] = agg['Asset_Class'].map(CLASS_DISPLAY_NAMES)
     agg['Date'] = date
     return agg.sort_values('Total_Value', ascending=False).reset_index(drop=True)
+
+
+# ============================================================
+# Cost Basis & P/L
+# ============================================================
+
+def compute_cost_basis(df):
+    """计算每个持仓的成本基础和盈亏。
+
+    Cost_Basis = 该资产所有历史 Net_Cash_Flow 之和
+    P/L = 最新市值 - Cost_Basis
+
+    Returns:
+        DataFrame with: Asset_Class, Platform, Name, Cost_Basis,
+                       Market_Value, Profit_Loss, Profit_Loss_Rate
+    """
+    latest_date = df['Date'].max()
+    latest = df[df['Date'] == latest_date]
+
+    group_cols = ['Asset_Class', 'Platform', 'Name']
+    cost = df.groupby(group_cols)['Net_Cash_Flow'].sum().reset_index()
+    cost.rename(columns={'Net_Cash_Flow': 'Cost_Basis'}, inplace=True)
+
+    market = latest[group_cols + ['Total_Value']].copy()
+    market.rename(columns={'Total_Value': 'Market_Value'}, inplace=True)
+
+    result = pd.merge(market, cost, on=group_cols, how='left')
+    result['Cost_Basis'] = result['Cost_Basis'].fillna(0)
+    result['Profit_Loss'] = result['Market_Value'] - result['Cost_Basis']
+    result['Profit_Loss_Rate'] = result.apply(
+        lambda r: round(r['Profit_Loss'] / r['Cost_Basis'] * 100, 2)
+        if r['Cost_Basis'] > 0 else None, axis=1
+    )
+    return result.sort_values('Market_Value', ascending=False).reset_index(drop=True)
+
+
+# ============================================================
+# File I/O with Locking
+# ============================================================
+
+def _atomic_write_csv(df, csv_path):
+    """Write DataFrame to CSV with file lock + atomic replace."""
+    lock_path = csv_path + '.lock'
+    with open(lock_path, 'w') as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            tmp_path = csv_path + '.tmp'
+            df.to_csv(tmp_path, index=False)
+            os.replace(tmp_path, csv_path)
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
+def update_snapshot(csv_path, date, updates_df):
+    """Replace all rows for a given date with updated rows."""
+    full_df = pd.read_csv(csv_path)
+    full_df['Date'] = pd.to_datetime(full_df['Date']).dt.strftime('%Y-%m-%d')
+    full_df = full_df[full_df['Date'] != date]
+    updates_df = updates_df.copy()
+    updates_df['Date'] = date
+    combined = pd.concat([full_df, updates_df], ignore_index=True)
+    combined = combined.sort_values('Date').reset_index(drop=True)
+    _atomic_write_csv(combined, csv_path)
+
+
+def delete_snapshot(csv_path, date):
+    """Delete all rows for a given date."""
+    full_df = pd.read_csv(csv_path)
+    full_df['Date'] = pd.to_datetime(full_df['Date']).dt.strftime('%Y-%m-%d')
+    filtered = full_df[full_df['Date'] != date].reset_index(drop=True)
+    _atomic_write_csv(filtered, csv_path)
 
 
 # ============================================================

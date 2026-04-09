@@ -11,9 +11,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
-    compute_class_nav, compute_allocation, CLASS_DISPLAY_NAMES,
-    VALID_ASSET_CLASSES,
+    compute_class_nav, compute_allocation, compute_cost_basis,
+    CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES,
+    _atomic_write_csv, update_snapshot, delete_snapshot,
 )
+from fx_service import get_exchange_rate
 
 # ─── Page Config ───
 
@@ -34,19 +36,20 @@ SAMPLE_CSV = os.path.join(BASE_DIR, 'data', 'portfolio_sample.csv')
 def load_data(csv_path):
     df = load_portfolio(csv_path)
     if df is None:
-        return None, None, None, None
+        return None, None, None, None, None
     errors, warnings = validate_portfolio(df)
     if errors:
-        return None, None, None, None
+        return None, None, None, None, None
     fund_nav = compute_fund_nav(df)
     class_nav = compute_class_nav(df)
     allocation = compute_allocation(df)
-    return df, fund_nav, class_nav, allocation
+    cost_basis = compute_cost_basis(df)
+    return df, fund_nav, class_nav, allocation, cost_basis
 
 
 # Pick the best available data file
 csv_path = DEFAULT_CSV if os.path.exists(DEFAULT_CSV) else SAMPLE_CSV
-raw_df, fund_nav_df, class_nav_dict, allocation_df = load_data(csv_path)
+raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df = load_data(csv_path)
 
 if raw_df is None:
     st.error("无法加载数据文件。请确保 data/portfolio.csv 或 data/portfolio_sample.csv 存在。")
@@ -103,7 +106,7 @@ filtered_fund = fund_nav_df[(fund_nav_df['Date'] >= date_start) & (fund_nav_df['
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update = st.tabs(["Dashboard", "Weekly Update"])
+tab_dashboard, tab_update, tab_history = st.tabs(["Dashboard", "Weekly Update", "History"])
 
 # ═══════════════════════════════════════════════════════════
 # Tab 1: Dashboard
@@ -287,6 +290,66 @@ with tab_dashboard:
     # Footer
     st.caption(f"共 {len(holdings)} 条持仓 | 筛选市值合计: ¥{holdings['Total_Value'].sum():,.2f} | 数据日期: {latest_date_all}")
 
+    # ─── Section 4: P/L Analysis ───
+
+    st.header("盈亏分析")
+
+    if cost_basis_df is not None and len(cost_basis_df) > 0:
+        # Summary KPIs
+        total_cost = cost_basis_df['Cost_Basis'].sum()
+        total_market = cost_basis_df['Market_Value'].sum()
+        total_pl = total_market - total_cost
+        total_pl_rate = (total_pl / total_cost * 100) if total_cost > 0 else 0
+
+        pl_col1, pl_col2, pl_col3, pl_col4 = st.columns(4)
+        with pl_col1:
+            st.metric("总成本", f"¥{total_cost:,.0f}")
+        with pl_col2:
+            st.metric("总市值", f"¥{total_market:,.0f}")
+        with pl_col3:
+            st.metric("总盈亏", f"¥{total_pl:+,.0f}")
+        with pl_col4:
+            st.metric("总收益率", f"{total_pl_rate:+.2f}%")
+
+        # P/L bar chart
+        chart_data = cost_basis_df.copy()
+        chart_data['Display_Name'] = chart_data['Name']
+        chart_data['Color'] = chart_data['Profit_Loss'].apply(lambda x: '盈利' if x >= 0 else '亏损')
+
+        fig_pl = px.bar(
+            chart_data, x='Profit_Loss', y='Display_Name',
+            orientation='h', color='Color',
+            color_discrete_map={'盈利': '#2e7d32', '亏损': '#d32f2f'},
+            title='持仓盈亏',
+            labels={'Profit_Loss': '盈亏 (CNY)', 'Display_Name': ''},
+        )
+        fig_pl.update_layout(height=max(300, len(chart_data) * 30 + 100), showlegend=False)
+        st.plotly_chart(fig_pl, use_container_width=True)
+
+        # P/L detail table
+        pl_display = cost_basis_df.copy()
+        pl_display['Asset_Class'] = pl_display['Asset_Class'].map(display_map)
+        pl_display = pl_display.rename(columns={
+            'Asset_Class': '资产类别',
+            'Platform': '平台',
+            'Name': '名称',
+            'Cost_Basis': '成本',
+            'Market_Value': '市值',
+            'Profit_Loss': '盈亏',
+            'Profit_Loss_Rate': '收益率(%)',
+        })
+        st.dataframe(
+            pl_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                '成本': st.column_config.NumberColumn(format="¥%.2f"),
+                '市值': st.column_config.NumberColumn(format="¥%.2f"),
+                '盈亏': st.column_config.NumberColumn(format="¥%.2f"),
+                '收益率(%)': st.column_config.NumberColumn(format="%.2f%%"),
+            },
+        )
+
 # ═══════════════════════════════════════════════════════════
 # Tab 2: Weekly Update
 # ═══════════════════════════════════════════════════════════
@@ -320,13 +383,37 @@ with tab_update:
         template['Net_Cash_Flow'] = 0.0
         st.session_state['update_template'] = template
 
-    # ─── Reset button ───
-    if st.button("重置为上周模板", type="secondary"):
-        latest_rows = raw_df[raw_df['Date'] == last_snapshot_date].copy()
-        template = latest_rows.drop(columns=['Date']).reset_index(drop=True)
-        template['Net_Cash_Flow'] = 0.0
-        st.session_state['update_template'] = template
-        st.rerun()
+    # ─── Reset button + FX refresh ───
+    btn_col1, btn_col2 = st.columns(2)
+    with btn_col1:
+        if st.button("重置为上周模板", type="secondary"):
+            latest_rows = raw_df[raw_df['Date'] == last_snapshot_date].copy()
+            template = latest_rows.drop(columns=['Date']).reset_index(drop=True)
+            template['Net_Cash_Flow'] = 0.0
+            st.session_state['update_template'] = template
+            st.rerun()
+    with btn_col2:
+        if st.button("刷新汇率", type="secondary", help="从 frankfurter.app 获取最新汇率"):
+            updated = 0
+            errors_fx = []
+            template = st.session_state['update_template']
+            for i, row in template.iterrows():
+                currency = row.get('Currency', 'CNY')
+                if currency and currency != 'CNY':
+                    try:
+                        rate = get_exchange_rate(currency, 'CNY')
+                        template.at[i, 'Exchange_Rate'] = round(rate, 4)
+                        updated += 1
+                    except Exception as e:
+                        errors_fx.append(f"{row.get('Name', '?')} ({currency}): {e}")
+            st.session_state['update_template'] = template
+            if updated > 0:
+                st.success(f"已更新 {updated} 个汇率")
+            if errors_fx:
+                for err in errors_fx:
+                    st.warning(f"汇率获取失败: {err}")
+            if updated > 0:
+                st.rerun()
 
     # ─── Editable table ───
     st.markdown("**编辑持仓** (可增删行，修改价格/份额/市值。外部资金进出仅填在 Cash 行的 Net_Cash_Flow)")
@@ -491,10 +578,8 @@ with tab_update:
             existing_df = pd.read_csv(csv_path)
             combined_df = pd.concat([existing_df, save_df], ignore_index=True)
 
-            # Atomic write via temp file
-            tmp_path = csv_path + '.tmp'
-            combined_df.to_csv(tmp_path, index=False)
-            os.replace(tmp_path, csv_path)
+            # Atomic write with file lock
+            _atomic_write_csv(combined_df, csv_path)
 
             st.success(f"已保存 {len(save_df)} 条记录 (日期: {new_date_str}) 到 {os.path.basename(csv_path)}")
             st.balloons()
@@ -503,3 +588,87 @@ with tab_update:
             st.cache_data.clear()
             del st.session_state['update_template']
             st.rerun()
+
+# ═══════════════════════════════════════════════════════════
+# Tab 3: History Management
+# ═══════════════════════════════════════════════════════════
+
+with tab_history:
+
+    st.header("历史快照管理")
+
+    all_dates = sorted(raw_df['Date'].unique(), reverse=True)
+
+    if len(all_dates) == 0:
+        st.info("暂无历史数据")
+    else:
+        selected_date = st.selectbox("选择快照日期", options=all_dates, key="history_date")
+
+        snapshot_rows = raw_df[raw_df['Date'] == selected_date].copy()
+        st.markdown(f"**{selected_date}** — {len(snapshot_rows)} 条持仓 | 总市值: ¥{snapshot_rows['Total_Value'].sum():,.2f}")
+
+        st.divider()
+
+        # ─── Edit snapshot ───
+        st.subheader("编辑快照")
+
+        edit_key = f"history_editor_{selected_date}"
+        edit_template = snapshot_rows.drop(columns=['Date']).reset_index(drop=True)
+
+        edited_history = st.data_editor(
+            edit_template,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Asset_Class": st.column_config.SelectboxColumn(
+                    "Asset_Class",
+                    options=sorted(VALID_ASSET_CLASSES),
+                    required=True,
+                ),
+                "Platform": st.column_config.TextColumn("Platform", required=True),
+                "Name": st.column_config.TextColumn("Name", required=True),
+                "Code": st.column_config.TextColumn("Code", default=""),
+                "Currency": st.column_config.SelectboxColumn(
+                    "Currency",
+                    options=["CNY", "HKD", "USD", "EUR"],
+                    required=True,
+                ),
+                "Exchange_Rate": st.column_config.NumberColumn(
+                    "Exchange_Rate", format="%.4f", min_value=0.0001, default=1.0,
+                ),
+                "Shares": st.column_config.NumberColumn("Shares", format="%.2f", min_value=0.0),
+                "Current_Price": st.column_config.NumberColumn("Current_Price", format="%.4f", min_value=0.0),
+                "Total_Value": st.column_config.NumberColumn("Total_Value", format="%.2f", min_value=0.0),
+                "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", format="%.2f"),
+            },
+            column_order=[
+                "Asset_Class", "Platform", "Name", "Code", "Currency", "Exchange_Rate",
+                "Shares", "Current_Price", "Total_Value", "Net_Cash_Flow",
+            ],
+            key=edit_key,
+        )
+
+        save_col, delete_col = st.columns(2)
+
+        with save_col:
+            if st.button("保存修改", type="primary", key="save_history"):
+                update_snapshot(csv_path, selected_date, edited_history)
+                st.success(f"已更新 {selected_date} 的快照")
+                st.cache_data.clear()
+                if 'update_template' in st.session_state:
+                    del st.session_state['update_template']
+                st.rerun()
+
+        with delete_col:
+            if len(all_dates) <= 1:
+                st.button("删除此快照", disabled=True, help="不能删除唯一的快照", key="delete_history")
+            else:
+                confirm_delete = st.checkbox("确认删除", key="confirm_delete_history")
+                if st.button("删除此快照", type="secondary", disabled=not confirm_delete, key="delete_history"):
+                    delete_snapshot(csv_path, selected_date)
+                    st.success(f"已删除 {selected_date} 的快照")
+                    st.cache_data.clear()
+                    if 'update_template' in st.session_state:
+                        del st.session_state['update_template']
+                    st.rerun()

@@ -8,9 +8,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
-    compute_class_nav, compute_allocation, plot_fund_nav,
-    plot_class_nav, plot_allocation_pie, export_results,
-    _run_nav_calculation, VALID_ASSET_CLASSES,
+    compute_class_nav, compute_allocation, compute_cost_basis,
+    plot_fund_nav, plot_class_nav, plot_allocation_pie, export_results,
+    _run_nav_calculation, _atomic_write_csv, update_snapshot, delete_snapshot,
+    VALID_ASSET_CLASSES,
 )
 
 
@@ -317,3 +318,82 @@ class TestEndToEnd:
         # NAV = 80934.35 / 80500 = 1.00539...
         expected_w3 = round(80934.35 / 80500, 4)
         assert fund_nav.iloc[2]['NAV'] == expected_w3
+
+
+# ─── Cost Basis & P/L ───
+
+class TestCostBasis:
+    def test_day0_cost_equals_value(self, sample_df):
+        """On Day 0 only, cost basis = total value (NCF == TV)."""
+        # Use only Day 0 data
+        day0 = sample_df[sample_df['Date'] == '2024-04-01']
+        cb = compute_cost_basis(day0)
+        for _, row in cb.iterrows():
+            assert abs(row['Cost_Basis'] - row['Market_Value']) < 0.01
+            assert abs(row['Profit_Loss']) < 0.01
+
+    def test_no_cashflow_pl_reflects_market(self, sample_df):
+        """With NCF=0 in week 2, P/L reflects price change from Day 0."""
+        # Use weeks 1-2 only (no NCF in week 2)
+        w1w2 = sample_df[sample_df['Date'] <= '2024-04-08']
+        cb = compute_cost_basis(w1w2)
+        etf = cb[cb['Name'] == '红利低波']
+        assert len(etf) == 1
+        etf_row = etf.iloc[0]
+        # Cost = 10000 (Day 0 NCF), Market = 10500 (week 2 TV)
+        assert etf_row['Cost_Basis'] == 10000.0
+        assert etf_row['Market_Value'] == 10500.0
+        assert etf_row['Profit_Loss'] == 500.0
+        assert abs(etf_row['Profit_Loss_Rate'] - 5.0) < 0.01
+
+    def test_cash_injection_increases_cost_basis(self, sample_df):
+        """Cash injection (NCF > 0) adds to cost basis."""
+        cb = compute_cost_basis(sample_df)
+        fi = cb[cb['Name'] == '周周宝']
+        assert len(fi) == 1
+        fi_row = fi.iloc[0]
+        # Cost = 50500 (Day 0) + 5000 (week 3) = 55500
+        assert fi_row['Cost_Basis'] == 55500.0
+
+    def test_cash_withdrawal_decreases_cost_basis(self, sample_df):
+        """Cash withdrawal (NCF < 0) reduces cost basis."""
+        cb = compute_cost_basis(sample_df)
+        cash = cb[cb['Name'] == '现金']
+        assert len(cash) == 1
+        cash_row = cash.iloc[0]
+        # Cost = 20000 (Day 0) + (-3000) (week 3) = 17000
+        assert cash_row['Cost_Basis'] == 17000.0
+
+    def test_all_holdings_present(self, sample_df):
+        """Cost basis should cover all holdings in latest snapshot."""
+        cb = compute_cost_basis(sample_df)
+        assert len(cb) == 3  # 红利低波, 周周宝, 现金
+
+
+# ─── File Locking & Snapshot Operations ───
+
+class TestFileOperations:
+    def test_atomic_write(self, sample_csv):
+        """_atomic_write_csv should write CSV atomically."""
+        df = load_portfolio(sample_csv)
+        new_path = sample_csv.replace('.csv', '_copy.csv')
+        _atomic_write_csv(df, new_path)
+        reloaded = pd.read_csv(new_path)
+        assert len(reloaded) == len(df)
+
+    def test_delete_snapshot(self, sample_csv):
+        """delete_snapshot removes all rows for a date."""
+        delete_snapshot(sample_csv, '2024-04-08')
+        df = load_portfolio(sample_csv)
+        assert '2024-04-08' not in df['Date'].values
+        assert len(df) == 6  # 9 - 3 rows removed
+
+    def test_update_snapshot(self, sample_csv):
+        """update_snapshot replaces rows for a date."""
+        df = load_portfolio(sample_csv)
+        week2 = df[df['Date'] == '2024-04-08'].drop(columns=['Date']).copy()
+        week2.loc[week2['Name'] == '红利低波', 'Total_Value'] = 99999.0
+        update_snapshot(sample_csv, '2024-04-08', week2)
+        reloaded = load_portfolio(sample_csv)
+        updated_row = reloaded[(reloaded['Date'] == '2024-04-08') & (reloaded['Name'] == '红利低波')]
+        assert updated_row.iloc[0]['Total_Value'] == 99999.0
