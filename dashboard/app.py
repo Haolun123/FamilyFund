@@ -15,7 +15,7 @@ from nav_engine import (
     CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES,
     _atomic_write_csv, update_snapshot, delete_snapshot,
 )
-from fx_service import get_exchange_rate, get_stock_price, load_sap_price_cache, save_sap_price_cache
+from fx_service import get_exchange_rate, get_stock_price
 from sap_stock import load_own_sap, load_move_sap, own_sap_summary, move_sap_summary
 
 # ─── Page Config ───
@@ -781,15 +781,20 @@ with tab_sap:
 
         st.subheader("持仓概览")
 
-        # Initialize from cache on first visit (before widgets render)
+        # Initialize from latest Company_Stock in portfolio.csv (before widgets render)
         if 'sap_price_initialized' not in st.session_state:
-            cache = load_sap_price_cache()
-            if cache:
-                st.session_state['sap_current_price'] = cache['price_eur']
-                st.session_state['sap_fx_rate'] = cache['fx_rate']
+            company_stock = raw_df[
+                (raw_df['Date'] == raw_df['Date'].max()) & (raw_df['Asset_Class'] == 'Company_Stock')
+            ]
+            if len(company_stock) > 0:
+                row0 = company_stock.iloc[0]
+                if row0['Current_Price'] > 0:
+                    st.session_state['sap_current_price'] = round(float(row0['Current_Price']), 2)
+                if row0['Exchange_Rate'] > 0:
+                    st.session_state['sap_fx_rate'] = round(float(row0['Exchange_Rate']), 4)
             st.session_state['sap_price_initialized'] = True
 
-        # Handle refresh: must set session_state BEFORE widget renders
+        # Handle refresh: try Yahoo Finance for price, frankfurter for FX
         if st.session_state.get('_sap_do_refresh'):
             st.session_state['_sap_do_refresh'] = False
             refresh_errors = []
@@ -798,26 +803,22 @@ with tab_sap:
                 if price:
                     st.session_state['sap_current_price'] = round(price, 2)
             except Exception:
-                refresh_errors.append("stock price")
+                refresh_errors.append("stock price (VPN required)")
             try:
                 rate = get_exchange_rate('EUR', 'CNY')
                 if rate:
                     st.session_state['sap_fx_rate'] = round(rate, 4)
             except Exception:
                 refresh_errors.append("FX rate")
-            save_sap_price_cache(
-                st.session_state.get('sap_current_price', 170.0),
-                st.session_state.get('sap_fx_rate', 8.0),
-            )
             if refresh_errors:
                 st.session_state['_sap_refresh_errors'] = refresh_errors
 
         # Show refresh errors from previous cycle
-        if st.session_state.pop('_sap_refresh_errors', None):
-            errs = st.session_state.get('_sap_refresh_errors', [])
-            st.warning(f"Failed to fetch: {', '.join(errs)}. Using cached/manual values.")
+        errs = st.session_state.pop('_sap_refresh_errors', None)
+        if errs:
+            st.warning(f"Failed to fetch: {', '.join(errs)}. Using portfolio/manual values.")
 
-        # User-input price & FX (decoupled from portfolio.csv)
+        # User-input price & FX
         price_col, fx_col, refresh_col = st.columns([2, 2, 1])
         with price_col:
             sap_price_eur = st.number_input(
@@ -832,10 +833,6 @@ with tab_sap:
             if st.button("Refresh", key="sap_refresh"):
                 st.session_state['_sap_do_refresh'] = True
                 st.rerun()
-
-        cache = load_sap_price_cache()
-        if cache and cache.get('updated'):
-            st.caption(f"Last refreshed: {cache['updated']}")
 
         kpi_cols = st.columns(3)
 
