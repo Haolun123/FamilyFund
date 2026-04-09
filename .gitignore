@@ -10,6 +10,7 @@ data/input_fund_data.csv
 data/output_*.csv
 data/own_sap.csv
 data/move_sap.csv
+data/sap_price_cache.json
 CurrentAsset.xlsx
 ~$*.xlsx
 
