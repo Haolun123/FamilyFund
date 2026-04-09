@@ -1,0 +1,12 @@
+.venv/
+.claude/
+.git/
+__pycache__/
+tests/
+output/
+*.xlsx
+*.pyc
+ARCHITECTURE*.md
+instruction.md
+_sanitize.py
+.DS_Store
