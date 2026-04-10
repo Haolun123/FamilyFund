@@ -259,29 +259,24 @@ flowchart TD
 sequenceDiagram
     actor CIO as 家庭 CIO
     participant BANK as 银行/券商 APP
-    participant CSV as input_fund_data.csv
-    participant PY as fund_calculator.py
-    participant OUT as 输出层
+    participant UI as Streamlit Dashboard
+    participant CSV as portfolio.csv
 
     Note over CIO: 每周五收盘 / 周末对账
-    
-    CIO->>BANK: 1. 打开各平台，盘点资产总市值
-    BANK-->>CIO: 返回各账户余额/持仓市值
-    
-    CIO->>CIO: 2. 汇总全部资产，确认本周净资金进出
-    
-    CIO->>CSV: 3. 在 CSV 末尾追加一行新数据
-    Note right of CSV: Date, Total_Market_Value, Net_Cash_Flow
-    
-    CIO->>PY: 4. 终端执行 python fund_calculator.py
-    
-    PY->>CSV: 读取全部历史数据
-    PY->>PY: 逐行执行净值核算
-    PY->>OUT: 写入 output_nav_log.csv
-    PY->>OUT: 生成 nav_trend_chart.png
-    PY-->>CIO: 5. 终端打印净值报告
-    
-    CIO->>CIO: 6. 审计净值与收益率，归档走势图
+
+    CIO->>BANK: 1. 打开各平台，盘点各持仓价格和市值
+    BANK-->>CIO: 返回各账户持仓详情
+
+    alt 方式 A：通过 UI
+        CIO->>UI: 2a. Weekly Update tab → 更新价格/市值/NCF
+        UI->>CSV: 自动追加新快照
+    else 方式 B：直接编辑 CSV
+        CIO->>CSV: 2b. 复制上周行，更新日期、价格、市值
+    end
+
+    CIO->>UI: 3. 刷新浏览器，查看 Dashboard tab
+    UI->>UI: nav_engine.py 自动计算 NAV、收益率、配置
+    UI-->>CIO: 4. 审计：整体收益 + 分类收益 + 配置变化
 ```
 
 ### 5.2 操作清单
@@ -289,12 +284,10 @@ sequenceDiagram
 | 步骤 | 操作 | 耗时估算 | 频率 |
 |:---:|:---|:---|:---|
 | 1 | 打开银行/券商 APP，汇总各账户市值 | 5-10 分钟 | 每周 |
-| 2 | 确认本周是否有外部资金进出 | 1 分钟 | 每周 |
-| 3 | 在 CSV 文件中追加一行数据 | 1 分钟 | 每周 |
-| 4 | 终端运行 `python fund_calculator.py` | < 1 秒 | 每周 |
-| 5 | 审计终端报告和走势图 | 2 分钟 | 每周 |
+| 2 | 通过 UI 或直接编辑 CSV 更新快照 | 2-3 分钟 | 每周 |
+| 3 | 刷新 Dashboard 审计净值与收益率 | 2 分钟 | 每周 |
 
-> **总计：每周仅需约 10-15 分钟，即可完成一次完整的家庭基金净值核算。**
+> **总计：每周仅需约 10-15 分钟。无需运行任何终端命令，所有计算在 Dashboard 加载时自动完成。**
 
 ---
 
@@ -309,18 +302,12 @@ FamilyFund/
 ├── CurrentAsset.xlsx               # [历史] CIO 原始 Excel 资产表
 ├── requirements.txt                # Python 依赖声明
 │
-├── data/                           # 数据层
-│   ├── portfolio.csv               # [手动维护] ★ 统一资产账本（唯一输入）
+├── data/                           # 数据层（iCloud 同步）
+│   ├── portfolio.csv               # [手动/UI 维护] ★ 统一资产账本（唯一输入）
 │   ├── portfolio_sample.csv        # 示例数据（3 周 × 9 持仓）
-│   ├── input_fund_data.csv         # [历史] 旧版基金账本
-│   ├── output_fund_nav.csv         # [程序生成] 基金整体净值底稿
-│   ├── output_class_nav.csv        # [程序生成] 分类净值底稿
-│   ├── output_allocation.csv       # [程序生成] 资产配置快照
-│   ├── output_nav_log.csv          # [程序生成] 旧版净值底稿
-│   ├── output_asset_breakdown.csv  # [程序生成] 逐笔持仓明细
-│   ├── output_asset_summary.csv    # [程序生成] 资产类别汇总
 │   ├── own_sap.csv                 # [手动/UI 维护] Own SAP (ESPP) 交易记录
-│   └── move_sap.csv                # [手动/UI 维护] Move SAP (RSU) 交易记录
+│   ├── move_sap.csv                # [手动/UI 维护] Move SAP (RSU) 交易记录
+│   └── sap_price_cache.json        # [程序生成] SAP 股价缓存（iCloud 同步）
 │
 ├── src/                            # 核心逻辑层
 │   ├── nav_engine.py               # ★ 统一多级净值核算引擎
@@ -466,56 +453,49 @@ flowchart TD
 sequenceDiagram
     actor CIO as 家庭 CIO
     participant BANK as 银行/券商 APP
+    participant UI as Streamlit Dashboard
     participant CSV as portfolio.csv
-    participant ENGINE as nav_engine.py
-    participant OUT as 输出层
 
     Note over CIO: 每周五收盘 / 周末对账
 
     CIO->>BANK: 1. 打开各平台，盘点各持仓价格和市值
     BANK-->>CIO: 返回各账户持仓详情
 
-    CIO->>CSV: 2. 复制上周所有行，更新日期
-    CIO->>CSV: 3. 更新 Current_Price 和 Total_Value
-    CIO->>CSV: 4. 填写 Net_Cash_Flow（通常全部为 0）
-    Note right of CSV: 新增/减少持仓：增删行即可
+    alt 方式 A：通过 UI
+        CIO->>UI: 2a. Weekly Update tab → 更新价格/市值/NCF
+        UI->>CSV: 自动追加新快照
+    else 方式 B：直接编辑 CSV
+        CIO->>CSV: 2b. 复制上周行，更新日期、价格、市值
+    end
 
-    CIO->>ENGINE: 5. 终端执行 python src/nav_engine.py
-
-    ENGINE->>CSV: 读取全部历史数据
-    ENGINE->>ENGINE: 校验数据完整性
-    ENGINE->>ENGINE: 计算基金整体 NAV
-    ENGINE->>ENGINE: 计算各类别 NAV ×7
-    ENGINE->>ENGINE: 计算资产配置占比
-    ENGINE->>OUT: 写入 3 个 CSV + 3 张图表
-    ENGINE-->>CIO: 6. 终端打印综合报告
-
-    CIO->>CIO: 7. 审计：整体收益 + 分类收益 + 配置变化
+    CIO->>UI: 3. 刷新浏览器，Dashboard 自动计算并展示
+    UI-->>CIO: NAV、收益率、配置占比等实时呈现
 ```
 
 ### 6.5.5 运行方式
 
+Dashboard 在加载时自动调用 `nav_engine.py` 进行所有计算，无需手动运行任何脚本。
+
 ```bash
-# 常规运行（读取 data/portfolio.csv）
-python src/nav_engine.py
+# 本地启动
+streamlit run dashboard/app.py
 
-# 指定输入文件
-python src/nav_engine.py data/portfolio_sample.csv
-
-# 从 XLSX 迁移（一次性）
-python src/migrate_xlsx.py
+# Docker 启动（推荐）
+docker compose up --build -d
+# Dashboard 访问：http://localhost:8501
 ```
 
-### 6.5.6 输出产物
+### 6.5.6 输出
 
-| 文件 | 内容 |
+所有计算结果在 Dashboard 加载时实时生成，无需写入文件：
+
+| 内容 | 展示位置 |
 |:---|:---|
-| `data/output_fund_nav.csv` | 基金整体净值时间序列（Date, NAV, Total_Shares, Cumulative_Return） |
-| `data/output_class_nav.csv` | 各类别净值时间序列（含 Asset_Class 列） |
-| `data/output_allocation.csv` | 最新日期的资产配置占比 |
-| `output/fund_nav_trend.png` | 基金整体净值走势图 |
-| `output/class_nav_trend.png` | 7 条线的分类净值对比图 |
-| `output/asset_allocation.png` | 甜甜圈配置饼图 |
+| 基金整体净值走势 | Dashboard tab — NAV 折线图 |
+| 各类别净值对比 | Dashboard tab — 分类净值折线图 |
+| 资产配置占比 | Dashboard tab — 饼图 |
+| 持仓盈亏明细 | Dashboard tab — P/L 表格 |
+| SAP 股票成本分析 | SAP Stock tab |
 
 ### 6.5.7 SAP 股票工作流
 
@@ -582,17 +562,15 @@ sequenceDiagram
 
 ```mermaid
 graph TB
-    subgraph UI_Layer ["UI 层 (Phase 3)"]
+    subgraph UI_Layer ["UI 层 (已实现)"]
         WEB["Streamlit Web Dashboard"]
-        CLI["CLI 命令行工具"]
     end
 
-    subgraph Report_Layer ["报表层 (Phase 2)"]
-        VIZ["可视化引擎<br/>(Plotly / ECharts)"]
-        EXPORT["导出模块<br/>(PDF / Excel)"]
+    subgraph Report_Layer ["报表层 (已实现)"]
+        VIZ["可视化引擎<br/>(Plotly)"]
     end
 
-    subgraph Engine_Layer ["计算引擎层 (Phase 2)"]
+    subgraph Engine_Layer ["计算引擎层 (已实现)"]
         NAV_ENGINE["净值核算引擎"]
         RISK["风险分析模块"]
         BENCH["基准对比模块"]
@@ -865,20 +843,27 @@ graph LR
     P2 --> P3["Phase 3 ✅<br/>Streamlit 实时仪表板"]
 ```
 
-> **全部三个阶段已实现。** Phase 1 保留在 `nav_engine.py` 中用于终端 / CI 场景；Phase 2 + 3 合并在 `dashboard/app.py` 中，基于 Streamlit + Plotly 提供交互式仪表板。
+> **全部三个阶段已实现。** `nav_engine.py` 作为计算引擎被 Dashboard 自动调用，日常使用无需在终端运行任何脚本。
 
-### 9.2 Phase 1 — matplotlib 静态图（已实现）
+### 9.2 Phase 1 — matplotlib 静态图（保留）
 
 - `nav_engine.py` 中的 `plot_fund_nav()`、`plot_class_nav()`、`plot_allocation_pie()`
 - 输出静态 PNG 到 `output/` 目录
-- 适合终端查看、CI 自动化、邮件报告附件
+- 保留用于 CI 自动化或邮件报告等非交互场景，日常不使用
 
 ### 9.3 Phase 2+3 — Streamlit + Plotly 仪表板（已实现）
 
-位于 `dashboard/app.py`，单文件约 275 行。启动命令：
+位于 `dashboard/app.py`，包含 4 个 tab（Dashboard, Weekly Update, History, SAP Stock）。
+
+启动方式：
 
 ```bash
+# 本地
 streamlit run dashboard/app.py
+
+# Docker（推荐，数据通过 iCloud 同步）
+docker compose up --build -d
+# 访问 http://localhost:8501
 ```
 
 #### 架构
@@ -918,7 +903,7 @@ graph TB
 - **`@st.cache_data`**：缓存 CSV 加载与计算结果，避免每次交互重复计算
 - **Plotly Express**：所有图表均为交互式（悬浮提示、缩放平移、导出 PNG）
 - **数据源自动检测**：优先使用 `data/portfolio.csv`，不存在时回退到 `data/portfolio_sample.csv`
-- **纯本地运行**：无需部署服务器，`streamlit run dashboard/app.py` 即可
+- **纯本地运行**：Docker 启动后访问 `http://localhost:8501`，无需手动运行脚本
 - **实时刷新**：修改 CSV 后刷新浏览器页面即可看到最新数据
 
 ---
@@ -987,22 +972,20 @@ git commit -m "calc: 更新净值底稿至 2024-04-22"
 ```mermaid
 timeline
     title FamilyFund 技术演进路线
-    section Phase 1 — 基础核算
-        当前 : 单脚本 fund_calculator.py
-             : pandas + matplotlib
-             : CSV 手动维护
-             : 终端报告 + PNG 图表
-    section Phase 2 — 模块化增强
-        近期 : 拆分为独立模块 (计算/风险/基准/可视化)
-             : CLI 命令行工具 (click/typer)
+    section Phase 1 — 基础核算（已完成）
+        已完成 : nav_engine.py 多级净值核算
+             : pandas 数据处理
+             : CSV 手动/UI 维护
+    section Phase 2+3 — 模块化 + 仪表板（已完成）
+        已完成 : Streamlit Web Dashboard (4 tabs)
              : Plotly 交互式图表
-             : 自动拉取基准数据 (akshare/yfinance)
+             : SAP 股票成本核算引擎
+             : Docker 容器化 + iCloud 数据同步
+    section 未来演进
+        待定 : 基准对比模块 (akshare/yfinance)
              : XIRR 收益分析
-    section Phase 3 — 可视化仪表板
-        远期 : Streamlit Web Dashboard
              : 多资产归因分析
              : PDF/Excel 导出
-             : 自动化对账提醒
 ```
 
 ### 11.2 依赖库规划
