@@ -73,18 +73,20 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 | `Fixed_Income` | Bonds, money market funds |
 | `Gold` | Physical gold, paper gold, gold ETF |
 | `Company_Stock` | Employer stock (may be foreign currency) |
-| `Cash` | Bank deposits |
+| `Cash` | Fixed cash reserve (100k CNY) |
 
 ### Cash Flow Convention
 
+The fund tracks **investment portfolio + fixed cash reserve (100,000 CNY)**, not total household wealth. Salary, rent, and daily spending happen outside the fund boundary.
+
 External cash flows go on the row where the value enters:
 
-- **Salary, spending** → Cash row NCF
+- **Deliberate deposit/withdrawal** → Cash row NCF (e.g., +50,000 when adding money to the fund)
 - **SAP Own SAP vesting** → Company_Stock "Own SAP" row NCF = Cost_CNY (the cash you sacrificed by opting in)
-- **SAP Move SAP vesting** → Company_Stock "Move SAP" row NCF = 0 (free shares, no cost)
+- **SAP Move SAP vesting** → Company_Stock "Move SAP" row NCF = CNY value at vesting (external value entering the fund)
 - **Internal rebalancing** (sell ETF → buy bonds) → NCF = 0 on all rows
 
-This ensures NAV reflects the employer subsidy as investment performance (NAV growth) rather than external cash inflow.
+This ensures NAV purely reflects investment performance. Own SAP employer subsidy shows as NAV growth (you paid less than market value). Move SAP vesting doesn't inflate NAV (it's a gift, not investment gain).
 
 ## How NAV Works
 

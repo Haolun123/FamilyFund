@@ -411,7 +411,7 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 | `Shares` | float | 是 | 持有份额/股数 |
 | `Current_Price` | float | 是 | 当前单价（原始币种） |
 | `Total_Value` | float | 是 | 当前总市值（CNY），= Shares × Price × Exchange_Rate |
-| `Net_Cash_Flow` | float | 是 | 本期外部资金变动。建仓日 = Total_Value，正常周 = 0。特殊情况：现金存取 → Cash 行 NCF；SAP Own SAP 归属 → Company_Stock 行 NCF = 归属成本（Cost_CNY）；SAP Move SAP 归属 → NCF = 0（免费获得）；内部调仓 → NCF = 0 |
+| `Net_Cash_Flow` | float | 是 | 本期外部资金变动。建仓日 = Total_Value，正常周 = 0。特殊情况：主动存取 → Cash 行 NCF；SAP Own SAP 归属 → Company_Stock 行 NCF = 归属成本（Cost_CNY）；SAP Move SAP 归属 → NCF = 归属市值（CNY 列，FMV）；内部调仓 → NCF = 0。注意：基金仅追踪固定现金储备（10万），工资/日常消费在基金边界之外 |
 
 #### 资产类别
 
@@ -423,7 +423,7 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 | `Fixed_Income` | 固定收益 | 银行理财、短债基金等 |
 | `Gold` | 黄金 | 实物黄金、纸黄金、黄金 ETF |
 | `Company_Stock` | 公司股票 | 雇主公司股票等 |
-| `Cash` | 现金 | 各银行活期余额 |
+| `Cash` | 现金 | 固定现金储备（10万 CNY），不追踪银行全部余额 |
 
 ### 6.5.3 多级净值核算
 
@@ -568,7 +568,7 @@ sequenceDiagram
 两个计划的分红均以股票形式再投资。收到分红后：
 1. 在 SAP Stock tab 添加 Dividend 交易（Date, Price, Qty）
 2. 下次对账：更新对应 Company_Stock 行的 Shares 和 Total_Value
-3. Own SAP Dividend: NCF = Cost_CNY（全额成本）; Move SAP Dividend: NCF = 0
+3. Own SAP Dividend: NCF = Cost_CNY（全额成本）; Move SAP Dividend: NCF = CNY（分红全额市值）
 
 ---
 
@@ -716,10 +716,9 @@ XLSX 中每个分区遵循固定模式：
 
 | 持仓名称 | 强制分类 | 原因 |
 |:---|:---|:---|
-| 现金 | `Cash` | 券商内的现金余额 |
+| 现金 | `Cash` | 固定现金储备（单行，10万 CNY） |
 | 国债ETF / 短融ETF | `Fixed_Income` | 虽在券商分区但本质是债券 |
 | 黄金 | `Gold` | 跨平台统一归类（银行+实物） |
-| 现金（银行X）/ 现金（银行Y） | `Cash` | 独立现金行 |
 
 **第二级：分区默认映射**
 

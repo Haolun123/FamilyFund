@@ -424,12 +424,18 @@ with tab_update:
             if col not in df.columns:
                 df[col] = None
 
-        # Fill missing fields from previous template by matching on Name
+        # Fill missing fields from previous template by matching on Code (primary) or Name (fallback)
+        prev_by_code = prev_template.set_index('Code')
         prev_by_name = prev_template.set_index('Name')
         for i, row in df.iterrows():
+            code = row.get('Code')
             name = row.get('Name')
-            if name and name in prev_by_name.index:
+            prev_row = None
+            if code and str(code).strip() and str(code).strip() in prev_by_code.index:
+                prev_row = prev_by_code.loc[str(code).strip()]
+            elif name and name in prev_by_name.index:
                 prev_row = prev_by_name.loc[name]
+            if prev_row is not None:
                 for col in ['Asset_Class', 'Platform', 'Code', 'Currency', 'Exchange_Rate']:
                     if pd.isna(row.get(col)) or str(row.get(col, '')).strip() == '':
                         df.at[i, col] = prev_row[col]
@@ -839,22 +845,6 @@ with tab_sap:
         cache = load_sap_price_cache()
         if cache and cache.get('updated'):
             st.caption(f"Last updated: {cache['updated']}")
-
-        # User-input price & FX
-        price_col, fx_col, refresh_col = st.columns([2, 2, 1])
-        with price_col:
-            sap_price_eur = st.number_input(
-                "SAP Price (EUR)", value=170.0, min_value=0.01,
-                format="%.2f", key="sap_current_price")
-        with fx_col:
-            sap_fx_rate = st.number_input(
-                "EUR/CNY Rate", value=8.0, min_value=0.01,
-                format="%.4f", key="sap_fx_rate")
-        with refresh_col:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Refresh", key="sap_refresh"):
-                st.session_state['_sap_do_refresh'] = True
-                st.rerun()
 
         kpi_cols = st.columns(3)
 

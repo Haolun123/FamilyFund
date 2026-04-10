@@ -477,19 +477,18 @@ When new SAP transactions are recorded (monthly Own SAP vesting, quarterly Move 
 | Event | `Shares` | `Total_Value` | `Net_Cash_Flow` |
 |-------|----------|---------------|-----------------|
 | Own SAP monthly vesting | Updated total from `own_sap.csv` | Shares × Price × FX | **Sum of `Cost_CNY`** from new transactions |
-| Move SAP quarterly vesting | Updated total from `move_sap.csv` | Shares × Price × FX | **0** (free shares) |
+| Move SAP quarterly vesting | Updated total from `move_sap.csv` | Shares × Price × FX | **Sum of `CNY`** from new vesting rows (FMV at vesting) |
 | Own SAP dividend reinvest | Updated total | Updated value | **Cost_CNY** of dividend row |
-| Move SAP dividend reinvest | Updated total | Updated value | **0** |
+| Move SAP dividend reinvest | Updated total | Updated value | **CNY** of dividend row (full value) |
 | No SAP activity this week | Same as last week | Updated value (price change) | 0 |
 
-### Why Cost_CNY for Own SAP NCF?
+### Why These NCF Values?
 
-NCF represents **what you sacrificed** (external value entering the fund). For Own SAP:
-- You forgo receiving cash compensation (Purchase) and pay income tax on match (Match)
-- The employer subsidy is **investment performance**, not external cash — NAV should reflect it as a gain
-- If we used market value as NCF, the employer's contribution would be invisible to NAV (shares increase, but NAV stays flat)
+NCF represents **external value entering the fund** — any asset that comes from outside the portfolio boundary.
 
-For Move SAP, RSU shares are truly free — no cash was sacrificed, so NCF = 0. The entire market value shows up as NAV growth.
+**Own SAP:** NCF = Cost_CNY (what you sacrificed). The employer subsidy portion (market value minus your cost) is genuine investment performance — NAV should reflect it as a gain.
+
+**Move SAP:** NCF = CNY (full market value at vesting). RSU shares are free to you, but they are still external value entering the fund from your employer. If NCF = 0, NAV would jump as if your investments grew — but they didn't, you received a gift. Setting NCF = FMV ensures new fund shares are issued to absorb the inflow, keeping NAV flat (correctly reflecting no investment gain from the vesting event itself). Any subsequent price change after vesting is real investment performance.
 
 ### Example: Own SAP March 2026 Vesting
 

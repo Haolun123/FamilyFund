@@ -238,7 +238,7 @@ def compute_cost_basis(df, own_sap_csv=None, move_sap_csv=None):
     latest_date = df['Date'].max()
     latest = df[df['Date'] == latest_date]
 
-    group_cols = ['Asset_Class', 'Platform', 'Name']
+    group_cols = ['Asset_Class', 'Platform', 'Name', 'Code']
     cost = df.groupby(group_cols)['Net_Cash_Flow'].sum().reset_index()
     cost.rename(columns={'Net_Cash_Flow': 'Cost_Basis'}, inplace=True)
 
