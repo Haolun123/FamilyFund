@@ -24,6 +24,9 @@ output/
 # OS
 .DS_Store
 
+# Environment (machine-specific paths)
+.env
+
 # IDE / tools
 .claude/
 

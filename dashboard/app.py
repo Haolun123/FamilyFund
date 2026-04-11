@@ -17,6 +17,7 @@ from nav_engine import (
 )
 from fx_service import get_exchange_rate, get_stock_price, load_sap_price_cache, save_sap_price_cache
 from sap_stock import load_own_sap, load_move_sap, own_sap_summary, move_sap_summary
+from pdf_report import generate_report as generate_pdf_report
 
 # ─── Page Config ───
 
@@ -73,6 +74,18 @@ data_name = os.path.basename(csv_path)
 dates = sorted(raw_df['Date'].unique())
 st.sidebar.markdown(f"**数据源**: `{data_name}`")
 st.sidebar.markdown(f"**周期数**: {len(dates)}")
+
+# PDF export
+st.sidebar.divider()
+st.sidebar.subheader("导出")
+_pdf_bytes = generate_pdf_report(raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df)
+_latest_date = fund_nav_df.iloc[-1]['Date']
+st.sidebar.download_button(
+    label="Download PDF Report",
+    data=_pdf_bytes,
+    file_name=f"FamilyFund_{_latest_date}.pdf",
+    mime="application/pdf",
+)
 
 # Date range filter
 st.sidebar.subheader("日期范围")
