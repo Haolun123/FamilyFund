@@ -305,8 +305,48 @@ def compute_cost_basis(df, own_sap_csv=None, move_sap_csv=None):
 
 
 # ============================================================
-# File I/O with Locking
+# XIRR — Money-Weighted Return
 # ============================================================
+
+def compute_xirr(df):
+    """计算基金整体的 XIRR（资金加权年化收益率）。
+
+    现金流定义：
+    - 每期 Net_Cash_Flow 为外部资金流入（正）或流出（负）
+    - 最新期总市值作为终值（以负号表示"取回"）
+
+    Returns:
+        float | None: 年化收益率（如 0.12 表示 12%），无法求解时返回 None
+    """
+    from scipy.optimize import brentq
+
+    agg = df.groupby('Date').agg(
+        Total_Value=('Total_Value', 'sum'),
+        Net_Cash_Flow=('Net_Cash_Flow', 'sum'),
+    ).reset_index().sort_values('Date')
+
+    dates = pd.to_datetime(agg['Date']).tolist()
+    cashflows = agg['Net_Cash_Flow'].tolist()
+
+    # 终值：最新期总市值，符号取负（代表"卖出收回"）
+    cashflows[-1] -= agg['Total_Value'].iloc[-1]
+
+    # 过滤掉全为零的情况
+    if all(cf == 0 for cf in cashflows):
+        return None
+
+    t0 = dates[0]
+    # 每笔现金流距起始日的年数
+    years = [(d - t0).days / 365.0 for d in dates]
+
+    def npv(rate):
+        return sum(cf / (1 + rate) ** y for cf, y in zip(cashflows, years))
+
+    try:
+        xirr = brentq(npv, -0.999, 100.0, maxiter=1000)
+        return round(xirr, 6)
+    except (ValueError, RuntimeError):
+        return None
 
 def _atomic_write_csv(df, csv_path):
     """Write DataFrame to CSV with file lock + atomic replace.

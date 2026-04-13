@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
     compute_class_nav, compute_allocation, compute_cost_basis,
+    compute_xirr,
     plot_fund_nav, plot_class_nav, plot_allocation_pie, export_results,
     _run_nav_calculation, _atomic_write_csv, update_snapshot, delete_snapshot,
     VALID_ASSET_CLASSES,
@@ -442,3 +443,39 @@ class TestFileOperations:
         reloaded = load_portfolio(sample_csv)
         updated_row = reloaded[(reloaded['Date'] == '2024-04-08') & (reloaded['Name'] == '红利低波')]
         assert updated_row.iloc[0]['Total_Value'] == 99999.0
+
+
+# ─── XIRR ───
+
+class TestXIRR:
+    def test_xirr_simple_known_return(self, tmp_path):
+        """10万建仓，一年后无追加，净值涨10%，XIRR应≈10%。"""
+        rows = []
+        for asset in ['ETF_Stock']:
+            rows.append({
+                'Date': '2023-01-01', 'Asset_Class': asset, 'Platform': 'A',
+                'Name': '测试ETF', 'Code': '', 'Currency': 'CNY',
+                'Exchange_Rate': 1.0, 'Shares': 100000, 'Current_Price': 1.0,
+                'Total_Value': 100000.0, 'Net_Cash_Flow': 100000.0,
+            })
+            rows.append({
+                'Date': '2024-01-01', 'Asset_Class': asset, 'Platform': 'A',
+                'Name': '测试ETF', 'Code': '', 'Currency': 'CNY',
+                'Exchange_Rate': 1.0, 'Shares': 100000, 'Current_Price': 1.1,
+                'Total_Value': 110000.0, 'Net_Cash_Flow': 0.0,
+            })
+        df = pd.DataFrame(rows)
+        result = compute_xirr(df)
+        assert result is not None
+        assert abs(result - 0.10) < 0.005  # within 0.5%
+
+    def test_xirr_returns_none_for_zero_cashflows(self, tmp_path):
+        """全零现金流时返回 None。"""
+        rows = [
+            {'Date': '2023-01-01', 'Asset_Class': 'Cash', 'Platform': 'A',
+             'Name': '现金', 'Code': '', 'Currency': 'CNY', 'Exchange_Rate': 1.0,
+             'Shares': 100000, 'Current_Price': 1.0, 'Total_Value': 100000.0, 'Net_Cash_Flow': 0.0},
+        ]
+        df = pd.DataFrame(rows)
+        result = compute_xirr(df)
+        assert result is None

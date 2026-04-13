@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
     compute_class_nav, compute_allocation, compute_cost_basis,
+    compute_xirr,
     CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES,
     _atomic_write_csv, update_snapshot, delete_snapshot,
 )
@@ -40,10 +41,10 @@ MOVE_SAP_CSV = os.path.join(BASE_DIR, 'data', 'move_sap.csv')
 def load_data(csv_path):
     df = load_portfolio(csv_path)
     if df is None:
-        return None, None, None, None, None
+        return None, None, None, None, None, None
     errors, warnings = validate_portfolio(df)
     if errors:
-        return None, None, None, None, None
+        return None, None, None, None, None, None
     fund_nav = compute_fund_nav(df)
     class_nav = compute_class_nav(df)
     allocation = compute_allocation(df)
@@ -52,12 +53,13 @@ def load_data(csv_path):
         own_sap_csv=OWN_SAP_CSV if os.path.exists(OWN_SAP_CSV) else None,
         move_sap_csv=MOVE_SAP_CSV if os.path.exists(MOVE_SAP_CSV) else None,
     )
-    return df, fund_nav, class_nav, allocation, cost_basis
+    xirr = compute_xirr(df)
+    return df, fund_nav, class_nav, allocation, cost_basis, xirr
 
 
 # Pick the best available data file
 csv_path = DEFAULT_CSV if os.path.exists(DEFAULT_CSV) else SAMPLE_CSV
-raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df = load_data(csv_path)
+raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df, xirr_value = load_data(csv_path)
 
 if raw_df is None:
     st.error("无法加载数据文件。请确保 data/portfolio.csv 或 data/portfolio_sample.csv 存在。")
@@ -143,7 +145,7 @@ with tab_dashboard:
     latest_date = latest_fund['Date']
     latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
 
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     with col1:
         st.metric("总资产", f"¥{latest_fund['Total_Value']:,.0f}")
     with col2:
@@ -154,16 +156,21 @@ with tab_dashboard:
     with col4:
         ann = latest_fund.get('Annualized_Return(%)')
         if ann is not None and not pd.isna(ann):
-            st.metric("年化收益率", f"{ann:+.2f}%")
+            st.metric("年化收益率(TWR)", f"{ann:+.2f}%", help="时间加权年化收益率，剔除资金进出影响")
         else:
-            st.metric("年化收益率", "< 1年")
+            st.metric("年化收益率(TWR)", "< 1年")
     with col5:
+        if xirr_value is not None:
+            st.metric("XIRR(MWR)", f"{xirr_value*100:+.2f}%", help="资金加权年化收益率，反映实际资金投入时机的真实回报")
+        else:
+            st.metric("XIRR(MWR)", "< 1年")
+    with col6:
         mdd = latest_fund.get('Max_Drawdown(%)')
         if mdd is not None and not pd.isna(mdd):
             st.metric("最大回撤", f"{mdd:.2f}%")
         else:
             st.metric("最大回撤", "—")
-    with col6:
+    with col7:
         st.metric("持仓数", f"{len(latest_holdings)}")
 
     # Fund NAV chart
