@@ -114,10 +114,13 @@ def _run_nav_calculation(dates, total_values, net_cash_flows):
         net_cash_flows: 每期净现金流列表
 
     Returns:
-        list[dict]: 每期的 NAV 核算快照
+        list[dict]: 每期的 NAV 核算快照，含年化收益率和最大回撤
     """
+    import datetime
+
     current_shares = 0.0
     records = []
+    start_date = pd.to_datetime(dates[0])
 
     for i, (date, tv, ncf) in enumerate(zip(dates, total_values, net_cash_flows)):
         if i == 0:
@@ -139,6 +142,13 @@ def _run_nav_calculation(dates, total_values, net_cash_flows):
                 new_shares = 0.0
             current_shares += new_shares
 
+        # 年化收益率: (1 + cumulative_return)^(365/days) - 1
+        days_elapsed = (pd.to_datetime(date) - start_date).days
+        if days_elapsed >= 365:
+            annualized_return = ((1 + cumulative_return) ** (365.0 / days_elapsed) - 1) * 100
+        else:
+            annualized_return = None  # 不足一年不显示年化
+
         records.append({
             'Date': date,
             'Total_Value': round(tv, 2),
@@ -146,9 +156,35 @@ def _run_nav_calculation(dates, total_values, net_cash_flows):
             'NAV': round(nav, 4),
             'Total_Shares': round(current_shares, 2),
             'Cumulative_Return(%)': round(cumulative_return * 100, 2),
+            'Annualized_Return(%)': round(annualized_return, 2) if annualized_return is not None else None,
         })
 
+    # 计算最大回撤: 在完整序列上回填到每行
+    nav_series = [r['NAV'] for r in records]
+    max_drawdowns = _compute_max_drawdown_series(nav_series)
+    for r, mdd in zip(records, max_drawdowns):
+        r['Max_Drawdown(%)'] = round(mdd * 100, 2)
+
     return records
+
+
+def _compute_max_drawdown_series(nav_series):
+    """计算截至每个时间点的最大回撤序列（从历史最高点的最大跌幅）。
+
+    Returns:
+        list[float]: 每期的最大回撤（负值，如 -0.15 表示回撤 15%）
+    """
+    result = []
+    peak = nav_series[0]
+    max_dd = 0.0
+    for nav in nav_series:
+        if nav > peak:
+            peak = nav
+        drawdown = (nav - peak) / peak if peak > 0 else 0.0
+        if drawdown < max_dd:
+            max_dd = drawdown
+        result.append(max_dd)
+    return result
 
 
 # ============================================================

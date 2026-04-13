@@ -143,7 +143,7 @@ with tab_dashboard:
     latest_date = latest_fund['Date']
     latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         st.metric("总资产", f"¥{latest_fund['Total_Value']:,.0f}")
     with col2:
@@ -152,6 +152,18 @@ with tab_dashboard:
         ret = latest_fund['Cumulative_Return(%)']
         st.metric("累计收益率", f"{ret:+.2f}%")
     with col4:
+        ann = latest_fund.get('Annualized_Return(%)')
+        if ann is not None and not pd.isna(ann):
+            st.metric("年化收益率", f"{ann:+.2f}%")
+        else:
+            st.metric("年化收益率", "< 1年")
+    with col5:
+        mdd = latest_fund.get('Max_Drawdown(%)')
+        if mdd is not None and not pd.isna(mdd):
+            st.metric("最大回撤", f"{mdd:.2f}%")
+        else:
+            st.metric("最大回撤", "—")
+    with col6:
         st.metric("持仓数", f"{len(latest_holdings)}")
 
     # Fund NAV chart

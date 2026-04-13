@@ -144,6 +144,45 @@ class TestCoreNav:
         # Shares = 100000 + (-5000 / 1.0) = 95000
         assert records[1]['Total_Shares'] == 95000.0
 
+    def test_annualized_return_none_under_one_year(self):
+        """不足一年时，年化收益率应为 None。"""
+        records = _run_nav_calculation(
+            ['2024-01-01', '2024-06-01'],
+            [100000, 110000],
+            [100000, 0],
+        )
+        assert records[1]['Annualized_Return(%)'] is None
+
+    def test_annualized_return_over_one_year(self):
+        """超过一年时，年化收益率应有值且计算正确。"""
+        records = _run_nav_calculation(
+            ['2023-01-01', '2024-01-01', '2025-01-01'],
+            [100000, 110000, 121000],
+            [100000, 0, 0],
+        )
+        # 2 年累计 21%，年化约 10%
+        assert records[2]['Annualized_Return(%)'] is not None
+        assert abs(records[2]['Annualized_Return(%)'] - 10.0) < 0.5
+
+    def test_max_drawdown_no_drawdown(self):
+        """单调上涨时最大回撤应为 0。"""
+        records = _run_nav_calculation(
+            ['2024-01-01', '2024-01-08', '2024-01-15'],
+            [100000, 110000, 120000],
+            [100000, 0, 0],
+        )
+        assert records[2]['Max_Drawdown(%)'] == 0.0
+
+    def test_max_drawdown_with_drop(self):
+        """下跌后回撤应为负值。"""
+        records = _run_nav_calculation(
+            ['2024-01-01', '2024-01-08', '2024-01-15'],
+            [100000, 120000, 90000],
+            [100000, 0, 0],
+        )
+        # NAV: 1.0 → 1.2 → 0.9; peak=1.2, drawdown=(0.9-1.2)/1.2 = -25%
+        assert records[2]['Max_Drawdown(%)'] == round(-25.0, 2)
+
 
 # ─── Fund-Level NAV ───
 
@@ -167,6 +206,12 @@ class TestFundNav:
     def test_week3_net_cash_flow(self, fund_nav):
         # +5000 - 3000 = 2000
         assert fund_nav.iloc[2]['Net_Cash_Flow'] == 2000.0
+
+    def test_fund_nav_has_annualized_return_column(self, fund_nav):
+        assert 'Annualized_Return(%)' in fund_nav.columns
+
+    def test_fund_nav_has_max_drawdown_column(self, fund_nav):
+        assert 'Max_Drawdown(%)' in fund_nav.columns
 
 
 # ─── Per-Class NAV ───
