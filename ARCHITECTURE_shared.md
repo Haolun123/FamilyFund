@@ -436,16 +436,40 @@ sequenceDiagram
     CIO->>BANK: 1. 打开各平台，盘点各持仓价格和市值
     BANK-->>CIO: 返回各账户持仓详情
 
-    alt 方式 A：通过 UI
-        CIO->>UI: 2a. Weekly Update tab → 更新价格/市值/NCF
-        UI->>CSV: 自动追加新快照
-    else 方式 B：直接编辑 CSV
-        CIO->>CSV: 2b. 复制上周行，更新日期、价格、市值
+    CIO->>UI: 2. Weekly Update tab → 更新各持仓 Price/Shares/Total_Value
+    Note over UI: 所有 NCF 默认为 0
+
+    alt 本期有调仓（买卖基金）或外部入金
+        CIO->>UI: 3. 打开"调仓辅助器"，按操作类型填入流水
+        UI-->>CIO: 自动计算 Cash Total_Value 和 Cash NCF（仅外部入金计入）
+        CIO->>UI: 4. 点"应用到持仓表"，Cash 行自动更新
     end
 
-    CIO->>UI: 3. 刷新浏览器，Dashboard 自动计算并展示
+    alt 本期有 SAP 股票归属
+        CIO->>UI: 5. 在 Company_Stock 行手动填 NCF = 归属成本/市值
+    end
+
+    UI->>CSV: 6. 保存快照（追加新日期行）
+    CIO->>UI: 7. 刷新浏览器，Dashboard 自动计算并展示
     UI-->>CIO: NAV、收益率、配置占比等实时呈现
 ```
+
+#### 调仓辅助器逻辑
+
+Weekly Update tab 内置"调仓辅助器"折叠区，解决调仓后 Cash 余额心算问题：
+
+| 操作类型 | Cash 变动 | 计入 NCF？ |
+|:---|:---|:---|
+| 卖出基金/ETF | +卖出金额 | 否（内部调仓） |
+| 买入基金/ETF | -买入金额 | 否（内部调仓） |
+| 外部入金（工资等） | +入金金额 | **是** |
+| 外部取出（消费等） | -取出金额 | **是** |
+
+辅助器输出两个值并自动回填 Cash 行：
+- `Total_Value` = 上周 Cash + 所有买卖净额 + 外部入金/取出
+- `Net_Cash_Flow` = 仅外部入金/取出之和（内部调仓不计）
+
+Company_Stock 的 NCF（SAP 归属）与此完全独立，照常在持仓表直接填写。
 
 ### 6.5.5 运行方式
 
@@ -882,6 +906,9 @@ graph TB
 | **资产类别对比** | 多线净值对比图 + 环形配置图 + 业绩表 | 类别筛选联动、悬浮数据 |
 | **持仓明细** | 完整持仓表（st.dataframe） | 类别/平台下拉筛选、列排序 |
 | **盈亏分析** | KPI 卡片 + 水平柱状图 + 明细表 | 持仓级盈亏（绿盈红亏） |
+| **周报更新** | 上周模板复用 + 调仓辅助器（Cash 余额/NCF 自动计算）+ 批量 CSV 导入 + 校验保存 | 调仓流水录入、一键回填 Cash 行 |
+| **历史记录** | 历史快照浏览与编辑 | 日期选择、行内编辑、删除 |
+| **SAP 股票** | Own/Move SAP 成本核算 | 手动输入价格汇率、自动计算归属成本 |
 | **侧边栏** | 日期范围 + 类别筛选 + PDF 下载 | 全局联动 |
 
 #### 技术要点
@@ -972,7 +999,6 @@ timeline
            : XIRR 资金加权收益率
            : 数据自动备份（_atomic_write_csv 写前备份）
         P1 : 夏普比率 + 卡尔马比率
-           : Weekly Update 中 Total_Value 自动计算
         P2 : 多资产收益归因分析
            : 再平衡建议（基于目标配置）
 ```
@@ -992,7 +1018,6 @@ timeline
 | 功能 | 关键依赖 | 说明 |
 |:---|:---|:---|
 | **夏普比率 + 卡尔马比率** | 无新依赖 | NAV 周收益率序列已具备，加无风险利率参数（默认 2.5% 年化）即可计算；与年化收益率/最大回撤一同展示 |
-| **Total_Value 自动计算** | 无新依赖 | Weekly Update 编辑表格中，当 Shares/Current_Price/Exchange_Rate 变更时自动计算 `Total_Value = Shares × Price × FX`，减少手动录入错误 |
 
 #### P2 — 低优先级 / 长期
 
