@@ -994,10 +994,11 @@ timeline
              : Docker 容器化 + iCloud 数据同步
              : PDF 报告导出（matplotlib PdfPages）
              : 年化收益率 + 最大回撤 KPI 指标
+             : 调仓辅助器（Cash 余额/NCF 自动计算）
+             : 数据自动备份（写前备份，保留最近 30 份）
     section 下一阶段（待实现）
         P0 : 基准对比模块 (CPI/M2/CSI300/S&P500) — 详见 BENCHMARKING_ANALYSIS.md
            : XIRR 资金加权收益率
-           : 数据自动备份（_atomic_write_csv 写前备份）
         P1 : 夏普比率 + 卡尔马比率
         P2 : 多资产收益归因分析
            : 再平衡建议（基于目标配置）
@@ -1011,7 +1012,6 @@ timeline
 |:---|:---|:---|:---|
 | **基准对比模块** | `BENCHMARKING_ANALYSIS.md` | `akshare`, `yfinance` | Dashboard 新增 Benchmark tab，叠加 CPI/M2/CSI300/S&P500(CNY) 曲线；所有基准在基金起始日归一化为 1.0 |
 | **XIRR** | `ARCHITECTURE_shared.md §8` | `scipy.optimize` | 考虑每笔 NCF 时间价值的资金加权年化收益率，与 NAV（时间加权）互补，回答"我实际赚了多少钱" |
-| **自动备份** | — | 无新依赖 | `_atomic_write_csv` 保存前自动拷贝到 `data/backups/portfolio_YYYYMMDD_HHMMSS.csv`，防止人为误操作导致数据丢失 |
 
 #### P1 — 中优先级
 

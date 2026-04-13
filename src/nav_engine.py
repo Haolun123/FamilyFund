@@ -309,7 +309,32 @@ def compute_cost_basis(df, own_sap_csv=None, move_sap_csv=None):
 # ============================================================
 
 def _atomic_write_csv(df, csv_path):
-    """Write DataFrame to CSV with file lock + atomic replace."""
+    """Write DataFrame to CSV with file lock + atomic replace.
+
+    Before writing, creates a timestamped backup in data/backups/.
+    Keeps the 30 most recent backups; older ones are deleted automatically.
+    """
+    import shutil
+    from datetime import datetime
+
+    # --- backup ---
+    if os.path.exists(csv_path):
+        backup_dir = os.path.join(os.path.dirname(csv_path), 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_name = os.path.splitext(os.path.basename(csv_path))[0]
+        backup_path = os.path.join(backup_dir, f'{backup_name}_{ts}.csv')
+        shutil.copy2(csv_path, backup_path)
+
+        # Prune: keep only the 30 most recent backups for this file
+        prefix = backup_name + '_'
+        all_backups = sorted([
+            f for f in os.listdir(backup_dir) if f.startswith(prefix) and f.endswith('.csv')
+        ])
+        for old in all_backups[:-30]:
+            os.remove(os.path.join(backup_dir, old))
+
+    # --- atomic write ---
     lock_path = csv_path + '.lock'
     with open(lock_path, 'w') as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
