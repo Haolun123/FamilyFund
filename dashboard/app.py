@@ -19,6 +19,7 @@ from nav_engine import (
 from fx_service import get_exchange_rate, get_stock_price, load_sap_price_cache, save_sap_price_cache
 from sap_stock import load_own_sap, load_move_sap, own_sap_summary, move_sap_summary
 from pdf_report import generate_report as generate_pdf_report
+from benchmark import get_benchmarks, BENCHMARK_DISPLAY_NAMES, BENCHMARK_COLORS
 
 # ─── Page Config ───
 
@@ -122,6 +123,18 @@ else:
         label_visibility="collapsed",
     )
 
+# Benchmark overlay
+st.sidebar.divider()
+st.sidebar.subheader("基准对比")
+selected_benchmarks = []
+for bkey, bname in BENCHMARK_DISPLAY_NAMES.items():
+    if st.sidebar.checkbox(bname, value=False, key=f"bm_{bkey}"):
+        selected_benchmarks.append(bkey)
+
+# Load benchmark data (cached, with iCloud fallback)
+fund_start_date = raw_df['Date'].min()
+benchmark_data = get_benchmarks(fund_start_date) if selected_benchmarks else {}
+
 # Filter data by date range
 filtered_raw = raw_df[(raw_df['Date'] >= date_start) & (raw_df['Date'] <= date_end)]
 filtered_fund = fund_nav_df[(fund_nav_df['Date'] >= date_start) & (fund_nav_df['Date'] <= date_end)]
@@ -181,8 +194,31 @@ with tab_dashboard:
     )
     fig_fund.add_hline(y=1.0, line_dash="dash", line_color="red", opacity=0.5,
                        annotation_text="基准线 1.0")
-    fig_fund.update_traces(line_color='#1f77b4', line_width=2.5)
-    fig_fund.update_layout(hovermode='x unified', height=400)
+    fig_fund.update_traces(line_color='#1f77b4', line_width=2.5, name='基金净值')
+
+    # Overlay benchmark lines
+    meta = benchmark_data.get('meta', {})
+    for bkey in selected_benchmarks:
+        bdata = benchmark_data.get(bkey)
+        if not bdata:
+            st.sidebar.warning(f"{BENCHMARK_DISPLAY_NAMES[bkey]}: 无数据")
+            continue
+        bdf = pd.DataFrame(bdata)
+        bdf = bdf[(bdf['date'] >= date_start) & (bdf['date'] <= date_end)]
+        if bdf.empty:
+            continue
+        until = meta.get(f'{bkey}_data_until', '未知')
+        label = f"{BENCHMARK_DISPLAY_NAMES[bkey]}（截至{until}）"
+        fig_fund.add_scatter(
+            x=bdf['date'], y=bdf['value'],
+            mode='lines',
+            name=label,
+            line=dict(color=BENCHMARK_COLORS[bkey], width=1.5, dash='dot'),
+        )
+
+    fig_fund.update_layout(hovermode='x unified', height=400,
+                           legend=dict(orientation='h', yanchor='bottom', y=-0.3,
+                                       xanchor='center', x=0.5))
     st.plotly_chart(fig_fund, use_container_width=True)
 
     # ─── Section 2: Asset Class Comparison ───

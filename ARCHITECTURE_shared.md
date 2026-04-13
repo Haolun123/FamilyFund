@@ -997,8 +997,9 @@ timeline
              : 调仓辅助器（Cash 余额/NCF 自动计算）
              : 数据自动备份（写前备份，保留最近 30 份）
              : XIRR 资金加权年化收益率
+             : 基准对比模块 (CSI300/S&P500/CPI/M2，iCloud 缓存)
     section 下一阶段（待实现）
-        P0 : 基准对比模块 (CPI/M2/CSI300/S&P500) — 详见 BENCHMARKING_ANALYSIS.md
+        P0 : （全部已完成）
         P1 : 夏普比率 + 卡尔马比率
         P2 : 多资产收益归因分析
            : 再平衡建议（基于目标配置）
@@ -1006,11 +1007,9 @@ timeline
 
 ### 11.2 待实现功能详情
 
-#### P0 — 高优先级
+#### P0 — 高优先级（全部已完成）
 
-| 功能 | 设计文档 | 关键依赖 | 说明 |
-|:---|:---|:---|:---|
-| **基准对比模块** | `BENCHMARKING_ANALYSIS.md` | `akshare`, `yfinance` | Dashboard 新增 Benchmark tab，叠加 CPI/M2/CSI300/S&P500(CNY) 曲线；所有基准在基金起始日归一化为 1.0 |
+所有 P0 功能已实现：基准对比模块、XIRR、自动备份。
 
 #### P1 — 中优先级
 
@@ -1035,8 +1034,8 @@ timeline
 | `streamlit` | Web 仪表板 | 已使用 |
 | `requests` | HTTP 请求（汇率/股价） | 已使用 |
 | `openpyxl` | XLSX 读取（迁移工具） | 已使用 |
-| `akshare` | 基准指数 + 宏观数据（CPI/M2/CSI300） | 待引入 |
-| `yfinance` | S&P 500 数据 | 待引入 |
+| `akshare` | 基准指数 + 宏观数据（CPI/M2/CSI300） | 已使用 |
+| `yfinance` | S&P 500 数据 | 已使用 |
 | `scipy` | XIRR 求解 | 已使用 |
 
 > **目录结构**：见 [6.1 当前结构](#61-当前结构)，已反映最新状态。
