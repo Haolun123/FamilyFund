@@ -275,6 +275,8 @@ FamilyFund/
 ├── BENCHMARKING_ANALYSIS.md           # 基准对比分析（CPI/M2/CSI300/S&P500）
 ├── DESIGN_SAP_STOCK.md                # SAP 股票模块设计文档
 ├── DESIGN_PDF_REPORT.md               # PDF 报告设计文档
+├── DESIGN_market_monitor.md           # 市场温度计设计文档（Tab 5，待实现）
+├── QUARTERLY_REPORT_DESIGN.md         # 季度家庭财报设计文档（Tab 6，设计阶段）
 ├── README.md                          # 项目简介
 ├── CurrentAsset.xlsx                  # [历史] CIO 原始 Excel 资产表
 ├── requirements.txt                   # Python 依赖声明
@@ -862,7 +864,7 @@ graph LR
 
 ### 9.3 Phase 2+3 — Streamlit + Plotly 仪表板（已实现）
 
-位于 `dashboard/app.py`，包含 4 个 tab（Dashboard, Weekly Update, History, SAP Stock）。侧边栏提供 PDF 报告一键下载。
+位于 `dashboard/app.py`，当前包含 4 个 tab（Dashboard, Weekly Update, History, SAP Stock）。侧边栏提供 PDF 报告一键下载。规划中新增 Tab 5（市场温度计）和 Tab 6（季度财报）。
 
 启动方式：
 
@@ -998,31 +1000,84 @@ timeline
              : 数据自动备份（写前备份，保留最近 30 份）
              : XIRR 资金加权年化收益率
              : 基准对比模块 (CSI300/S&P500/CPI/M2，iCloud 缓存)
-    section 下一阶段（待实现）
-        P0 : （全部已完成）
-        P1 : 夏普比率 + 卡尔马比率
-        P2 : 多资产收益归因分析
-           : 再平衡建议（基于目标配置）
+    section Phase 4 — 市场信号（设计完成，待实现）
+        待实现 : 市场温度计 Tab（Tab 5）
+              : 乖离率监测 (MA60/MA200，5个标的)
+              : VIX 恐慌指数
+              : 标普/纳指 PE×VIX 定投倍数矩阵
+    section Phase 5 — 家庭资产负债表（设计阶段）
+        待实现 : 季度财报 Tab（Tab 6）
+              : 全量资产负债表（含不动产/坏账准备）
+              : 净资产 QoQ 瀑布图
+              : 季度 PDF 报告生成
 ```
 
 ### 11.2 待实现功能详情
 
-#### P0 — 高优先级（全部已完成）
+#### 已完成（P0）
 
 所有 P0 功能已实现：基准对比模块、XIRR、自动备份。
 
-#### P1 — 中优先级
+#### P1 — 市场温度计（设计完成，可立即实现）
 
-| 功能 | 关键依赖 | 说明 |
+设计文档：`DESIGN_market_monitor.md`
+
+| 功能 | 新增文件 | 说明 |
 |:---|:---|:---|
-| **夏普比率 + 卡尔马比率** | 无新依赖 | NAV 周收益率序列已具备，加无风险利率参数（默认 2.5% 年化）即可计算；与年化收益率/最大回撤一同展示 |
+| **乖离率监测** | `src/market_monitor.py` | CSI300/中证A500/黄金/纳指/标普的 MA60+MA200 乖离率，颜色分5档（≤−10% 深度超卖 … >+15% 超买） |
+| **VIX 恐慌指数** | 同上 | yfinance `^VIX`，显示当前值 + 信号分档 |
+| **PE×VIX 定投倍数矩阵** | 同上 | 标普(VOO)/纳指(QQQ) PE × VIX 二维矩阵，输出定投倍数建议（0.2x → 顶格 → 暂停） |
+| **市场温度计 Tab 5** | `dashboard/app.py` | 3个 Section：乖离率表格 / VIX+PE 卡片 / 倍数建议；数据缓存至 `market_cache.json` |
 
-#### P2 — 低优先级 / 长期
+**数据源**（全部验证可用）：akshare(`sh000300`, `sh000510`)，yfinance(`GC=F`, `^NDX`, `^GSPC`, `^VIX`, VOO, QQQ)
+
+**设计决策摘要**：
+- A股（CSI300/中证A500）以 MA60 为主要参考；美股/黄金以 MA200 为主要参考
+- 不做跨标的综合信号，每个标的独立展示（用户对每个标的有独立持仓目标）
+- 倍数矩阵仅适用于标普500和纳指100，A股和黄金仅展示乖离率颜色提示
+- 系统只输出倍数，用户以自身基准定投金额执行，无需告知系统基准金额
+- 第一版不做历史走势图
+
+#### P2 — 季度家庭财报（设计阶段，需先确认数据模型）
+
+设计文档：`QUARTERLY_REPORT_DESIGN.md`
+
+| 功能 | 新增文件 | 说明 |
+|:---|:---|:---|
+| **balance_sheet.csv** | `data/balance_sheet.csv` | 季度末全量资产负债快照；`Asset_Investment` 行由引擎自动从 portfolio.csv 聚合，其余手工录入 |
+| **cashflow_log.csv** | `data/cashflow_log.csv` | 季度外部现金流（工资储蓄/大额支出/家庭注资） |
+| **季度核算引擎** | `src/quarterly_engine.py` | 净资产计算、QoQ对比、财务比率（资产负债率/流动比率）、损益反推 |
+| **季度财报 Tab 6** | `dashboard/app.py` | 资产负债表（双列）/ 净资产瀑布图 / QoQ 资产结构对比；含"生成季度PDF"按钮 |
+| **季度 PDF 报告** | `src/quarterly_report.py` | 复用 pdf_report.py 基础设施，4页：封面KPI / 资产负债表 / 损益瀑布图 / 投资组合深潜 |
+
+**资产分类体系**（基于 QuarterlyReport.xlsx 实际内容）：
+
+| Category | 说明 | 数据来源 |
+|:---|:---|:---|
+| `Asset_Current` | 流动资产（现金账户、公积金、在途资金） | 手工录入 |
+| `Asset_Investment` | 投资理财（★自动聚合） | portfolio.csv 季末快照 |
+| `Asset_RealEstate` | 不动产 + 车辆（公允价值估算） | 手工录入 |
+| `Asset_PrivateEquity` | 私募股权（精密制造A轮等） | 手工录入 |
+| `Asset_BadDebt` | 预备提记坏账（原值 × 坏账率） | 手工录入，显示原值并单独列坏账准备抵减 |
+| `Liability_Current` | 流动负债（信用卡账单） | 手工录入 |
+| `Liability_LongTerm` | 长期负债（房贷、车贷） | 手工录入 |
+| `Liability_Family` | 家庭内部借款（丈母娘注资等） | 手工录入，独立于银行贷款 |
+
+**前置工作（实现前必须完成）**：
+1. 确认在途资金的分类规则（建议：持有期 < 1个月的临时性流动资金）
+2. 明确 portfolio.csv 与季报"投资理财"的映射边界（哪些持仓自动聚合，哪些手工补录）
+3. 迁移 xlsx 历史数据：25Q4 + 26Q1 → balance_sheet.csv
+
+**Tab 编号说明**：市场温度计占用 Tab 5，季度财报为 Tab 6。
+
+#### P3 — 低优先级 / 长期
 
 | 功能 | 说明 |
 |:---|:---|
-| **收益归因分析** | 各资产类别对总收益的贡献度分解，回答"这段时间收益主要靠什么赚的" |
-| **再平衡建议** | 基于目标配置比例，自动计算各类别需买入/卖出金额以恢复目标配置 |
+| **夏普比率 + 卡尔马比率** | NAV 周收益率序列已具备，加无风险利率参数（默认 2.5%）即可；KPI 展示 |
+| **收益归因分析** | 各资产类别对总收益的贡献度分解 |
+| **净资产历史走势** | 季频净资产折线图（需要积累多季度数据后才有意义） |
+| **再平衡建议** | 基于目标配置比例，自动计算各类别买入/卖出金额 |
 
 ### 11.3 依赖库
 
