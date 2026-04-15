@@ -263,6 +263,7 @@ def _fetch_qvix() -> float | None:
 
 
 
+def _compute_ma(series: pd.Series, window: int) -> float | None:
     """计算序列最新 MA 值，不足窗口期返回 None。"""
     if series is None or len(series) < window:
         return None
