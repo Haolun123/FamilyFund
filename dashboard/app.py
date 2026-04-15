@@ -147,7 +147,7 @@ filtered_fund = fund_nav_df[(fund_nav_df['Date'] >= date_start) & (fund_nav_df['
 # ─── Tabs ───
 
 tab_dashboard, tab_update, tab_history, tab_sap, tab_market = st.tabs(
-    ["Dashboard", "Weekly Update", "History", "SAP Stock", "市场温度计"]
+    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -1507,25 +1507,31 @@ with tab_market:
 
     with mult_col1:
         color = _mult_color(mult_sp)
-        st.markdown(
-            f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center;'>"
-            f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>标普500</div>"
-            f"<div style='font-size:13px; color:#999;'>PE {pe_sp:.1f} × VIX {vix_val:.1f}</div>"
-            f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_sp}</div>"
-            f"</div>",
-            unsafe_allow_html=True,
-        ) if pe_sp and vix_val else st.info("标普500: 数据不完整，无法计算")
+        if pe_sp and vix_val:
+            st.markdown(
+                f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center;'>"
+                f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>标普500</div>"
+                f"<div style='font-size:13px; color:#999;'>PE {pe_sp:.1f} × VIX {vix_val:.1f}</div>"
+                f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_sp}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("标普500: 数据不完整，无法计算")
 
     with mult_col2:
         color = _mult_color(mult_ndx)
-        st.markdown(
-            f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center;'>"
-            f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>纳指100</div>"
-            f"<div style='font-size:13px; color:#999;'>PE {pe_ndx:.1f} × VIX {vix_val:.1f}</div>"
-            f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_ndx}</div>"
-            f"</div>",
-            unsafe_allow_html=True,
-        ) if pe_ndx and vix_val else st.info("纳指100: 数据不完整，无法计算")
+        if pe_ndx and vix_val:
+            st.markdown(
+                f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center;'>"
+                f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>纳指100</div>"
+                f"<div style='font-size:13px; color:#999;'>PE {pe_ndx:.1f} × VIX {vix_val:.1f}</div>"
+                f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_ndx}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("纳指100: 数据不完整，无法计算")
 
     st.markdown(
         "**倍数说明**: 暂停 = 不建议定投；观望 = 维持最小仓位；顶格 = 全力加仓。"
