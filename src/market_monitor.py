@@ -1,4 +1,4 @@
-"""market_monitor.py — 市场温度计：乖离率监测 + PE×VIX 定投倍数矩阵
+"""market_monitor.py — 市场温度计：乖离率监测 + PE×VIX/QVIX 定投倍数矩阵
 
 支持标的：
   - CSI 300 (沪深300)      — akshare 日频
@@ -9,10 +9,22 @@
   - VIX 恐慌指数           — yfinance ^VIX
   - 标普500 PE             — yfinance VOO trailingPE
   - 纳指100 PE             — yfinance QQQ trailingPE
+  - A股 QVIX              — akshare index_option_300etf_qvix（300ETF期权隐含波动率）
+  - CSI300 PE             — akshare stock_index_pe_lg(symbol='沪深300') 滚动市盈率
+  - 中证500 PE（A500代理）  — akshare stock_index_pe_lg(symbol='中证500') 滚动市盈率
+    ⚠️  中证A500 于 2023-11-17 发布，历史数据不足以建立可靠的百分位分布。
+        暂用中证500作为代理：两者同为大中盘均衡指数，行业权重结构相近，
+        PE走势高度相关。待A500积累3年以上数据后切换。
 
 均线参考规则：
   - A股（CSI300/中证A500）：MA60 为主要参考
   - 美股/黄金（纳指/标普/黄金）：MA200 为主要参考
+
+A股定投倍数矩阵说明：
+  - 美股用绝对PE×VIX（历史区间稳定）
+  - A股用PE百分位×QVIX百分位（A股PE历史极差8x-51x，百分位法更稳健）
+  - QVIX分档：<30th 低波, 30-60th 正常, 60-80th 偏高, >80th 恐慌
+  - PE分档：<30th 低估, 30-60th 合理, 60-80th 偏贵, >80th 高估
 
 缓存策略：
   - 缓存文件：$FAMILYFUND_DATA/market_cache.json（iCloud 目录）
@@ -111,6 +123,51 @@ NDX100_PE_SIGNAL = [
     (None,  45.0,   '高估',   '🔴'),
 ]
 
+# ── A股 QVIX 信号分档（基于历史百分位，2015年至今）─────────────
+# 历史参考：中位数 18.9，25-75% 区间 16.7-21.7，90th 24.8，最高 45.9
+QVIX_LEVELS = [
+    (17.2,  None,   '低波/平静',   '🔴'),   # < 30th pct
+    (19.8,  17.2,   '正常波动',    '⚪'),   # 30-60th pct
+    (22.5,  19.8,   '偏高',        '🟡'),   # 60-80th pct
+    (None,  22.5,   '恐慌',        '🟢'),   # > 80th pct
+]
+
+# ── CSI300 PE×QVIX 定投倍数矩阵（百分位法）──────────────────────
+# PE百分位分档（沪深300 滚动PE，2005年至今）：
+#   <30th: ≤11.5   30-60th: 11.5-13.2   60-80th: 13.2-15.6   >80th: ≥15.6
+# QVIX百分位分档：
+#   <30th: ≤17.2   30-60th: 17.2-19.8   60-80th: 19.8-22.5   >80th: ≥22.5
+CSI300_PE_BANDS  = [15.6, 13.2, 11.5]   # PE 行分界（> 各值）
+CSI300_QVIX_BANDS = [17.2, 19.8, 22.5]  # QVIX 列分界（< 各值）
+
+CSI300_MATRIX = [
+    # QVIX: <30th    30-60th  60-80th  >80th
+    ['暂停',  '观望',  '0.3x',  '0.5x'],  # PE > 80th (高估)
+    ['0.5x',  '0.8x',  '1.2x',  '2.0x'],  # PE 60-80th (偏贵)
+    ['1.0x',  '1.5x',  '2.5x',  '4.0x'],  # PE 30-60th (合理)
+    ['2.0x',  '3.0x',  '5.0x',  '顶格'],  # PE < 30th (低估)
+]
+
+# ── 中证A500 PE×QVIX 定投倍数矩阵（百分位法，以中证500为代理）─────
+# ⚠️  中证A500（000510）于2023-11-17发布，历史数据不足。
+#     此处PE数据来自中证500（000905）作为临时代理。
+#     原因：中证500与A500同为大中盘均衡指数，行业结构相近，
+#     PE走势高度相关（当前A500≈21.8 vs 中证500≈28.5，绝对值有差异但
+#     百分位分布特征相似）。待A500积累3年以上历史后切换。
+# PE百分位分档（中证500 滚动PE，2005年至今）：
+#   <30th: ≤21.2   30-60th: 21.2-27.3   60-80th: 27.3-37.4   >80th: ≥37.4
+# QVIX共用同一指数（300ETF期权，代表A股整体隐含波动率）
+CSI_A500_PE_BANDS  = [37.4, 27.3, 21.2]   # PE 行分界（> 各值）
+CSI_A500_QVIX_BANDS = [17.2, 19.8, 22.5]  # 同 CSI300，共用 QVIX
+
+CSI_A500_MATRIX = [
+    # QVIX: <30th    30-60th  60-80th  >80th
+    ['暂停',  '观望',  '0.3x',  '0.5x'],  # PE > 80th (高估)
+    ['0.5x',  '0.8x',  '1.2x',  '2.0x'],  # PE 60-80th (偏贵)
+    ['1.0x',  '1.5x',  '2.5x',  '4.0x'],  # PE 30-60th (合理)
+    ['2.0x',  '3.0x',  '5.0x',  '顶格'],  # PE < 30th (低估)
+]
+
 
 # ══════════════════════════════════════════════════════════════
 # Cache I/O
@@ -184,7 +241,28 @@ def _fetch_pe(symbol: str) -> float | None:
         return None
 
 
-def _compute_ma(series: pd.Series, window: int) -> float | None:
+def _fetch_akshare_pe(symbol: str) -> float | None:
+    """拉取 akshare 指数滚动市盈率（最新值）。symbol: '沪深300' 或 '中证500'。"""
+    try:
+        import akshare as ak
+        df = ak.stock_index_pe_lg(symbol=symbol)
+        val = float(df['滚动市盈率'].iloc[-1])
+        return round(val, 2) if val > 0 else None
+    except Exception:
+        return None
+
+
+def _fetch_qvix() -> float | None:
+    """拉取 A股 QVIX（300ETF期权隐含波动率指数，最新收盘值）。"""
+    try:
+        import akshare as ak
+        df = ak.index_option_300etf_qvix()
+        return round(float(df['close'].iloc[-1]), 2)
+    except Exception:
+        return None
+
+
+
     """计算序列最新 MA 值，不足窗口期返回 None。"""
     if series is None or len(series) < window:
         return None
@@ -210,15 +288,18 @@ def get_market_data(force_refresh: bool = False) -> dict:
 
     Returns:
         dict: {
-            'csi300':    {'price': ..., 'ma60': ..., 'ma200': ..., 'updated': '...'},
-            'csi_a500':  {...},
-            'gold':      {...},
-            'ndx100':    {...},
-            'sp500':     {...},
-            'vix':       {'price': ..., 'updated': '...'},
-            'pe_sp500':  {'value': ..., 'source': ..., 'manual_override': ..., 'updated': '...'},
-            'pe_ndx100': {...},
-            'meta':      {'<key>_updated': '...', ...}
+            'csi300':       {'price': ..., 'ma60': ..., 'ma200': ..., 'updated': '...'},
+            'csi_a500':     {...},
+            'gold':         {...},
+            'ndx100':       {...},
+            'sp500':        {...},
+            'vix':          {'price': ..., 'updated': '...'},
+            'qvix':         {'price': ..., 'updated': '...'},
+            'pe_sp500':     {'value': ..., 'source': ..., 'manual_override': ..., 'updated': '...'},
+            'pe_ndx100':    {...},
+            'pe_csi300':    {'value': ..., 'source': 'akshare 沪深300 滚动PE', 'updated': '...'},
+            'pe_csi_a500':  {'value': ..., 'source': 'akshare 中证500 滚动PE（A500代理）', 'updated': '...'},
+            'meta':         {'<key>_updated': '...', ...}
         }
         各字段为 None 表示完全不可用（无缓存且拉取失败）
     """
@@ -251,7 +332,15 @@ def get_market_data(force_refresh: bool = False) -> dict:
             cache['vix_updated'] = today
             cache_dirty = True
 
-    # ── PE（仅在无 manual_override 时自动拉取）──
+    # ── QVIX（A股隐含波动率，300ETF期权）──
+    if _should_fetch('qvix'):
+        val = _fetch_qvix()
+        if val:
+            cache['qvix'] = {'price': val}
+            cache['qvix_updated'] = today
+            cache_dirty = True
+
+    # ── 美股PE（仅在无 manual_override 时自动拉取）──
     for pe_key, ticker in [('pe_sp500', 'VOO'), ('pe_ndx100', 'QQQ')]:
         existing = cache.get(pe_key, {})
         if existing.get('manual_override') is not None:
@@ -269,17 +358,31 @@ def get_market_data(force_refresh: bool = False) -> dict:
             cache[f'{pe_key}_updated'] = today
             cache_dirty = True
 
+    # ── A股PE（akshare，不支持手动覆盖）──
+    for pe_key, ak_symbol, source_note in [
+        ('pe_csi300',   '沪深300', 'akshare 沪深300 滚动PE'),
+        ('pe_csi_a500', '中证500', 'akshare 中证500 滚动PE（A500代理，待A500积累3年数据后切换）'),
+    ]:
+        if not _should_fetch(pe_key):
+            continue
+        val = _fetch_akshare_pe(ak_symbol)
+        if val:
+            cache[pe_key] = {'value': val, 'source': source_note}
+            cache[f'{pe_key}_updated'] = today
+            cache_dirty = True
+
     if cache_dirty:
         _save_cache(cache)
 
     # ── 组装结果 ──
+    all_keys = list(TARGETS.keys()) + ['vix', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500']
     result = {}
-    for key in list(TARGETS.keys()) + ['vix', 'pe_sp500', 'pe_ndx100']:
+    for key in all_keys:
         result[key] = cache.get(key)
 
     # meta：各项数据的更新时间
     meta = {}
-    for key in list(TARGETS.keys()) + ['vix', 'pe_sp500', 'pe_ndx100']:
+    for key in all_keys:
         meta[f'{key}_updated'] = cache.get(f'{key}_updated', '未知')
     result['meta'] = meta
 
@@ -413,3 +516,56 @@ def lookup_multiplier(pe: float, vix: float, target: str) -> str:
             break
 
     return matrix[pe_row][vix_col]
+
+
+def compute_qvix_signal(qvix: float | None) -> tuple[str, str]:
+    """返回 A股 QVIX 的 (信号文字, emoji)。"""
+    if qvix is None:
+        return '无数据', '—'
+    for upper, lower, label, emoji in QVIX_LEVELS:
+        above_lower = (lower is None) or (qvix > lower)
+        below_upper = (upper is None) or (qvix <= upper)
+        if above_lower and below_upper:
+            return label, emoji
+    return '—', '—'
+
+
+def lookup_a_share_multiplier(pe: float | None, qvix: float | None, target: str) -> str:
+    """查 A股 PE×QVIX 矩阵（百分位法），返回定投倍数建议。
+
+    Args:
+        pe:     PE 值（CSI300 用沪深300滚动PE；中证A500 用中证500滚动PE作代理）
+        qvix:   QVIX 值（300ETF期权隐含波动率，CSI300/A500 共用）
+        target: 'csi300' 或 'csi_a500'
+
+    Returns:
+        '暂停' / '观望' / '0.3x' / ... / '顶格'
+        若 pe 或 qvix 为 None，返回 '—'
+    """
+    if pe is None or qvix is None:
+        return '—'
+
+    if target == 'csi300':
+        pe_bands   = CSI300_PE_BANDS
+        qvix_bands = CSI300_QVIX_BANDS
+        matrix     = CSI300_MATRIX
+    else:
+        pe_bands   = CSI_A500_PE_BANDS
+        qvix_bands = CSI_A500_QVIX_BANDS
+        matrix     = CSI_A500_MATRIX
+
+    # PE 行定位（从高到低找第一个 pe > band）
+    pe_row = len(pe_bands)
+    for i, band in enumerate(pe_bands):
+        if pe > band:
+            pe_row = i
+            break
+
+    # QVIX 列定位（< 各分界值）
+    qvix_col = len(qvix_bands)
+    for j, band in enumerate(qvix_bands):
+        if qvix < band:
+            qvix_col = j
+            break
+
+    return matrix[pe_row][qvix_col]

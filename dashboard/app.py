@@ -22,7 +22,8 @@ from pdf_report import generate_report as generate_pdf_report
 from benchmark import get_benchmarks, BENCHMARK_DISPLAY_NAMES, BENCHMARK_COLORS
 from market_monitor import (
     get_market_data, set_pe_override,
-    compute_bias, compute_vix_signal, compute_pe_signal, lookup_multiplier,
+    compute_bias, compute_vix_signal, compute_pe_signal, compute_qvix_signal,
+    lookup_multiplier, lookup_a_share_multiplier,
     TARGETS,
 )
 
@@ -1425,30 +1426,37 @@ with tab_market:
 
     st.subheader("恐慌与估值")
 
-    vix_entry  = market_data.get('vix')
+    vix_entry    = market_data.get('vix')
+    qvix_entry   = market_data.get('qvix')
     pe_sp_entry  = market_data.get('pe_sp500')
     pe_ndx_entry = market_data.get('pe_ndx100')
 
-    vix_val  = vix_entry.get('price')   if vix_entry  else None
-    pe_sp    = (pe_sp_entry.get('manual_override') or pe_sp_entry.get('value'))  if pe_sp_entry  else None
+    vix_val  = vix_entry.get('price')    if vix_entry   else None
+    qvix_val = qvix_entry.get('price')   if qvix_entry  else None
+    pe_sp    = (pe_sp_entry.get('manual_override') or pe_sp_entry.get('value'))   if pe_sp_entry  else None
     pe_ndx   = (pe_ndx_entry.get('manual_override') or pe_ndx_entry.get('value')) if pe_ndx_entry else None
     sp_src   = ('手动' if (pe_sp_entry or {}).get('manual_override') else 'VOO auto') if pe_sp_entry else '—'
     ndx_src  = ('手动' if (pe_ndx_entry or {}).get('manual_override') else 'QQQ auto') if pe_ndx_entry else '—'
 
-    vix_label,  vix_emoji  = compute_vix_signal(vix_val)
-    sp_pe_label, sp_pe_emoji = compute_pe_signal(pe_sp, 'sp500')
+    vix_label,   vix_emoji   = compute_vix_signal(vix_val)
+    qvix_label,  qvix_emoji  = compute_qvix_signal(qvix_val)
+    sp_pe_label,  sp_pe_emoji  = compute_pe_signal(pe_sp,  'sp500')
     ndx_pe_label, ndx_pe_emoji = compute_pe_signal(pe_ndx, 'ndx100')
 
-    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     with kpi1:
         st.metric("VIX 恐慌指数", f"{vix_val:.1f}" if vix_val else "—")
         st.markdown(f"{vix_emoji} **{vix_label}**")
-        st.caption(f"更新: {meta.get('vix_updated', '未知')}")
+        st.caption(f"美股恐慌指数　更新: {meta.get('vix_updated', '未知')}")
     with kpi2:
+        st.metric("QVIX A股波动率", f"{qvix_val:.1f}" if qvix_val else "—")
+        st.markdown(f"{qvix_emoji} **{qvix_label}**")
+        st.caption(f"300ETF期权隐含波动率　更新: {meta.get('qvix_updated', '未知')}")
+    with kpi3:
         st.metric("标普500 PE", f"{pe_sp:.1f}" if pe_sp else "—")
         st.markdown(f"{sp_pe_emoji} **{sp_pe_label}**")
         st.caption(f"来源: {sp_src}　更新: {meta.get('pe_sp500_updated', '未知')}")
-    with kpi3:
+    with kpi4:
         st.metric("纳指100 PE", f"{pe_ndx:.1f}" if pe_ndx else "—")
         st.markdown(f"{ndx_pe_emoji} **{ndx_pe_label}**")
         st.caption(f"来源: {ndx_src}　更新: {meta.get('pe_ndx100_updated', '未知')}")
@@ -1532,6 +1540,64 @@ with tab_market:
             )
         else:
             st.info("纳指100: 数据不完整，无法计算")
+
+    st.markdown(
+        "**倍数说明**: 暂停 = 不建议定投；观望 = 维持最小仓位；顶格 = 全力加仓。"
+        "倍数以您自身基准定投金额为基础执行。"
+    )
+    st.caption("⚠️ 仅供参考，不构成投资建议。数据来自公开市场，存在延迟。")
+
+    st.divider()
+
+    # ─── Section 4: A股定投倍数建议（CSI300 + 中证A500） ───
+
+    st.subheader("A股定投倍数建议")
+    st.caption(
+        "基于 PE百分位 × QVIX百分位 矩阵。A股PE历史区间波动极大（8x–51x），"
+        "百分位法比绝对值更稳健。QVIX为300ETF期权隐含波动率（A股波动率基准）。"
+    )
+
+    pe_csi300_entry  = market_data.get('pe_csi300')
+    pe_csi_a500_entry = market_data.get('pe_csi_a500')
+
+    pe_csi300   = pe_csi300_entry.get('value')   if pe_csi300_entry  else None
+    pe_csi_a500 = pe_csi_a500_entry.get('value') if pe_csi_a500_entry else None
+
+    mult_csi300  = lookup_a_share_multiplier(pe_csi300,   qvix_val, 'csi300')
+    mult_csi_a500 = lookup_a_share_multiplier(pe_csi_a500, qvix_val, 'csi_a500')
+
+    a_col1, a_col2 = st.columns(2)
+
+    with a_col1:
+        color = _mult_color(mult_csi300)
+        if pe_csi300 and qvix_val:
+            st.markdown(
+                f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center;'>"
+                f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>CSI 300 沪深300</div>"
+                f"<div style='font-size:13px; color:#999;'>PE {pe_csi300:.1f} × QVIX {qvix_val:.1f}</div>"
+                f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_csi300}</div>"
+                f"<div style='font-size:11px; color:#aaa;'>PE来源: akshare 沪深300 滚动PE</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("CSI300: 数据不完整，无法计算")
+
+    with a_col2:
+        color = _mult_color(mult_csi_a500)
+        if pe_csi_a500 and qvix_val:
+            pe_src_note = (pe_csi_a500_entry or {}).get('source', '')
+            st.markdown(
+                f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center;'>"
+                f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>中证A500</div>"
+                f"<div style='font-size:13px; color:#999;'>PE {pe_csi_a500:.1f} × QVIX {qvix_val:.1f}</div>"
+                f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_csi_a500}</div>"
+                f"<div style='font-size:11px; color:#e65100;'>⚠️ PE代理: 中证500（A500于2023-11-17发布，历史数据不足，待积累3年后切换）</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("中证A500: 数据不完整，无法计算")
 
     st.markdown(
         "**倍数说明**: 暂停 = 不建议定投；观望 = 维持最小仓位；顶格 = 全力加仓。"
