@@ -106,7 +106,7 @@ Webhook URL 通过环境变量注入，不硬编码，不提交到 git：
 WXWORK_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxx
 ```
 
-在 EC2 上存放于 `~/familyfund.env`，cron 运行时 `source` 载入。
+市场温度计只拉公开市场数据（akshare/yfinance），与个人持仓数据完全解耦，无需设置 `FAMILYFUND_DATA`。`market_cache.json` 会自动写入项目 `data/` 目录作为日间缓存。
 
 ---
 
@@ -163,19 +163,18 @@ sudo dnf install -y python3 python3-pip git
 # 2. Clone 项目
 git clone https://github.com/Haolun123/FamilyFund.git $BASE/familyfund
 
-# 3. 创建 venv 并安装依赖（精简版，只装推送所需包）
+# 3. 创建 venv 并安装依赖（仅推送所需）
 python3 -m venv $BASE/familyfund-venv
 $BASE/familyfund-venv/bin/pip install --quiet akshare yfinance pandas requests
 
-# 4. 创建目录
-mkdir -p $BASE/data $BASE/logs
+# 4. 创建日志目录
+mkdir -p $BASE/logs
 
 # 5. 创建 .env 文件（需手动填入 Webhook URL）
 cat > $BASE/familyfund.env << 'ENVEOF'
 export WXWORK_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE
-export FAMILYFUND_DATA=/home/ec2-user/data
 ENVEOF
-chmod 600 $BASE/familyfund.env  # 仅 owner 可读
+chmod 600 $BASE/familyfund.env
 
 # 6. 配置 cron（UTC 00:30 = 北京时间 08:30）
 CRON_LINE="30 0 * * * source $BASE/familyfund.env && $BASE/familyfund-venv/bin/python $BASE/familyfund/scripts/daily_push.py >> $BASE/logs/push.log 2>&1"
@@ -184,7 +183,7 @@ CRON_LINE="30 0 * * * source $BASE/familyfund.env && $BASE/familyfund-venv/bin/p
 echo ""
 echo "Setup complete."
 echo ">>> 请编辑 $BASE/familyfund.env，填入真实的 WXWORK_WEBHOOK_URL <<<"
-echo "手动测试推送: source $BASE/familyfund.env && $BASE/familyfund-venv/bin/python $BASE/familyfund/scripts/daily_push.py"
+echo "手动测试: source $BASE/familyfund.env && $BASE/familyfund-venv/bin/python $BASE/familyfund/scripts/daily_push.py --force"
 ```
 
 ---
