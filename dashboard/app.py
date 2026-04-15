@@ -20,6 +20,11 @@ from fx_service import get_exchange_rate, get_stock_price, load_sap_price_cache,
 from sap_stock import load_own_sap, load_move_sap, own_sap_summary, move_sap_summary
 from pdf_report import generate_report as generate_pdf_report
 from benchmark import get_benchmarks, BENCHMARK_DISPLAY_NAMES, BENCHMARK_COLORS
+from market_monitor import (
+    get_market_data, set_pe_override,
+    compute_bias, compute_vix_signal, compute_pe_signal, lookup_multiplier,
+    TARGETS,
+)
 
 # ─── Page Config ───
 
@@ -141,7 +146,9 @@ filtered_fund = fund_nav_df[(fund_nav_df['Date'] >= date_start) & (fund_nav_df['
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_history, tab_sap = st.tabs(["Dashboard", "Weekly Update", "History", "SAP Stock"])
+tab_dashboard, tab_update, tab_history, tab_sap, tab_market = st.tabs(
+    ["Dashboard", "Weekly Update", "History", "SAP Stock", "市场温度计"]
+)
 
 # ═══════════════════════════════════════════════════════════
 # Tab 1: Dashboard
@@ -1304,3 +1311,224 @@ with tab_sap:
                     st.cache_data.clear()
                     st.session_state.pop('move_sap_rows', None)
                     st.rerun()
+
+# ═══════════════════════════════════════════════════════════
+# Tab 5: 市场温度计
+# ═══════════════════════════════════════════════════════════
+
+with tab_market:
+
+    st.header("市场温度计")
+
+    # ─── 顶部栏：最后更新 + 刷新按钮 ───
+
+    top_col1, top_col2 = st.columns([5, 1])
+    with top_col2:
+        if st.button("🔄 刷新数据", key="market_refresh"):
+            st.session_state['_market_force_refresh'] = True
+            st.rerun()
+
+    force = st.session_state.pop('_market_force_refresh', False)
+
+    with st.spinner("加载市场数据..."):
+        market_data = get_market_data(force_refresh=force)
+
+    meta = market_data.get('meta', {})
+
+    # 显示最后更新时间（取各标的最新时间）
+    update_times = [v for k, v in meta.items() if k.endswith('_updated') and v != '未知']
+    last_update  = max(update_times) if update_times else '未知'
+    with top_col1:
+        st.caption(f"数据更新时间: {last_update}　｜　数据来自公开市场，存在延迟")
+
+    st.divider()
+
+    # ─── Section 1: 乖离率监测 ───
+
+    st.subheader("乖离率监测")
+    st.caption("乖离率 = (当前价 − MAn) / MAn × 100%　｜　**粗体**为主要参考均线")
+
+    # 颜色图例
+    st.markdown(
+        "🔵 深度超卖 (≤−10%)　　"
+        "🟢 超卖 (−10~−5%)　　"
+        "⚪ 正常 (−5~+8%)　　"
+        "🟡 偏高 (+8~+15%)　　"
+        "🔴 超买 (>+15%)"
+    )
+
+    bias_rows = []
+    for key, cfg in TARGETS.items():
+        entry = market_data.get(key)
+        updated = meta.get(f'{key}_updated', '未知')
+        is_stale = (updated != last_update and updated != '未知')
+
+        if entry is None:
+            bias_rows.append({
+                '标的':        cfg['name'] + (' ⚠️陈旧' if is_stale else ''),
+                '当前价':      '—',
+                'MA60':        '—',
+                'MA60乖离':    '—',
+                'MA200':       '—',
+                'MA200乖离':   '—',
+                '主要信号':    '无数据',
+            })
+            continue
+
+        bias = compute_bias(entry)
+        primary_ma = cfg['primary_ma']
+
+        def _fmt_bias(b, signal, emoji, is_primary):
+            if b is None:
+                return '—'
+            sign = '+' if b >= 0 else ''
+            text = f"{emoji} {sign}{b:.2f}%"
+            return f"**{text}**" if is_primary else text
+
+        bias60_str  = _fmt_bias(bias['bias60'],  bias['signal60'],  bias['emoji60'],  primary_ma == 60)
+        bias200_str = _fmt_bias(bias['bias200'], bias['signal200'], bias['emoji200'], primary_ma == 200)
+
+        main_signal = bias[f"signal{primary_ma}"]
+        main_emoji  = bias[f"emoji{primary_ma}"]
+
+        price = entry.get('price', 0)
+        ma60  = entry.get('ma60')
+        ma200 = entry.get('ma200')
+
+        bias_rows.append({
+            '标的':      cfg['name'] + (' ⚠️' if is_stale else ''),
+            '当前价':    f"{price:,.2f}",
+            'MA60':      f"{ma60:,.2f}"  if ma60  else '—',
+            'MA60乖离':  bias60_str,
+            'MA200':     f"{ma200:,.2f}" if ma200 else '—',
+            'MA200乖离': bias200_str,
+            '主要信号':  f"{main_emoji} {main_signal}",
+        })
+
+    if bias_rows:
+        bias_df = pd.DataFrame(bias_rows)
+        st.dataframe(
+            bias_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                '标的':      st.column_config.TextColumn(width='medium'),
+                'MA60乖离':  st.column_config.TextColumn('MA60乖离 ★A股', width='medium'),
+                'MA200乖离': st.column_config.TextColumn('MA200乖离 ★美股/金', width='medium'),
+                '主要信号':  st.column_config.TextColumn(width='small'),
+            },
+        )
+
+    st.divider()
+
+    # ─── Section 2: 恐慌与估值 ───
+
+    st.subheader("恐慌与估值")
+
+    vix_entry  = market_data.get('vix')
+    pe_sp_entry  = market_data.get('pe_sp500')
+    pe_ndx_entry = market_data.get('pe_ndx100')
+
+    vix_val  = vix_entry.get('price')   if vix_entry  else None
+    pe_sp    = (pe_sp_entry.get('manual_override') or pe_sp_entry.get('value'))  if pe_sp_entry  else None
+    pe_ndx   = (pe_ndx_entry.get('manual_override') or pe_ndx_entry.get('value')) if pe_ndx_entry else None
+    sp_src   = ('手动' if (pe_sp_entry or {}).get('manual_override') else 'VOO auto') if pe_sp_entry else '—'
+    ndx_src  = ('手动' if (pe_ndx_entry or {}).get('manual_override') else 'QQQ auto') if pe_ndx_entry else '—'
+
+    vix_label,  vix_emoji  = compute_vix_signal(vix_val)
+    sp_pe_label, sp_pe_emoji = compute_pe_signal(pe_sp, 'sp500')
+    ndx_pe_label, ndx_pe_emoji = compute_pe_signal(pe_ndx, 'ndx100')
+
+    kpi1, kpi2, kpi3 = st.columns(3)
+    with kpi1:
+        st.metric("VIX 恐慌指数", f"{vix_val:.1f}" if vix_val else "—")
+        st.markdown(f"{vix_emoji} **{vix_label}**")
+        st.caption(f"更新: {meta.get('vix_updated', '未知')}")
+    with kpi2:
+        st.metric("标普500 PE", f"{pe_sp:.1f}" if pe_sp else "—")
+        st.markdown(f"{sp_pe_emoji} **{sp_pe_label}**")
+        st.caption(f"来源: {sp_src}　更新: {meta.get('pe_sp500_updated', '未知')}")
+    with kpi3:
+        st.metric("纳指100 PE", f"{pe_ndx:.1f}" if pe_ndx else "—")
+        st.markdown(f"{ndx_pe_emoji} **{ndx_pe_label}**")
+        st.caption(f"来源: {ndx_src}　更新: {meta.get('pe_ndx100_updated', '未知')}")
+
+    # PE 手动覆盖（折叠）
+    with st.expander("PE 手动覆盖（网络不可达时使用）", expanded=False):
+        st.caption("填入后点击应用，系统将使用手动值直到清除。留空表示清除手动值，恢复自动获取。")
+        ov_col1, ov_col2, ov_col3 = st.columns([2, 2, 1])
+        with ov_col1:
+            sp_ov = st.number_input(
+                "标普PE (VOO)",
+                value=float(pe_sp) if pe_sp else 0.0,
+                min_value=0.0, step=0.1, format="%.1f",
+                key="pe_sp_override",
+            )
+        with ov_col2:
+            ndx_ov = st.number_input(
+                "纳指PE (QQQ)",
+                value=float(pe_ndx) if pe_ndx else 0.0,
+                min_value=0.0, step=0.1, format="%.1f",
+                key="pe_ndx_override",
+            )
+        with ov_col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("应用", key="pe_override_apply"):
+                set_pe_override('sp500',  sp_ov  if sp_ov  > 0 else None)
+                set_pe_override('ndx100', ndx_ov if ndx_ov > 0 else None)
+                st.success("已保存 PE 手动值")
+                st.rerun()
+            if st.button("清除手动值", key="pe_override_clear"):
+                set_pe_override('sp500',  None)
+                set_pe_override('ndx100', None)
+                st.success("已清除，将恢复自动获取")
+                st.rerun()
+
+    st.divider()
+
+    # ─── Section 3: 定投倍数建议（标普 + 纳指） ───
+
+    st.subheader("定投倍数建议")
+    st.caption("基于 PE × VIX 矩阵，仅适用于标普500和纳指100。A股和黄金请参考乖离率颜色自行判断。")
+
+    mult_sp  = lookup_multiplier(pe_sp,  vix_val, 'sp500')
+    mult_ndx = lookup_multiplier(pe_ndx, vix_val, 'ndx100')
+
+    def _mult_color(m):
+        if m in ('暂停',):
+            return '#d32f2f'
+        if m in ('观望',):
+            return '#f57c00'
+        if m == '顶格':
+            return '#1565c0'
+        return '#2e7d32'
+
+    mult_col1, mult_col2 = st.columns(2)
+
+    with mult_col1:
+        color = _mult_color(mult_sp)
+        st.markdown(
+            f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center;'>"
+            f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>标普500</div>"
+            f"<div style='font-size:13px; color:#999;'>PE {pe_sp:.1f} × VIX {vix_val:.1f}</div>"
+            f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_sp}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        ) if pe_sp and vix_val else st.info("标普500: 数据不完整，无法计算")
+
+    with mult_col2:
+        color = _mult_color(mult_ndx)
+        st.markdown(
+            f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center;'>"
+            f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>纳指100</div>"
+            f"<div style='font-size:13px; color:#999;'>PE {pe_ndx:.1f} × VIX {vix_val:.1f}</div>"
+            f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_ndx}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        ) if pe_ndx and vix_val else st.info("纳指100: 数据不完整，无法计算")
+
+    st.markdown(
+        "**倍数说明**: 暂停 = 不建议定投；观望 = 维持最小仓位；顶格 = 全力加仓。"
+        "倍数以您自身基准定投金额为基础执行。"
+    )
+    st.caption("⚠️ 仅供参考，不构成投资建议。数据来自公开市场，存在延迟。")
