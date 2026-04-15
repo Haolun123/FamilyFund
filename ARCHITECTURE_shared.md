@@ -275,7 +275,8 @@ FamilyFund/
 ├── BENCHMARKING_ANALYSIS.md           # 基准对比分析（CPI/M2/CSI300/S&P500）
 ├── DESIGN_SAP_STOCK.md                # SAP 股票模块设计文档
 ├── DESIGN_PDF_REPORT.md               # PDF 报告设计文档
-├── DESIGN_market_monitor.md           # 市场温度计设计文档（Tab 5，待实现）
+├── DESIGN_market_monitor.md           # 市场温度计设计文档（Tab 5，已实现）
+├── DESIGN_daily_push.md               # 每日企业微信推送设计文档（EC2 cron，已实现）
 ├── QUARTERLY_REPORT_DESIGN.md         # 季度家庭财报设计文档（Tab 6，设计阶段）
 ├── README.md                          # 项目简介
 ├── CurrentAsset.xlsx                  # [历史] CIO 原始 Excel 资产表
@@ -297,19 +298,26 @@ FamilyFund/
 ├── src/                               # 核心逻辑层
 │   ├── nav_engine.py                  # ★ 统一多级净值核算引擎
 │   ├── sap_stock.py                   # SAP 股票成本核算引擎
-│   ├── fx_service.py                  # 实时汇率/股价获取
+│   ├── fx_service.py                  # 实时汇率/股价获取（含 SAP 价格 iCloud 缓存）
 │   ├── pdf_report.py                  # PDF 报告生成（matplotlib PdfPages）
+│   ├── market_monitor.py              # 市场温度计：乖离率/VIX/QVIX/PE×VIX矩阵/A股PE×QVIX矩阵
+│   ├── notifier.py                    # 企业微信每日推送（格式化消息 + Webhook 发送）
 │   ├── import_sap_xlsx.py             # XLSX → own_sap/move_sap CSV 迁移工具
 │   ├── migrate_xlsx.py                # XLSX → portfolio.csv 迁移工具
 │   ├── fund_calculator.py             # [历史] 旧版净值核算
 │   └── asset_breakdown.py             # XLSX 资产配置解析
 │
 ├── dashboard/                         # ★ 可视化仪表板
-│   └── app.py                         # Streamlit + Plotly 交互式仪表板
+│   └── app.py                         # Streamlit + Plotly 交互式仪表板（5 tabs）
 │
-└── tests/                             # 测试（共 98 项）
+├── scripts/                           # 运维脚本
+│   ├── daily_push.py                  # 每日推送入口（EC2 cron 调用，--force 可手动触发）
+│   └── test_ec2_akshare.py            # EC2 akshare 可达性测试工具
+│
+└── tests/                             # 测试（共 143 项）
     ├── test_nav_engine.py             # 统一引擎测试（32 项）
     ├── test_sap_stock.py              # SAP 股票测试（22 项）
+    ├── test_market_monitor.py         # 市场温度计测试（45 项）
     ├── test_fund_calculator.py        # 旧版净值测试（16 项）
     └── test_asset_breakdown.py        # 资产配置测试（20 项）
 ```
@@ -327,7 +335,9 @@ FamilyFund/
 | `sap_stock.py` | 开发维护 | 按需修改 | 纳入 Git |
 | `fx_service.py` | 开发维护 | 按需修改 | 纳入 Git |
 | `pdf_report.py` | 开发维护 | 按需修改 | 纳入 Git |
-| `dashboard/app.py` | 开发维护 | 按需修改 | 纳入 Git |
+| `market_monitor.py` | 开发维护 | 按需修改 | 纳入 Git |
+| `notifier.py` | 开发维护 | 按需修改 | 纳入 Git |
+| `scripts/daily_push.py` | 开发维护 | 按需修改 | 纳入 Git |
 | `Dockerfile` | 开发维护 | 按需修改 | 纳入 Git |
 | `docker-compose.yml` | 开发维护 | 按需修改 | 纳入 Git |
 | `.env` | 用户配置 | 一次性 | **不入 Git**（机器特定路径） |
@@ -1000,11 +1010,13 @@ timeline
              : 数据自动备份（写前备份，保留最近 30 份）
              : XIRR 资金加权年化收益率
              : 基准对比模块 (CSI300/S&P500/CPI/M2，iCloud 缓存)
-    section Phase 4 — 市场信号（设计完成，待实现）
-        待实现 : 市场温度计 Tab（Tab 5）
+    section Phase 4 — 市场信号（已实现）
+        已完成 : 市场温度计 Tab 5（Dashboard）
               : 乖离率监测 (MA60/MA200，5个标的)
-              : VIX 恐慌指数
+              : VIX + QVIX 恐慌指数
               : 标普/纳指 PE×VIX 定投倍数矩阵
+              : A股 PE百分位×QVIX百分位 矩阵（CSI300/中证A500）
+              : EC2 每日企业微信推送（cron，北京时间 8:30）
     section Phase 5 — 家庭资产负债表（设计阶段）
         待实现 : 季度财报 Tab（Tab 6）
               : 全量资产负债表（含不动产/坏账准备）
@@ -1014,29 +1026,23 @@ timeline
 
 ### 11.2 待实现功能详情
 
-#### 已完成（P0）
+#### 已完成（P0 + P1）
 
 所有 P0 功能已实现：基准对比模块、XIRR、自动备份。
 
-#### P1 — 市场温度计（设计完成，可立即实现）
+P1 市场温度计已全部实现：
 
-设计文档：`DESIGN_market_monitor.md`
-
-| 功能 | 新增文件 | 说明 |
+| 功能 | 文件 | 说明 |
 |:---|:---|:---|
-| **乖离率监测** | `src/market_monitor.py` | CSI300/中证A500/黄金/纳指/标普的 MA60+MA200 乖离率，颜色分5档（≤−10% 深度超卖 … >+15% 超买） |
-| **VIX 恐慌指数** | 同上 | yfinance `^VIX`，显示当前值 + 信号分档 |
-| **PE×VIX 定投倍数矩阵** | 同上 | 标普(VOO)/纳指(QQQ) PE × VIX 二维矩阵，输出定投倍数建议（0.2x → 顶格 → 暂停） |
-| **市场温度计 Tab 5** | `dashboard/app.py` | 3个 Section：乖离率表格 / VIX+PE 卡片 / 倍数建议；数据缓存至 `market_cache.json` |
+| **乖离率监测** | `src/market_monitor.py` | CSI300/中证A500/黄金/纳指/标普的 MA60+MA200 乖离率，颜色分5档 |
+| **VIX + QVIX** | 同上 | VIX（美股）+ QVIX（A股300ETF期权），各自分档显示 |
+| **美股 PE×VIX 矩阵** | 同上 | 标普(VOO)/纳指(QQQ) PE × VIX 绝对值矩阵，输出定投倍数 |
+| **A股 PE×QVIX 矩阵** | 同上 | CSI300(沪深300 PE) + 中证A500(中证500代理PE) × QVIX 百分位矩阵 |
+| **市场温度计 Tab 5** | `dashboard/app.py` | 4个 Section：乖离率表 / VIX+QVIX+PE卡片 / 美股倍数 / A股倍数 |
+| **每日企业微信推送** | `src/notifier.py` + `scripts/daily_push.py` | EC2 cron 北京时间 8:30，交易日自动推送，非交易日跳过 |
 
-**数据源**（全部验证可用）：akshare(`sh000300`, `sh000510`)，yfinance(`GC=F`, `^NDX`, `^GSPC`, `^VIX`, VOO, QQQ)
-
-**设计决策摘要**：
-- A股（CSI300/中证A500）以 MA60 为主要参考；美股/黄金以 MA200 为主要参考
-- 不做跨标的综合信号，每个标的独立展示（用户对每个标的有独立持仓目标）
-- 倍数矩阵仅适用于标普500和纳指100，A股和黄金仅展示乖离率颜色提示
-- 系统只输出倍数，用户以自身基准定投金额执行，无需告知系统基准金额
-- 第一版不做历史走势图
+**数据源**：akshare(`sh000300`, `sh000510`, 沪深300PE, 中证500PE, QVIX)，yfinance(`GC=F`, `^NDX`, `^GSPC`, `^VIX`, VOO, QQQ)  
+**部署**：AWS EC2 t3.micro ap-southeast-2，Python venv + crontab，无 Docker
 
 #### P2 — 季度家庭财报（设计阶段，需先确认数据模型）
 

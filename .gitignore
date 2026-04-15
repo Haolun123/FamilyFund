@@ -11,9 +11,15 @@ data/output_*.csv
 data/own_sap.csv
 data/move_sap.csv
 data/sap_price_cache.json
+data/market_cache.json
 data/backups/
 CurrentAsset.xlsx
+QuarterlyReport.xlsx
 ~$*.xlsx
+
+# Reference images (local use only)
+IMG_0681.JPG
+IMG_0682.JPG
 
 # Private docs
 instruction.md
@@ -27,9 +33,14 @@ output/
 
 # Environment (machine-specific paths)
 .env
+familyfund.env
 
 # IDE / tools
 .claude/
+
+# Logs
+scripts/error_log/
+*.log
 
 # Temp
 *.tmp
