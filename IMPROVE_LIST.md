@@ -9,43 +9,50 @@
 ### ✅ 做得好的地方
 
 1. **核心算法正确且优雅** — `_run_nav_calculation()` 单一函数复用于基金整体和每个资产类别，份额净值法实现准确
-2. **数据安全** — `_atomic_write_csv()` 用文件锁 + 原子替换，防止写入中断导致数据损坏
-3. **Dashboard 完整度高** — 4 个 Tab（总览/周更/历史/SAP）覆盖了日常所有操作场景
+2. **数据安全** — `_atomic_write_csv()` 用文件锁 + 原子替换 + 自动备份（保留最近 30 份），防止写入中断导致数据损坏
+3. **Dashboard 完整度高** — 5 个 Tab（总览/周更/历史/SAP/市场温度计）覆盖了日常所有操作场景
 4. **输入校验严格** — `validate_snapshot()` 对空值、异常波动、NCF 一致性等都有检查
 5. **批量导入** — CSV/TSV 粘贴导入很实用，自动补全缺失字段
 6. **PDF 报告** — 4 页 A4 横版报告，零额外依赖，可直接下载
-7. **98 项测试** — 测试覆盖面广
+7. **54 项测试** — 测试覆盖面广
 8. **Docker 化** — 一键部署，健康检查也有
+9. **每日企业微信推送** — EC2 cron 自动推送市场温度计信号
 
 ---
 
-### 🔧 建议添加/改进的功能（按优先级排序）
+### ✅ 已完成功能清单（已实现，可直接使用）
 
-#### **P0 — 高价值且易实现**
+| 功能 | 实现位置 | 说明 |
+|------|------|------|
+| 年化收益率（TWR） | `nav_engine._run_nav_calculation` | Dashboard KPI 展示 |
+| 最大回撤（MDD） | `nav_engine._compute_max_drawdown_series` | Dashboard KPI 展示 |
+| 数据自动备份 | `nav_engine._atomic_write_csv` | 保存时备份，保留最近 30 份 |
+| 基准对比（CSI300/S&P500/CPI/M2） | `src/benchmark.py` | Dashboard NAV 图叠加 |
+| XIRR（资金加权收益率） | `nav_engine.compute_xirr` | Dashboard KPI 展示 |
+| 夏普比率 | `nav_engine.compute_sharpe` | Dashboard KPI 展示，无风险利率默认 2.5% |
+| 市场温度计 + 定投矩阵 | `src/market_monitor.py` | Tab 5，PE×VIX/QVIX 矩阵 |
+| 每日企业微信推送 | `src/notifier.py` + `scripts/daily_push.py` | EC2 cron，北京时间 8:30 |
 
-1. **年化收益率显示** — 当前只有累计收益率，但运行超过 1 年后年化收益率更有参考意义。只需在 `_run_nav_calculation` 末尾加一行计算即可
-2. **最大回撤 (MDD)** — 这是衡量风险最直观的指标，可以直接从 NAV 序列计算，在 Dashboard KPI 卡片区显示
-3. **数据自动备份** — 每次 `_atomic_write_csv` 保存前自动备份一份到 `data/backups/portfolio_YYYYMMDD_HHMMSS.csv`，防止人为误操作
+---
 
-#### **P1 — 架构文档中已规划但未实现**
+### 🔧 待实现功能（按优先级排序）
 
-4. **基准对比模块** — 至少先做 CPI 和沪深300 的对比，让 CIO 知道"有没有跑赢通胀/大盘"。可以用 `akshare` 获取国内数据
-5. **XIRR（资金加权收益率）** — 用 `scipy.optimize` 求解，回答"我实际赚了多少钱"这个问题。与 NAV（时间加权）互补
-6. **夏普比率** — 有了周收益率序列后很容易算，是评估风险调整后收益的黄金标准
+#### **P1 — 低挂果，快速完成**
 
-#### **P2 — 用户体验优化**
+1. **卡尔马比率（Calmar Ratio）** — 年化收益 / 最大回撤，两个值都已具备，几行代码
+2. **风险集中度警示** — 单持仓或单资产类别占总资产比例超阈值时高亮（如 Company_Stock > 30%）
+3. **货币敞口可视化** — 按 CNY/USD/EUR 汇总持仓市值，显示外汇风险分布
 
-7. **移动端适配** — 当前 Streamlit 在手机上不太好用，可以加 `st.set_page_config(layout="wide")` 之外的一些 CSS 微调
-8. **周报推送/通知** — 每周对账后自动生成摘要，可选推送到微信（通过 Server 酱/PushPlus 等）
-9. **Total_Value 自动计算** — 在 Weekly Update 中，当用户修改 Shares 或 Current_Price 时，Total_Value 应自动 = Shares × Price × Exchange_Rate，减少手动计算错误
-10. **数据导入优化** — 支持直接从券商/银行导出的 Excel/CSV 模板批量导入，减少手动录入
+#### **P2 — 中等复杂度**
 
-#### **P3 — 长期演进**
+4. **资金效率分析** — 每笔 NCF（外部资金流入）对应的实际回报，回答"哪些时点买入决策好/差"
+5. **持仓回测** — 模拟定投策略（固定倍数 vs PE×VIX 矩阵倍数），验证矩阵有效性；基于 yfinance/akshare 历史行情
 
-11. **收益归因分析** — 分析各资产类别对总收益的贡献度（即"这段时间收益主要靠什么赚的"）
-12. **再平衡建议** — 基于目标配置比例，自动计算需要买卖多少才能恢复到目标配置
-13. **Monte Carlo 模拟** — 基于历史波动率，模拟未来资产走势的概率分布
-14. **多用户/多基金** — 支持夫妻各自一个子基金，或者分"保守型"和"进取型"两个组合
+#### **P3 — 高复杂度 / 需前置工作**
+
+6. **季度财报（Tab 6）** — 资产负债表 + 净资产瀑布图；前置：迁移 25Q4+26Q1 历史 xlsx 数据
+7. **收益归因分析** — 各资产类别对总收益的贡献度分解
+8. **再平衡建议** — 基于目标配置比例，自动计算各类别买入/卖出金额
 
 ---
 
@@ -53,7 +60,5 @@
 
 - **`fx_service.py` 没有重试机制** — 网络请求应加 retry（`requests.adapters.HTTPAdapter` + `urllib3.util.retry.Retry`）
 - **SAP Tab 的默认价格硬编码为 170.0 / 8.0** — 如果缓存为空，应该提示用户手动输入而不是给一个可能过时的默认值
-- **`load_data()` 缓存问题** — `@st.cache_data` 按 `csv_path` 缓存，但如果文件内容变了（比如用户在 History tab 编辑后），需要手动 `st.cache_data.clear()`（你已经做了，但散落在多处，容易遗漏）
+- **`load_data()` 缓存问题** — `@st.cache_data` 按 `csv_path` 缓存，但如果文件内容变了（比如用户在 History tab 编辑后），需要手动 `st.cache_data.clear()`（已做，但散落在多处，容易遗漏）
 - **缺少 `.streamlit/config.toml`** — Git 仓库里没有这个文件，Docker 构建时 `COPY .streamlit/ .streamlit/` 可能会失败
-
-总体来说，这是一个设计精良的个人项目。建议优先实现 **年化收益率 + 最大回撤 + 自动备份** 这三个"低投入高回报"的功能，然后逐步推进基准对比和 XIRR。
