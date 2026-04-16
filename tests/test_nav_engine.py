@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
     compute_class_nav, compute_allocation, compute_cost_basis,
-    compute_xirr,
+    compute_xirr, compute_sharpe,
     plot_fund_nav, plot_class_nav, plot_allocation_pie, export_results,
     _run_nav_calculation, _atomic_write_csv, update_snapshot, delete_snapshot,
     VALID_ASSET_CLASSES,
@@ -479,3 +479,88 @@ class TestXIRR:
         df = pd.DataFrame(rows)
         result = compute_xirr(df)
         assert result is None
+
+
+# ============================================================
+# Sharpe Ratio Tests
+# ============================================================
+
+class TestComputeSharpe:
+
+    def _make_nav_df(self, nav_values, start='2023-01-01', freq_days=7):
+        """Helper: build a fund_nav_df from a list of NAV values."""
+        import datetime
+        dates = []
+        d = datetime.date.fromisoformat(start)
+        for _ in nav_values:
+            dates.append(d.isoformat())
+            d += datetime.timedelta(days=freq_days)
+
+        # compute cumulative return and annualized return manually
+        records = []
+        start_dt = datetime.date.fromisoformat(start)
+        for i, (date_str, nav) in enumerate(zip(dates, nav_values)):
+            cum_ret = (nav - 1.0) * 100
+            days = (datetime.date.fromisoformat(date_str) - start_dt).days
+            if days >= 365:
+                ann_ret = ((nav) ** (365.0 / days) - 1) * 100
+            else:
+                ann_ret = None
+            records.append({
+                'Date': date_str,
+                'NAV': nav,
+                'Cumulative_Return(%)': cum_ret,
+                'Annualized_Return(%)': ann_ret,
+            })
+        return pd.DataFrame(records)
+
+    def test_returns_none_for_insufficient_data(self):
+        """少于 4 个周期时返回 None。"""
+        nav_df = self._make_nav_df([1.0, 1.01, 1.02])
+        assert compute_sharpe(nav_df) is None
+
+    def test_returns_none_when_no_annual_return(self):
+        """不足一年数据（年化收益率为 None）时返回 None。"""
+        # 5 weeks — not enough for annualized return
+        nav_df = self._make_nav_df([1.0, 1.01, 1.02, 1.03, 1.04])
+        # All Annualized_Return(%) should be None (< 365 days)
+        assert all(pd.isna(nav_df['Annualized_Return(%)']))
+        assert compute_sharpe(nav_df) is None
+
+    def test_positive_sharpe_for_steady_gains(self):
+        """稳定上涨的 NAV 序列夏普比率为正。"""
+        import datetime
+        # Build ~2 years of weekly data with steady 10% annual gain
+        nav_values = []
+        n = 104  # 2 years of weekly data
+        for i in range(n):
+            nav_values.append(round(1.0 * (1.10 ** (i / 52)), 6))
+
+        nav_df = self._make_nav_df(nav_values, freq_days=7)
+        result = compute_sharpe(nav_df, risk_free_rate=0.025)
+        assert result is not None
+        assert result > 0
+
+    def test_negative_sharpe_for_losses(self):
+        """持续下跌的 NAV 序列夏普比率为负。"""
+        nav_values = []
+        n = 104
+        for i in range(n):
+            nav_values.append(round(1.0 * (0.88 ** (i / 52)), 6))
+
+        nav_df = self._make_nav_df(nav_values, freq_days=7)
+        result = compute_sharpe(nav_df, risk_free_rate=0.025)
+        assert result is not None
+        assert result < 0
+
+    def test_none_for_none_input(self):
+        """None 输入返回 None。"""
+        assert compute_sharpe(None) is None
+
+    def test_returns_float(self):
+        """返回值为 float，保留两位小数。"""
+        nav_values = [round(1.0 * (1.10 ** (i / 52)), 6) for i in range(104)]
+        nav_df = self._make_nav_df(nav_values, freq_days=7)
+        result = compute_sharpe(nav_df)
+        assert isinstance(result, float)
+        assert result == round(result, 2)

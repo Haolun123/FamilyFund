@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
     compute_class_nav, compute_allocation, compute_cost_basis,
-    compute_xirr,
+    compute_xirr, compute_sharpe,
     CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES,
     _atomic_write_csv, update_snapshot, delete_snapshot,
 )
@@ -61,12 +61,13 @@ def load_data(csv_path):
         move_sap_csv=MOVE_SAP_CSV if os.path.exists(MOVE_SAP_CSV) else None,
     )
     xirr = compute_xirr(df)
-    return df, fund_nav, class_nav, allocation, cost_basis, xirr
+    sharpe = compute_sharpe(fund_nav)
+    return df, fund_nav, class_nav, allocation, cost_basis, xirr, sharpe
 
 
 # Pick the best available data file
 csv_path = DEFAULT_CSV if os.path.exists(DEFAULT_CSV) else SAMPLE_CSV
-raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df, xirr_value = load_data(csv_path)
+raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df, xirr_value, sharpe_value = load_data(csv_path)
 
 if raw_df is None:
     st.error("无法加载数据文件。请确保 data/portfolio.csv 或 data/portfolio_sample.csv 存在。")
@@ -166,7 +167,7 @@ with tab_dashboard:
     latest_date = latest_fund['Date']
     latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
 
-    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
     with col1:
         st.metric("总资产", f"¥{latest_fund['Total_Value']:,.0f}")
     with col2:
@@ -186,12 +187,17 @@ with tab_dashboard:
         else:
             st.metric("XIRR(MWR)", "< 1年")
     with col6:
+        if sharpe_value is not None:
+            st.metric("夏普比率", f"{sharpe_value:.2f}", help="年化夏普比率，无风险利率 2.5%。>1 优秀，>0 可接受，<0 不如无风险收益")
+        else:
+            st.metric("夏普比率", "< 1年")
+    with col7:
         mdd = latest_fund.get('Max_Drawdown(%)')
         if mdd is not None and not pd.isna(mdd):
             st.metric("最大回撤", f"{mdd:.2f}%")
         else:
             st.metric("最大回撤", "—")
-    with col7:
+    with col8:
         st.metric("持仓数", f"{len(latest_holdings)}")
 
     # Fund NAV chart

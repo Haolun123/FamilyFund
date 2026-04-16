@@ -348,6 +348,60 @@ def compute_xirr(df):
     except (ValueError, RuntimeError):
         return None
 
+# ============================================================
+# Sharpe Ratio
+# ============================================================
+
+def compute_sharpe(fund_nav_df, risk_free_rate: float = 0.025) -> float | None:
+    """计算基金的年化夏普比率。
+
+    基于 NAV 序列的周期收益率：
+      - 周期收益率 = (NAV_t / NAV_{t-1}) - 1
+      - 年化收益率 = 最新 NAV 对应的 Annualized_Return(%) / 100
+      - 年化波动率 = 周期收益率的标准差 × √n（n 为年化因子，按实际间隔推算）
+      - 夏普比率 = (年化收益率 - risk_free_rate) / 年化波动率
+
+    Args:
+        fund_nav_df: compute_fund_nav() 返回的 DataFrame，需含 NAV 和 Date 列
+        risk_free_rate: 无风险年化利率，默认 2.5%
+
+    Returns:
+        float: 夏普比率（保留两位小数），数据不足 4 个周期或波动率为 0 时返回 None
+    """
+    if fund_nav_df is None or len(fund_nav_df) < 4:
+        return None
+
+    nav = fund_nav_df['NAV'].astype(float).tolist()
+    dates = pd.to_datetime(fund_nav_df['Date']).tolist()
+
+    # 周期收益率
+    period_returns = [(nav[i] / nav[i - 1]) - 1 for i in range(1, len(nav))]
+
+    if len(period_returns) < 3:
+        return None
+
+    # 推算年化因子：用平均周期天数折算到年（52周=年，实际天数更准）
+    total_days = (dates[-1] - dates[0]).days
+    avg_days_per_period = total_days / len(period_returns)
+    periods_per_year = 365.0 / avg_days_per_period if avg_days_per_period > 0 else 52.0
+
+    import statistics
+    vol_per_period = statistics.stdev(period_returns)
+    if vol_per_period == 0:
+        return None
+
+    vol_annualized = vol_per_period * (periods_per_year ** 0.5)
+
+    # 年化收益率取 NAV 序列计算值
+    ann_col = fund_nav_df['Annualized_Return(%)'].iloc[-1]
+    if ann_col is None or pd.isna(ann_col):
+        return None
+    ann_return = float(ann_col) / 100.0
+
+    sharpe = (ann_return - risk_free_rate) / vol_annualized
+    return round(sharpe, 2)
+
+
 def _atomic_write_csv(df, csv_path):
     """Write DataFrame to CSV with file lock + atomic replace.
 
