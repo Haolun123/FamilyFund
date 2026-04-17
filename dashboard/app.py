@@ -387,6 +387,89 @@ with tab_dashboard:
     # Footer
     st.caption(f"共 {len(holdings)} 条持仓 | 筛选市值合计: ¥{holdings['Total_Value'].sum():,.2f} | 数据日期: {latest_date_all}")
 
+    # ─── Section 3b: Risk Concentration ───
+
+    st.header("风险集中度")
+
+    latest_all = raw_df[raw_df['Date'] == latest_date_all].copy()
+    grand_total = latest_all['Total_Value'].sum()
+
+    # 类别集中度
+    CLASS_THRESHOLD = 0.40  # 单类别 > 40% 警示
+    HOLDING_THRESHOLD = 0.20  # 单持仓 > 20% 警示
+
+    class_conc = latest_all.groupby('Asset_Class')['Total_Value'].sum().reset_index()
+    class_conc['Pct'] = class_conc['Total_Value'] / grand_total
+    class_conc['Display'] = class_conc['Asset_Class'].map(display_map)
+
+    holding_conc = latest_all.groupby('Name')['Total_Value'].sum().reset_index()
+    holding_conc['Pct'] = holding_conc['Total_Value'] / grand_total
+
+    warnings_conc = []
+    for _, row in class_conc.iterrows():
+        if row['Pct'] > CLASS_THRESHOLD:
+            warnings_conc.append(f"**{row['Display']}** 占比 {row['Pct']*100:.1f}%，超过类别阈值 {CLASS_THRESHOLD*100:.0f}%")
+    for _, row in holding_conc.iterrows():
+        if row['Pct'] > HOLDING_THRESHOLD:
+            warnings_conc.append(f"**{row['Name']}** 占比 {row['Pct']*100:.1f}%，超过单持仓阈值 {HOLDING_THRESHOLD*100:.0f}%")
+
+    if warnings_conc:
+        for w in warnings_conc:
+            st.warning(w)
+    else:
+        st.success("集中度正常：无类别超过 40%，无单持仓超过 20%")
+
+    # 类别集中度 bar
+    class_conc_sorted = class_conc.sort_values('Pct', ascending=True)
+    fig_conc = px.bar(
+        class_conc_sorted,
+        x='Pct', y='Display',
+        orientation='h',
+        labels={'Pct': '占比', 'Display': '资产类别'},
+        title='各类别集中度',
+        text=class_conc_sorted['Pct'].apply(lambda x: f'{x*100:.1f}%'),
+    )
+    fig_conc.add_vline(x=CLASS_THRESHOLD, line_dash='dash', line_color='orange',
+                       annotation_text=f'警示线 {CLASS_THRESHOLD*100:.0f}%', annotation_position='top right')
+    fig_conc.update_traces(marker_color='#2196F3', textposition='outside')
+    fig_conc.update_layout(xaxis_tickformat=',.0%', height=300, margin=dict(l=0, r=40, t=40, b=0))
+    st.plotly_chart(fig_conc, use_container_width=True)
+
+    # ─── Section 3c: Currency Exposure ───
+
+    st.header("货币敞口")
+
+    # 按原始币种汇总（不换算），同时换算 CNY 市值
+    latest_all['CNY_Value'] = latest_all['Total_Value']  # Total_Value 已是 CNY
+    currency_exp = latest_all.groupby('Currency').agg(
+        CNY_Value=('CNY_Value', 'sum'),
+    ).reset_index()
+    currency_exp['Pct'] = currency_exp['CNY_Value'] / grand_total
+    currency_exp = currency_exp.sort_values('CNY_Value', ascending=False)
+
+    # Metrics row
+    ccy_cols = st.columns(len(currency_exp))
+    for i, (_, row) in enumerate(currency_exp.iterrows()):
+        with ccy_cols[i]:
+            st.metric(
+                row['Currency'],
+                f"¥{row['CNY_Value']:,.0f}",
+                f"{row['Pct']*100:.1f}%",
+            )
+
+    # Pie chart
+    fig_ccy = px.pie(
+        currency_exp,
+        names='Currency',
+        values='CNY_Value',
+        title='货币敞口分布（按 CNY 折算市值）',
+        color_discrete_sequence=['#2196F3', '#4CAF50', '#FF9800', '#9C27B0'],
+        hole=0.4,
+    )
+    fig_ccy.update_traces(texttemplate='%{label}<br>%{percent:.1%}', textposition='outside')
+    fig_ccy.update_layout(height=350, margin=dict(l=0, r=0, t=40, b=0))
+    st.plotly_chart(fig_ccy, use_container_width=True)
+
     # ─── Section 4: P/L Analysis ───
 
     st.header("盈亏分析")
