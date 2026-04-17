@@ -13,19 +13,15 @@ data/move_sap.csv
 data/sap_price_cache.json
 data/market_cache.json
 data/backups/
-CurrentAsset.xlsx
-QuarterlyReport.xlsx
+
+# Reference files (local use only, not in repo)
+reference/
 ~$*.xlsx
 
-# Reference images (local use only)
-IMG_0681.JPG
-IMG_0682.JPG
-
 # Private docs
-instruction.md
-ARCHITECTURE.md
-DESIGN_public_push.md
-DESIGN_public_push.pdf
+docs/instruction.md
+docs/DESIGN_public_push.md
+docs/DESIGN_public_push.pdf
 
 # Generated output
 output/
