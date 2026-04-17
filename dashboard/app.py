@@ -934,6 +934,13 @@ with tab_update:
             st.rerun()
 
     # ─── Validation ───
+
+    def validate_snapshot(df, prev_df, new_date_str, last_date_str):
+        """Validate the new weekly snapshot. Returns (errors, warnings)."""
+        errors = []
+        warnings = []
+
+        # Date check
         if new_date_str <= last_date_str:
             errors.append(f"新日期 ({new_date_str}) 必须晚于上次快照 ({last_date_str})")
 
