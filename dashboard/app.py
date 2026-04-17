@@ -680,7 +680,45 @@ with tab_update:
             if updated > 0:
                 st.rerun()
 
-    # ─── Cash 调仓辅助器 ───
+    # ─── Editable table ───
+    st.markdown("**编辑持仓** (可增删行，修改价格/份额/市值。外部资金进出仅填在 Cash 行的 Net_Cash_Flow)")
+
+    edited_df = st.data_editor(
+        st.session_state['update_template'],
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Asset_Class": st.column_config.SelectboxColumn(
+                "Asset_Class",
+                options=sorted(VALID_ASSET_CLASSES),
+                required=True,
+            ),
+            "Platform": st.column_config.TextColumn("Platform", required=True),
+            "Name": st.column_config.TextColumn("Name", required=True),
+            "Code": st.column_config.TextColumn("Code", default=""),
+            "Currency": st.column_config.SelectboxColumn(
+                "Currency",
+                options=["CNY", "HKD", "USD", "EUR"],
+                required=True,
+            ),
+            "Exchange_Rate": st.column_config.NumberColumn(
+                "Exchange_Rate", format="%.4f", min_value=0.0001, default=1.0,
+                help="Currency to CNY (e.g. EUR→CNY ≈ 7.92)",
+            ),
+            "Shares": st.column_config.NumberColumn("Shares", format="%.2f", min_value=0.0),
+            "Current_Price": st.column_config.NumberColumn("Current_Price", format="%.4f", min_value=0.0),
+            "Total_Value": st.column_config.NumberColumn("Total_Value", format="%.2f", min_value=0.0),
+            "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", format="%.2f", default=0.0),
+        },
+        column_order=[
+            "Asset_Class", "Platform", "Name", "Code", "Currency", "Exchange_Rate",
+            "Shares", "Current_Price", "Total_Value", "Net_Cash_Flow",
+        ],
+        key="weekly_editor",
+    )
+
+    # ─── Cash 调仓辅助器（在编辑持仓表之后，确保 edited_df 已赋值）───
     with st.expander("💱 调仓辅助器（计算 Cash 余额）", expanded=False):
         st.caption(
             "填入本期买卖操作，系统自动计算 Cash 的最终市值和 NCF。"
@@ -792,52 +830,110 @@ with tab_update:
             st.session_state['rebalance_entries'] = []
             st.rerun()
 
-    # ─── Editable table ───
-    st.markdown("**编辑持仓** (可增删行，修改价格/份额/市值。外部资金进出仅填在 Cash 行的 Net_Cash_Flow)")
+    # ─── Cash 调仓辅助器（在编辑持仓表之后，确保 edited_df 已赋值）───
+    with st.expander("💱 调仓辅助器（计算 Cash 余额）", expanded=False):
+        st.caption(
+            "填入本期买卖操作，系统自动计算 Cash 的最终市值和 NCF。"
+            "内部调仓（买入/卖出基金）NCF 始终为 0，只有外部资金进出才计入 NCF。"
+        )
 
-    edited_df = st.data_editor(
-        st.session_state['update_template'],
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Asset_Class": st.column_config.SelectboxColumn(
-                "Asset_Class",
-                options=sorted(VALID_ASSET_CLASSES),
-                required=True,
-            ),
-            "Platform": st.column_config.TextColumn("Platform", required=True),
-            "Name": st.column_config.TextColumn("Name", required=True),
-            "Code": st.column_config.TextColumn("Code", default=""),
-            "Currency": st.column_config.SelectboxColumn(
-                "Currency",
-                options=["CNY", "HKD", "USD", "EUR"],
-                required=True,
-            ),
-            "Exchange_Rate": st.column_config.NumberColumn(
-                "Exchange_Rate", format="%.4f", min_value=0.0001, default=1.0,
-                help="Currency to CNY (e.g. EUR→CNY ≈ 7.92)",
-            ),
-            "Shares": st.column_config.NumberColumn("Shares", format="%.2f", min_value=0.0),
-            "Current_Price": st.column_config.NumberColumn("Current_Price", format="%.4f", min_value=0.0),
-            "Total_Value": st.column_config.NumberColumn("Total_Value", format="%.2f", min_value=0.0),
-            "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", format="%.2f", default=0.0),
-        },
-        column_order=[
-            "Asset_Class", "Platform", "Name", "Code", "Currency", "Exchange_Rate",
-            "Shares", "Current_Price", "Total_Value", "Net_Cash_Flow",
-        ],
-        key="weekly_editor",
-    )
+        if 'rebalance_entries' not in st.session_state:
+            st.session_state['rebalance_entries'] = []
+
+        col_add1, col_add2, col_add3 = st.columns(3)
+        with col_add1:
+            if st.button("＋ 卖出（Cash 增加）", key="rb_add_sell"):
+                st.session_state['rebalance_entries'].append({'type': '卖出', 'note': '', 'amount': 0.0})
+                st.rerun()
+        with col_add2:
+            if st.button("＋ 买入（Cash 减少）", key="rb_add_buy"):
+                st.session_state['rebalance_entries'].append({'type': '买入', 'note': '', 'amount': 0.0})
+                st.rerun()
+        with col_add3:
+            if st.button("＋ 外部入金/取出", key="rb_add_external"):
+                st.session_state['rebalance_entries'].append({'type': '外部', 'note': '', 'amount': 0.0})
+                st.rerun()
+
+        entries = st.session_state['rebalance_entries']
+        to_remove = []
+        for idx, entry in enumerate(entries):
+            c1, c2, c3, c4 = st.columns([1.2, 3, 2, 0.7])
+            with c1:
+                type_label = {'卖出': '🔴 卖出', '买入': '🟢 买入', '外部': '🔵 外部'}.get(entry['type'], entry['type'])
+                st.markdown(f"**{type_label}**")
+            with c2:
+                entry['note'] = st.text_input("备注", value=entry['note'], key=f"rb_note_{idx}", label_visibility="collapsed", placeholder="资产名称/说明")
+            with c3:
+                raw_val = st.number_input("金额(CNY)", value=abs(entry['amount']), min_value=0.0, step=100.0, format="%.2f", key=f"rb_amt_{idx}", label_visibility="collapsed")
+                if entry['type'] == '卖出':
+                    entry['amount'] = raw_val
+                elif entry['type'] == '买入':
+                    entry['amount'] = -raw_val
+                else:
+                    entry['amount'] = raw_val
+            with c4:
+                if st.button("✕", key=f"rb_del_{idx}"):
+                    to_remove.append(idx)
+
+        for idx in reversed(to_remove):
+            st.session_state['rebalance_entries'].pop(idx)
+        if to_remove:
+            st.rerun()
+
+        for idx, entry in enumerate(entries):
+            if entry['type'] == '外部':
+                sign_key = f"rb_ext_sign_{idx}"
+                is_out = st.checkbox("取出（负值）", key=sign_key, value=entry['amount'] < 0)
+                if is_out:
+                    entry['amount'] = -abs(entry['amount'])
+                else:
+                    entry['amount'] = abs(entry['amount'])
+
+        if entries:
+            st.divider()
+
+            prev_cash_rows = edited_df[edited_df['Asset_Class'] == 'Cash']
+            prev_cash_tv = prev_cash_rows['Total_Value'].sum() if len(prev_cash_rows) > 0 else 0.0
+
+            internal_delta = sum(e['amount'] for e in entries if e['type'] in ('卖出', '买入'))
+            external_ncf = sum(e['amount'] for e in entries if e['type'] == '外部')
+            new_cash_tv = prev_cash_tv + internal_delta + external_ncf
+
+            res_col1, res_col2, res_col3 = st.columns(3)
+            with res_col1:
+                st.metric("当前 Cash", f"¥{prev_cash_tv:,.0f}")
+            with res_col2:
+                st.metric("本周 Cash Total_Value", f"¥{new_cash_tv:,.0f}",
+                          delta=f"{internal_delta + external_ncf:+,.0f}")
+            with res_col3:
+                st.metric("Cash Net_Cash_Flow (外部)", f"¥{external_ncf:+,.0f}",
+                          help="只有外部入金/取出计入 NCF，内部调仓不计")
+
+            if st.button("✅ 应用到持仓表（更新 Cash 行）", type="primary", key="rb_apply"):
+                # 先同步 edited_df（保留用户在表格里已填的内容）
+                template = edited_df.copy()
+                cash_mask = template['Asset_Class'] == 'Cash'
+                if cash_mask.any():
+                    cash_idx = template[cash_mask].index
+                    if len(cash_idx) == 1:
+                        i = cash_idx[0]
+                        template.at[i, 'Total_Value'] = round(new_cash_tv, 2)
+                        template.at[i, 'Shares'] = round(new_cash_tv, 2)
+                        template.at[i, 'Net_Cash_Flow'] = round(external_ncf, 2)
+                    else:
+                        st.warning("检测到多条 Cash 行，请手动更新 Cash 的 Total_Value 和 NCF")
+                else:
+                    st.warning("未找到 Cash 行，请手动更新")
+                st.session_state['update_template'] = template
+                st.session_state['rebalance_entries'] = []
+                st.success(f"已更新 Cash → Total_Value: ¥{new_cash_tv:,.0f}，NCF: ¥{external_ncf:+,.0f}")
+                st.rerun()
+
+        if entries and st.button("清空所有条目", key="rb_clear", type="secondary"):
+            st.session_state['rebalance_entries'] = []
+            st.rerun()
 
     # ─── Validation ───
-
-    def validate_snapshot(df, prev_df, new_date_str, last_date_str):
-        """Validate the new weekly snapshot. Returns (errors, warnings)."""
-        errors = []
-        warnings = []
-
-        # Date check
         if new_date_str <= last_date_str:
             errors.append(f"新日期 ({new_date_str}) 必须晚于上次快照 ({last_date_str})")
 
