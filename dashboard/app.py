@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
     compute_class_nav, compute_allocation, compute_cost_basis,
-    compute_xirr, compute_sharpe,
+    compute_xirr, compute_sharpe, compute_calmar,
     CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES,
     _atomic_write_csv, update_snapshot, delete_snapshot,
 )
@@ -62,12 +62,13 @@ def load_data(csv_path):
     )
     xirr = compute_xirr(df)
     sharpe = compute_sharpe(fund_nav)
-    return df, fund_nav, class_nav, allocation, cost_basis, xirr, sharpe
+    calmar = compute_calmar(fund_nav)
+    return df, fund_nav, class_nav, allocation, cost_basis, xirr, sharpe, calmar
 
 
 # Pick the best available data file
 csv_path = DEFAULT_CSV if os.path.exists(DEFAULT_CSV) else SAMPLE_CSV
-raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df, xirr_value, sharpe_value = load_data(csv_path)
+raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df, xirr_value, sharpe_value, calmar_value = load_data(csv_path)
 
 if raw_df is None:
     st.error("无法加载数据文件。请确保 data/portfolio.csv 或 data/portfolio_sample.csv 存在。")
@@ -187,19 +188,24 @@ with tab_dashboard:
         else:
             st.metric("XIRR(MWR)", "< 1年")
 
-    col6, col7, col8 = st.columns([1, 1, 1])
+    col6, col7, col8, col9 = st.columns(4)
     with col6:
         if sharpe_value is not None:
             st.metric("夏普比率", f"{sharpe_value:.2f}", help="年化夏普比率，无风险利率 2.5%。>1 优秀，>0 可接受，<0 不如无风险收益")
         else:
             st.metric("夏普比率", "< 1年")
     with col7:
+        if calmar_value is not None:
+            st.metric("卡尔马比率", f"{calmar_value:.2f}", help="年化收益率 / 最大回撤。>1 优秀，越高说明相对回撤获取的收益越高")
+        else:
+            st.metric("卡尔马比率", "< 1年")
+    with col8:
         mdd = latest_fund.get('Max_Drawdown(%)')
         if mdd is not None and not pd.isna(mdd):
             st.metric("最大回撤", f"{mdd:.2f}%")
         else:
             st.metric("最大回撤", "—")
-    with col8:
+    with col9:
         st.metric("持仓数", f"{len(latest_holdings)}")
 
     # Fund NAV chart

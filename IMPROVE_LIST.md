@@ -30,6 +30,7 @@
 | 基准对比（CSI300/S&P500/CPI/M2） | `src/benchmark.py` | Dashboard NAV 图叠加 |
 | XIRR（资金加权收益率） | `nav_engine.compute_xirr` | Dashboard KPI 展示 |
 | 夏普比率 | `nav_engine.compute_sharpe` | Dashboard KPI 展示，无风险利率默认 2.5% |
+| 卡尔马比率 | `nav_engine.compute_calmar` | Dashboard KPI 展示，年化收益 / 最大回撤 |
 | 市场温度计 + 定投矩阵 | `src/market_monitor.py` | Tab 5，PE×VIX/QVIX 矩阵 |
 | 每日企业微信推送 | `src/notifier.py` + `scripts/daily_push.py` | EC2 cron，北京时间 8:30 |
 
@@ -39,9 +40,8 @@
 
 #### **P1 — 低挂果，快速完成**
 
-1. **卡尔马比率（Calmar Ratio）** — 年化收益 / 最大回撤，两个值都已具备，几行代码
-2. **风险集中度警示** — 单持仓或单资产类别占总资产比例超阈值时高亮（如 Company_Stock > 30%）
-3. **货币敞口可视化** — 按 CNY/USD/EUR 汇总持仓市值，显示外汇风险分布
+1. **风险集中度警示** — 单持仓或单资产类别占总资产比例超阈值时高亮（如 Company_Stock > 30%）
+2. **货币敞口可视化** — 按 CNY/USD/EUR 汇总持仓市值，显示外汇风险分布
 
 #### **P2 — 中等复杂度**
 

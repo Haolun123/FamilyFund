@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
     compute_class_nav, compute_allocation, compute_cost_basis,
-    compute_xirr, compute_sharpe,
+    compute_xirr, compute_sharpe, compute_calmar,
     plot_fund_nav, plot_class_nav, plot_allocation_pie, export_results,
     _run_nav_calculation, _atomic_write_csv, update_snapshot, delete_snapshot,
     VALID_ASSET_CLASSES,
@@ -562,5 +562,87 @@ class TestComputeSharpe:
         nav_values = [round(1.0 * (1.10 ** (i / 52)), 6) for i in range(104)]
         nav_df = self._make_nav_df(nav_values, freq_days=7)
         result = compute_sharpe(nav_df)
+        assert isinstance(result, float)
+        assert result == round(result, 2)
+
+
+# ============================================================
+# Calmar Ratio Tests
+# ============================================================
+
+class TestComputeCalmar:
+
+    def _make_nav_df(self, nav_values, start='2023-01-01', freq_days=7):
+        import datetime
+        dates = []
+        d = datetime.date.fromisoformat(start)
+        for _ in nav_values:
+            dates.append(d.isoformat())
+            d += datetime.timedelta(days=freq_days)
+
+        records = []
+        start_dt = datetime.date.fromisoformat(start)
+        peak = nav_values[0]
+        max_dd = 0.0
+        for i, (date_str, nav) in enumerate(zip(dates, nav_values)):
+            if nav > peak:
+                peak = nav
+            dd = (nav - peak) / peak if peak > 0 else 0.0
+            if dd < max_dd:
+                max_dd = dd
+            days = (datetime.date.fromisoformat(date_str) - start_dt).days
+            ann_ret = ((nav) ** (365.0 / days) - 1) * 100 if days >= 365 else None
+            records.append({
+                'Date': date_str,
+                'NAV': nav,
+                'Annualized_Return(%)': ann_ret,
+                'Max_Drawdown(%)': round(max_dd * 100, 2),
+            })
+        return pd.DataFrame(records)
+
+    def test_positive_calmar_for_gains_with_drawdown(self):
+        """有回撤、有收益时卡尔马比率为正。"""
+        # 上涨后回调再上涨
+        nav_values = [1.0, 1.05, 1.10, 1.08, 1.06, 1.12, 1.18, 1.15,
+                      1.20, 1.25, 1.22, 1.28, 1.30, 1.27, 1.35, 1.40,
+                      1.38, 1.45, 1.50, 1.48, 1.55, 1.60, 1.58, 1.65,
+                      1.70, 1.68, 1.75, 1.80, 1.78, 1.85, 1.90, 1.88,
+                      1.95, 2.00, 1.98, 2.05, 2.10, 2.08, 2.15, 2.20,
+                      2.18, 2.25, 2.30, 2.28, 2.35, 2.40, 2.38, 2.45,
+                      2.50, 2.48, 2.55, 2.60, 2.58, 2.65, 2.70]
+        nav_df = self._make_nav_df(nav_values, freq_days=7)
+        result = compute_calmar(nav_df)
+        assert result is not None
+        assert result > 0
+
+    def test_returns_none_for_zero_drawdown(self):
+        """最大回撤为 0（单调上涨）时返回 None。"""
+        nav_values = [round(1.0 + i * 0.01, 4) for i in range(60)]
+        nav_df = self._make_nav_df(nav_values, freq_days=7)
+        # 单调上涨 max_drawdown = 0
+        nav_df['Max_Drawdown(%)'] = 0.0
+        result = compute_calmar(nav_df)
+        assert result is None
+
+    def test_returns_none_when_no_annual_return(self):
+        """不足一年数据时返回 None。"""
+        nav_values = [round(1.0 * (1.10 ** (i / 52)), 4) for i in range(10)]
+        nav_df = self._make_nav_df(nav_values, freq_days=7)
+        result = compute_calmar(nav_df)
+        assert result is None
+
+    def test_returns_none_for_none_input(self):
+        assert compute_calmar(None) is None
+
+    def test_returns_float(self):
+        nav_values = [1.0, 1.05, 1.10, 1.08, 1.06, 1.12, 1.18, 1.15,
+                      1.20, 1.25, 1.22, 1.28, 1.30, 1.27, 1.35, 1.40,
+                      1.38, 1.45, 1.50, 1.48, 1.55, 1.60, 1.58, 1.65,
+                      1.70, 1.68, 1.75, 1.80, 1.78, 1.85, 1.90, 1.88,
+                      1.95, 2.00, 1.98, 2.05, 2.10, 2.08, 2.15, 2.20,
+                      2.18, 2.25, 2.30, 2.28, 2.35, 2.40, 2.38, 2.45,
+                      2.50, 2.48, 2.55, 2.60, 2.58, 2.65, 2.70]
+        nav_df = self._make_nav_df(nav_values, freq_days=7)
+        result = compute_calmar(nav_df)
         assert isinstance(result, float)
         assert result == round(result, 2)

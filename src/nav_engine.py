@@ -402,6 +402,41 @@ def compute_sharpe(fund_nav_df, risk_free_rate: float = 0.025) -> float | None:
     return round(sharpe, 2)
 
 
+# ============================================================
+# Calmar Ratio
+# ============================================================
+
+def compute_calmar(fund_nav_df) -> float | None:
+    """计算基金的卡尔马比率（Calmar Ratio）。
+
+    卡尔马比率 = 年化收益率 / abs(最大回撤)
+    衡量每承受一单位最大回撤所获得的年化回报。
+
+    Args:
+        fund_nav_df: compute_fund_nav() 返回的 DataFrame，
+                     需含 Annualized_Return(%) 和 Max_Drawdown(%) 列
+
+    Returns:
+        float: 卡尔马比率（保留两位小数）
+        None: 数据不足一年、最大回撤为 0 时返回 None
+    """
+    if fund_nav_df is None or len(fund_nav_df) < 2:
+        return None
+
+    ann_col = fund_nav_df['Annualized_Return(%)'].iloc[-1]
+    mdd_col = fund_nav_df['Max_Drawdown(%)'].iloc[-1]
+
+    if ann_col is None or pd.isna(ann_col):
+        return None
+    if mdd_col is None or pd.isna(mdd_col) or mdd_col == 0:
+        return None
+
+    ann_return = float(ann_col) / 100.0
+    max_drawdown = abs(float(mdd_col) / 100.0)
+
+    return round(ann_return / max_drawdown, 2)
+
+
 def _atomic_write_csv(df, csv_path):
     """Write DataFrame to CSV with file lock + atomic replace.
 
