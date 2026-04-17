@@ -1046,12 +1046,15 @@ with tab_sap:
             own_sum = own_sap_summary(own_df, fx_rate=sap_fx_rate)
             own_value = own_sum['total_shares'] * sap_price_eur * sap_fx_rate
             own_pl = own_value - own_sum['total_cost']
+            own_pl_pct = own_pl / own_sum['total_cost'] * 100 if own_sum['total_cost'] > 0 else None
             with kpi_cols[0]:
                 st.markdown("**Own SAP (ESPP)**")
                 st.metric("持股", f"{own_sum['total_shares']:.2f} 股")
                 st.metric("成本", f"¥{own_sum['total_cost']:,.2f}")
                 st.metric("市值", f"¥{own_value:,.2f}")
                 st.metric("盈亏", f"¥{own_pl:+,.2f}")
+                if own_pl_pct is not None:
+                    st.metric("盈亏%", f"{own_pl_pct:+.2f}%")
                 if own_sum['break_even_eur']:
                     st.caption(f"盈亏平衡价: {own_sum['break_even_eur']:.2f} EUR")
 
@@ -1059,12 +1062,15 @@ with tab_sap:
             move_sum = move_sap_summary(move_df, fx_rate=sap_fx_rate)
             move_value = move_sum['total_shares'] * sap_price_eur * sap_fx_rate
             move_pl = move_value - move_sum['total_cost']
+            move_pl_pct = move_pl / move_sum['total_cost'] * 100 if move_sum['total_cost'] > 0 else None
             with kpi_cols[1]:
                 st.markdown("**Move SAP (RSU)**")
                 st.metric("持股", f"{move_sum['total_shares']:.2f} 股")
                 st.metric("成本", f"¥{move_sum['total_cost']:,.2f}")
                 st.metric("市值", f"¥{move_value:,.2f}")
                 st.metric("盈亏", f"¥{move_pl:+,.2f}")
+                if move_pl_pct is not None:
+                    st.metric("盈亏%", f"{move_pl_pct:+.2f}%")
                 if move_sum['break_even_eur']:
                     st.caption(f"盈亏平衡价: {move_sum['break_even_eur']:.2f} EUR")
 
@@ -1075,11 +1081,14 @@ with tab_sap:
                             (move_sum['total_cost'] if move_df is not None else 0)
             combined_value = combined_shares * sap_price_eur * sap_fx_rate
             combined_pl = combined_value - combined_cost
+            combined_pl_pct = combined_pl / combined_cost * 100 if combined_cost > 0 else None
             st.markdown("**Combined**")
             st.metric("总持股", f"{combined_shares:.2f} 股")
             st.metric("总成本", f"¥{combined_cost:,.2f}")
             st.metric("总市值", f"¥{combined_value:,.2f}")
             st.metric("总盈亏", f"¥{combined_pl:+,.2f}")
+            if combined_pl_pct is not None:
+                st.metric("总盈亏%", f"{combined_pl_pct:+.2f}%")
             st.caption(f"当前股价: {sap_price_eur:.2f} EUR")
 
         st.divider()
