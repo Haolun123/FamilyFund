@@ -376,7 +376,7 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 | 字段 | 类型 | 必填 | 说明 |
 |:---|:---|:---|:---|
 | `Date` | YYYY-MM-DD | 是 | 对账日期，严格递增 |
-| `Asset_Class` | string | 是 | 资产类别（7 选 1，见下表） |
+| `Asset_Class` | string | 是 | 资产类别（8 选 1，见下表） |
 | `Platform` | string | 是 | 交易平台/账户名 |
 | `Name` | string | 是 | 持仓名称 |
 | `Code` | string | 否 | 证券代码/基金代码 |
@@ -391,13 +391,14 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 
 | 代码 | 中文名 | 典型持仓 |
 |:---|:---|:---|
-| `US_Blend_Fund` | 美股宽基基金 | 标普500 QDII 等宽基指数基金 |\n| `US_Growth_Fund` | 美股成长基金 | 纳指100 QDII 等科技成长指数基金 |
-| `CN_Index_Fund` | A股指数基金 | 沪深 300、中证 500 等宽基指数 |
-| `ETF_Stock` | ETF与股票 | 红利 ETF、个股等 |
-| `Fixed_Income` | 固定收益 | 银行理财、短债基金等 |
-| `Gold` | 黄金 | 实物黄金、纸黄金、黄金 ETF |
-| `Company_Stock` | 公司股票 | 雇主公司股票等 |
-| `Cash` | 现金 | 固定现金储备（10万 CNY），不追踪银行全部余额 |
+| `US_Blend_Fund`  | 美股宽基基金 | 标普500 QDII 等宽基指数基金 |
+| `US_Growth_Fund` | 美股成长基金 | 纳指100 QDII 等科技成长指数基金 |
+| `CN_Index_Fund`  | A股指数基金  | 沪深300、中证A500 等宽基指数 |
+| `ETF_Stock`      | ETF与股票   | 红利 ETF、个股等 |
+| `Fixed_Income`   | 固定收益    | 银行理财、短债基金等 |
+| `Gold`           | 黄金        | 实物黄金、纸黄金、黄金 ETF |
+| `Company_Stock`  | 公司股票    | 雇主公司股票等 |
+| `Cash`           | 现金        | 固定现金储备（10万 CNY），不追踪银行全部余额 |
 
 ### 6.5.3 多级净值核算
 
@@ -666,7 +667,8 @@ flowchart TD
     S8 --> CLS
     S9 --> CLS
     
-    CLS --> US["US_Index_Fund<br/>美股指数基金"]
+    CLS --> USB["US_Blend_Fund<br/>美股宽基基金"]
+    CLS --> USG["US_Growth_Fund<br/>美股成长基金"]
     CLS --> CN["CN_Index_Fund<br/>A股指数基金"]
     CLS --> ETF["ETF_Stock<br/>ETF与股票"]
     CLS --> FI["Fixed_Income<br/>固定收益"]
@@ -713,10 +715,11 @@ XLSX 中每个分区遵循固定模式：
 
 | 分区 | 默认资产类别 |
 |:---|:---|
-| 场外基金A、场外基金B | `US_Index_Fund` |
-| 场外基金C | `CN_Index_Fund` |
-| 券商A | `ETF_Stock` |
-| 银行A、银行B | `Fixed_Income` |
+| 标普场外 | `US_Blend_Fund` |
+| 纳指场外 | `US_Growth_Fund` |
+| 场外基金（A股） | `CN_Index_Fund` |
+| 券商（ETF/股票） | `ETF_Stock` |
+| 银行理财 | `Fixed_Income` |
 | 公司股票 | `Company_Stock` |
 | 实物 | `Gold` |
 
@@ -927,9 +930,11 @@ graph TB
 
 | 视图 | 组件 | 交互性 |
 |:---|:---|:---|
-| **基金总览** | 6 个 KPI 指标卡（总资产/净值/累计收益率/年化收益率/最大回撤/持仓数）+ 净值走势折线图 | 悬浮提示、缩放、日期范围联动 |
+| **基金总览** | 8 个 KPI 指标卡（总资产/净值/累计收益率/年化收益率(TWR)/XIRR/夏普比率/卡尔马比率/最大回撤/持仓数，分两行展示）+ 净值走势折线图 | 悬浮提示、缩放、日期范围联动 |
 | **资产类别对比** | 多线净值对比图 + 环形配置图 + 业绩表 | 类别筛选联动、悬浮数据 |
 | **持仓明细** | 完整持仓表（st.dataframe） | 类别/平台下拉筛选、列排序 |
+| **风险集中度** | 类别/单持仓占比 warning + 横向柱状图（40% 警示线） | 自动计算，无需配置 |
+| **货币敞口** | CNY/USD/EUR/HKD 市值分布 metrics + 圆环饼图 | 按 Currency 字段自动汇总 |
 | **盈亏分析** | KPI 卡片 + 水平柱状图 + 明细表 | 持仓级盈亏（绿盈红亏） |
 | **周报更新** | 上周模板复用 + 调仓辅助器（Cash 余额/NCF 自动计算）+ 批量 CSV 导入 + 校验保存 | 调仓流水录入、一键回填 Cash 行 |
 | **历史记录** | 历史快照浏览与编辑 | 日期选择、行内编辑、删除 |
@@ -1095,8 +1100,8 @@ P1 市场温度计已全部实现：
 |:---|:---|
 | ~~**夏普比率**~~ | ✅ 已实现：`compute_sharpe()`，Dashboard KPI 展示，无风险利率默认 2.5% |
 | ~~**卡尔马比率**~~ | ✅ 已实现：`compute_calmar()`，Dashboard KPI 展示，年化收益 / 最大回撤 |
-| **风险集中度警示** | 单持仓/单类别占总资产比例超阈值时高亮（如 Company_Stock > 30%） |
-| **货币敞口可视化** | 按 CNY/USD/EUR 汇总持仓市值，显示外汇风险分布 |
+| ~~**风险集中度警示**~~ | ✅ 已实现：类别 > 40% / 单持仓 > 20% 自动 warning + 柱状图，Dashboard Tab1 |
+| ~~**货币敞口可视化**~~ | ✅ 已实现：CNY/USD/EUR/HKD metrics + 圆环饼图，Dashboard Tab1 |
 | **资金效率分析** | 每笔 NCF 对应的实际回报，回答"哪些时点买入决策好/差" |
 | **持仓回测** | 模拟固定倍数 vs PE×VIX 矩阵倍数定投策略，验证矩阵有效性 |
 | **收益归因分析** | 各资产类别对总收益的贡献度分解 |

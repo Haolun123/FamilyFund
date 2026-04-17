@@ -31,6 +31,10 @@
 | XIRR（资金加权收益率） | `nav_engine.compute_xirr` | Dashboard KPI 展示 |
 | 夏普比率 | `nav_engine.compute_sharpe` | Dashboard KPI 展示，无风险利率默认 2.5% |
 | 卡尔马比率 | `nav_engine.compute_calmar` | Dashboard KPI 展示，年化收益 / 最大回撤 |
+| 风险集中度警示 | `dashboard/app.py` Tab1 | 类别>40% / 单持仓>20% 自动警示 + 柱状图 |
+| 货币敞口可视化 | `dashboard/app.py` Tab1 | CNY/USD/EUR/HKD 分布 metrics + 圆环图 |
+| SAP 盈亏百分比 | `dashboard/app.py` Tab4 | Own/Move/Combined 各自显示盈亏% |
+| 标普/纳指分类拆分 | `nav_engine.py` + `portfolio.csv` | `US_Blend_Fund`（标普）+ `US_Growth_Fund`（纳指）独立 NAV 追踪 |
 | 市场温度计 + 定投矩阵 | `src/market_monitor.py` | Tab 5，PE×VIX/QVIX 矩阵 |
 | 每日企业微信推送 | `src/notifier.py` + `scripts/daily_push.py` | EC2 cron，北京时间 8:30 |
 
@@ -38,21 +42,16 @@
 
 ### 🔧 待实现功能（按优先级排序）
 
-#### **P1 — 低挂果，快速完成**
-
-1. **风险集中度警示** — 单持仓或单资产类别占总资产比例超阈值时高亮（如 Company_Stock > 30%）
-2. **货币敞口可视化** — 按 CNY/USD/EUR 汇总持仓市值，显示外汇风险分布
-
 #### **P2 — 中等复杂度**
 
-4. **资金效率分析** — 每笔 NCF（外部资金流入）对应的实际回报，回答"哪些时点买入决策好/差"
-5. **持仓回测** — 模拟定投策略（固定倍数 vs PE×VIX 矩阵倍数），验证矩阵有效性；基于 yfinance/akshare 历史行情
+1. **资金效率分析** — 每笔 NCF（外部资金流入）对应的实际回报，回答"哪些时点买入决策好/差"
+2. **持仓回测** — 模拟定投策略（固定倍数 vs PE×VIX 矩阵倍数），验证矩阵有效性；基于 yfinance/akshare 历史行情
 
 #### **P3 — 高复杂度 / 需前置工作**
 
-6. **季度财报（Tab 6）** — 资产负债表 + 净资产瀑布图；前置：迁移 25Q4+26Q1 历史 xlsx 数据
-7. **收益归因分析** — 各资产类别对总收益的贡献度分解
-8. **再平衡建议** — 基于目标配置比例，自动计算各类别买入/卖出金额
+3. **季度财报（Tab 6）** — 资产负债表 + 净资产瀑布图；前置：迁移 25Q4+26Q1 历史 xlsx 数据
+4. **收益归因分析** — 各资产类别对总收益的贡献度分解
+5. **再平衡建议** — 基于目标配置比例，自动计算各类别买入/卖出金额
 
 ---
 
