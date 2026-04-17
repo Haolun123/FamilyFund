@@ -167,7 +167,7 @@ with tab_dashboard:
     latest_date = latest_fund['Date']
     latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
 
-    col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("总资产", f"¥{latest_fund['Total_Value']:,.0f}")
     with col2:
@@ -186,6 +186,8 @@ with tab_dashboard:
             st.metric("XIRR(MWR)", f"{xirr_value*100:+.2f}%", help="资金加权年化收益率，反映实际资金投入时机的真实回报")
         else:
             st.metric("XIRR(MWR)", "< 1年")
+
+    col6, col7, col8 = st.columns([1, 1, 1])
     with col6:
         if sharpe_value is not None:
             st.metric("夏普比率", f"{sharpe_value:.2f}", help="年化夏普比率，无风险利率 2.5%。>1 优秀，>0 可接受，<0 不如无风险收益")
