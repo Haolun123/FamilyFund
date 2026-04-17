@@ -19,18 +19,19 @@ OUTPUT_CLASS_CHART = os.path.join(BASE_DIR, 'output', 'class_nav_trend.png')
 OUTPUT_PIE_CHART = os.path.join(BASE_DIR, 'output', 'asset_allocation.png')
 
 VALID_ASSET_CLASSES = {
-    'US_Index_Fund', 'CN_Index_Fund', 'ETF_Stock',
+    'US_Blend_Fund', 'US_Growth_Fund', 'CN_Index_Fund', 'ETF_Stock',
     'Fixed_Income', 'Gold', 'Company_Stock', 'Cash',
 }
 
 CLASS_DISPLAY_NAMES = {
-    'US_Index_Fund': '美股指数基金',
-    'CN_Index_Fund': 'A股指数基金',
-    'ETF_Stock': 'ETF与股票',
-    'Fixed_Income': '固定收益',
-    'Gold': '黄金',
-    'Company_Stock': '公司股票',
-    'Cash': '现金',
+    'US_Blend_Fund':  '美股宽基基金',
+    'US_Growth_Fund': '美股成长基金',
+    'CN_Index_Fund':  'A股指数基金',
+    'ETF_Stock':      'ETF与股票',
+    'Fixed_Income':   '固定收益',
+    'Gold':           '黄金',
+    'Company_Stock':  '公司股票',
+    'Cash':           '现金',
 }
 
 REQUIRED_COLUMNS = [

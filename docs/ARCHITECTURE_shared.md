@@ -391,7 +391,7 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 
 | 代码 | 中文名 | 典型持仓 |
 |:---|:---|:---|
-| `US_Index_Fund` | 美股指数基金 | 标普 500 QDII、纳指 QDII 等 |
+| `US_Blend_Fund` | 美股宽基基金 | 标普500 QDII 等宽基指数基金 |\n| `US_Growth_Fund` | 美股成长基金 | 纳指100 QDII 等科技成长指数基金 |
 | `CN_Index_Fund` | A股指数基金 | 沪深 300、中证 500 等宽基指数 |
 | `ETF_Stock` | ETF与股票 | 红利 ETF、个股等 |
 | `Fixed_Income` | 固定收益 | 银行理财、短债基金等 |

@@ -17,8 +17,8 @@ OUTPUT_PIE_CHART = os.path.join(BASE_DIR, 'output', 'asset_allocation.png')
 # --- 分区 → 资产类别映射 ---
 # 每个 section header 对应一个默认资产类别
 SECTION_CLASS_MAP = {
-    '标普场外': 'US_Index_Fund',
-    '纳指场外': 'US_Index_Fund',
+    '标普场外': 'US_Blend_Fund',
+    '纳指场外': 'US_Growth_Fund',
     'A500场外': 'CN_Index_Fund',
     '中信证券': 'ETF_Stock',
     '招商银行': 'Fixed_Income',
@@ -44,13 +44,14 @@ STANDALONE_CLASS = {
 
 # 资产类别显示名称
 CLASS_DISPLAY_NAMES = {
-    'US_Index_Fund': '美股指数基金',
-    'CN_Index_Fund': 'A股指数基金',
-    'ETF_Stock': 'ETF与股票',
-    'Fixed_Income': '固定收益',
-    'Gold': '黄金',
-    'Company_Stock': '公司股票',
-    'Cash': '现金',
+    'US_Blend_Fund':  '美股宽基基金',
+    'US_Growth_Fund': '美股成长基金',
+    'CN_Index_Fund':  'A股指数基金',
+    'ETF_Stock':      'ETF与股票',
+    'Fixed_Income':   '固定收益',
+    'Gold':           '黄金',
+    'Company_Stock':  '公司股票',
+    'Cash':           '现金',
 }
 
 # 列名标准化映射（XLSX 中出现的 header 变体 → 标准字段名）

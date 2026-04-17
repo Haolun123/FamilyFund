@@ -67,7 +67,7 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 
 | Code | Description |
 |------|-------------|
-| `US_Index_Fund` | US index funds (S&P 500, Nasdaq QDII) |
+| `US_Blend_Fund/US_Growth_Fund` | US index funds (S&P 500, Nasdaq QDII) |
 | `CN_Index_Fund` | China A-share index funds |
 | `ETF_Stock` | ETFs and individual stocks |
 | `Fixed_Income` | Bonds, money market funds |

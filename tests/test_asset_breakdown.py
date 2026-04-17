@@ -75,10 +75,17 @@ class TestClassification:
         for cls in classified:
             assert cls in CLASS_DISPLAY_NAMES
 
-    def test_us_index_fund(self, classified):
-        names = {h['name'] for h in classified['US_Index_Fund']}
-        # Should contain funds from 标普场外 and 纳指场外 sections
-        assert len(classified['US_Index_Fund']) > 0
+    def test_us_blend_fund(self, classified):
+        # 标普场外 → US_Blend_Fund
+        assert len(classified['US_Blend_Fund']) > 0
+        platforms = {h['platform'] for h in classified['US_Blend_Fund']}
+        assert '标普场外' in platforms
+
+    def test_us_growth_fund(self, classified):
+        # 纳指场外 → US_Growth_Fund
+        assert len(classified['US_Growth_Fund']) > 0
+        platforms = {h['platform'] for h in classified['US_Growth_Fund']}
+        assert '纳指场外' in platforms
 
     def test_cash_holdings(self, classified):
         names = {h['name'] for h in classified['Cash']}

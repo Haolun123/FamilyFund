@@ -337,8 +337,8 @@ class TestEndToEnd:
         assert len(fund_nav) == 3  # 3 weeks
         assert all(fund_nav['NAV'] > 0)
 
-        # All 7 asset classes present
-        assert len(class_nav) == 7
+        # All asset classes present (8 since US_Index_Fund split into US_Blend_Fund + US_Growth_Fund)
+        assert len(class_nav) == 8
         for cls in class_nav:
             assert cls in VALID_ASSET_CLASSES
 
