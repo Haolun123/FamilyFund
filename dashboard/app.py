@@ -692,7 +692,7 @@ with tab_update:
                 st.rerun()
 
     # ─── Editable table ───
-    st.markdown("**编辑持仓** (可增删行，修改价格/份额/市值。外部资金进出仅填在 Cash 行的 Net_Cash_Flow)")
+    st.markdown("**编辑持仓** (可增删行，修改价格/份额/市值。买卖 NCF 通过调仓辅助器自动填写，外部入金/出金记在 Cash 行的 Net_Cash_Flow)")
 
     edited_df = st.data_editor(
         st.session_state['update_template'],
@@ -729,103 +729,201 @@ with tab_update:
         key="weekly_editor",
     )
 
-    # ─── Cash 调仓辅助器（在编辑持仓表之后，确保 edited_df 已赋值）───
-    with st.expander("💱 调仓辅助器（计算 Cash 余额）", expanded=False):
+    # ─── 调仓辅助器（在编辑持仓表之后，确保 edited_df 已赋值）───
+    with st.expander("⚖️ 调仓辅助器（设置每行 NCF）", expanded=False):
         st.caption(
-            "填入本期买卖操作，系统自动计算 Cash 的最终市值和 NCF。"
-            "内部调仓（买入/卖出基金）NCF 始终为 0，只有外部资金进出才计入 NCF。"
+            "登记本期所有买卖及外部资金操作。点击「应用」后：\n"
+            "① 更新 Cash 行 Total_Value；"
+            "② 在相关资产行写入 Net_Cash_Flow（买入为正，卖出为负）；"
+            "③ 新增标的自动追加到持仓表底部（请之后手动填写份额/价格/市值）。"
         )
 
         if 'rebalance_entries' not in st.session_state:
             st.session_state['rebalance_entries'] = []
 
-        col_add1, col_add2, col_add3 = st.columns(3)
+        col_add1, col_add2, col_add3, col_add4 = st.columns(4)
         with col_add1:
-            if st.button("＋ 卖出（Cash 增加）", key="rb_add_sell"):
-                st.session_state['rebalance_entries'].append({'type': '卖出', 'note': '', 'amount': 0.0})
+            if st.button("＋ 买入", key="rb_add_buy"):
+                st.session_state['rebalance_entries'].append(
+                    {'type': '买入', 'asset_name': '', 'amount': 0.0, 'is_new': False, 'new_asset': {}})
                 st.rerun()
         with col_add2:
-            if st.button("＋ 买入（Cash 减少）", key="rb_add_buy"):
-                st.session_state['rebalance_entries'].append({'type': '买入', 'note': '', 'amount': 0.0})
+            if st.button("＋ 卖出", key="rb_add_sell"):
+                st.session_state['rebalance_entries'].append(
+                    {'type': '卖出', 'asset_name': '', 'amount': 0.0, 'is_new': False, 'new_asset': {}})
                 st.rerun()
         with col_add3:
-            if st.button("＋ 外部入金/取出", key="rb_add_external"):
-                st.session_state['rebalance_entries'].append({'type': '外部', 'note': '', 'amount': 0.0})
+            if st.button("＋ 外部入金", key="rb_add_ext_in"):
+                st.session_state['rebalance_entries'].append(
+                    {'type': '外部入金', 'asset_name': '', 'amount': 0.0, 'is_new': False, 'new_asset': {}})
                 st.rerun()
+        with col_add4:
+            if st.button("＋ 外部取出", key="rb_add_ext_out"):
+                st.session_state['rebalance_entries'].append(
+                    {'type': '外部取出', 'asset_name': '', 'amount': 0.0, 'is_new': False, 'new_asset': {}})
+                st.rerun()
+
+        # Build asset name list from current holdings (excluding Cash)
+        existing_names = edited_df[edited_df['Asset_Class'] != 'Cash']['Name'].dropna().tolist()
+        asset_options = existing_names + ['新增标的']
 
         entries = st.session_state['rebalance_entries']
         to_remove = []
+        type_labels = {'买入': '🟢 买入', '卖出': '🔴 卖出', '外部入金': '🔵 外部入金', '外部取出': '🟠 外部取出'}
+
         for idx, entry in enumerate(entries):
-            c1, c2, c3, c4 = st.columns([1.2, 3, 2, 0.7])
+            c1, c2, c3, c4 = st.columns([1.0, 2.5, 1.8, 0.5])
             with c1:
-                type_label = {'卖出': '🔴 卖出', '买入': '🟢 买入', '外部': '🔵 外部'}.get(entry['type'], entry['type'])
-                st.markdown(f"**{type_label}**")
+                st.markdown(f"**{type_labels.get(entry['type'], entry['type'])}**")
             with c2:
-                entry['note'] = st.text_input("备注", value=entry['note'], key=f"rb_note_{idx}", label_visibility="collapsed", placeholder="资产名称/说明")
-            with c3:
-                raw_val = st.number_input("金额(CNY)", value=abs(entry['amount']), min_value=0.0, step=100.0, format="%.2f", key=f"rb_amt_{idx}", label_visibility="collapsed")
-                if entry['type'] == '卖出':
-                    entry['amount'] = raw_val
-                elif entry['type'] == '买入':
-                    entry['amount'] = -raw_val
+                if entry['type'] in ('买入', '卖出'):
+                    selected = st.selectbox(
+                        "资产", options=[''] + asset_options,
+                        index=([''] + asset_options).index(entry['asset_name']) if entry['asset_name'] in ([''] + asset_options) else 0,
+                        key=f"rb_asset_{idx}", label_visibility="collapsed",
+                        placeholder="选择资产...",
+                    )
+                    entry['asset_name'] = selected
+                    entry['is_new'] = (selected == '新增标的')
                 else:
-                    entry['amount'] = raw_val
+                    st.markdown("*外部资金*")
+                    entry['asset_name'] = ''
+                    entry['is_new'] = False
+            with c3:
+                entry['amount'] = st.number_input(
+                    "金额(CNY)", value=float(entry['amount']), min_value=0.0, step=100.0,
+                    format="%.2f", key=f"rb_amt_{idx}", label_visibility="collapsed",
+                )
             with c4:
                 if st.button("✕", key=f"rb_del_{idx}"):
                     to_remove.append(idx)
+
+            # 新增标的子表单
+            if entry.get('is_new'):
+                st.info("新标的信息 — 应用后将追加一行到持仓表，请之后手动填写份额/价格/市值")
+                na = entry.get('new_asset', {})
+                nc1, nc2, nc3, nc4, nc5 = st.columns([1.5, 1.5, 2.0, 1.5, 1.2])
+                with nc1:
+                    na['Asset_Class'] = st.selectbox("类别", options=sorted(VALID_ASSET_CLASSES),
+                        index=sorted(VALID_ASSET_CLASSES).index(na['Asset_Class']) if na.get('Asset_Class') in VALID_ASSET_CLASSES else 0,
+                        key=f"rb_new_ac_{idx}")
+                with nc2:
+                    na['Platform'] = st.text_input("平台", value=na.get('Platform', ''), key=f"rb_new_plat_{idx}")
+                with nc3:
+                    na['Name'] = st.text_input("名称", value=na.get('Name', ''), key=f"rb_new_name_{idx}")
+                with nc4:
+                    na['Code'] = st.text_input("代码", value=na.get('Code', ''), key=f"rb_new_code_{idx}")
+                with nc5:
+                    na['Currency'] = st.selectbox("货币", options=["CNY", "HKD", "USD", "EUR"],
+                        index=["CNY", "HKD", "USD", "EUR"].index(na['Currency']) if na.get('Currency') in ["CNY", "HKD", "USD", "EUR"] else 0,
+                        key=f"rb_new_ccy_{idx}")
+                entry['new_asset'] = na
 
         for idx in reversed(to_remove):
             st.session_state['rebalance_entries'].pop(idx)
         if to_remove:
             st.rerun()
 
-        for idx, entry in enumerate(entries):
-            if entry['type'] == '外部':
-                sign_key = f"rb_ext_sign_{idx}"
-                is_out = st.checkbox("取出（负值）", key=sign_key, value=entry['amount'] < 0)
-                if is_out:
-                    entry['amount'] = -abs(entry['amount'])
-                else:
-                    entry['amount'] = abs(entry['amount'])
-
         if entries:
             st.divider()
 
+            total_buy  = sum(e['amount'] for e in entries if e['type'] == '买入')
+            total_sell = sum(e['amount'] for e in entries if e['type'] == '卖出')
+            ext_in     = sum(e['amount'] for e in entries if e['type'] == '外部入金')
+            ext_out    = sum(e['amount'] for e in entries if e['type'] == '外部取出')
+            cash_delta   = total_sell - total_buy + ext_in - ext_out
+            external_ncf = ext_in - ext_out
+
             prev_cash_rows = edited_df[edited_df['Asset_Class'] == 'Cash']
-            prev_cash_tv = prev_cash_rows['Total_Value'].sum() if len(prev_cash_rows) > 0 else 0.0
+            prev_cash_tv   = prev_cash_rows['Total_Value'].sum() if len(prev_cash_rows) > 0 else 0.0
+            new_cash_tv    = prev_cash_tv + cash_delta
 
-            internal_delta = sum(e['amount'] for e in entries if e['type'] in ('卖出', '买入'))
-            external_ncf = sum(e['amount'] for e in entries if e['type'] == '外部')
-            new_cash_tv = prev_cash_tv + internal_delta + external_ncf
-
-            res_col1, res_col2, res_col3 = st.columns(3)
+            res_col1, res_col2, res_col3, res_col4, res_col5 = st.columns(5)
             with res_col1:
                 st.metric("当前 Cash", f"¥{prev_cash_tv:,.0f}")
             with res_col2:
-                st.metric("本周 Cash Total_Value", f"¥{new_cash_tv:,.0f}",
-                          delta=f"{internal_delta + external_ncf:+,.0f}")
+                st.metric("操作后 Cash", f"¥{new_cash_tv:,.0f}", delta=f"{cash_delta:+,.0f}")
             with res_col3:
-                st.metric("Cash Net_Cash_Flow (外部)", f"¥{external_ncf:+,.0f}",
-                          help="只有外部入金/取出计入 NCF，内部调仓不计")
+                st.metric("Cash NCF（外部）", f"¥{external_ncf:+,.0f}", help="只有外部入金/取出计入 NCF")
+            with res_col4:
+                st.metric("买入合计", f"¥{total_buy:,.0f}")
+            with res_col5:
+                st.metric("卖出合计", f"¥{total_sell:,.0f}")
 
-            if st.button("✅ 应用到持仓表（更新 Cash 行）", type="primary", key="rb_apply"):
-                # 先同步 edited_df（保留用户在表格里已填的内容）
+            if st.button("✅ 应用到持仓表", type="primary", key="rb_apply"):
                 template = edited_df.copy()
+
+                # 预检警告（不阻断）
+                if new_cash_tv < 0:
+                    st.warning(f"应用后 Cash 将为负 (¥{new_cash_tv:,.0f})，请检查买入金额")
+                if total_buy > prev_cash_tv and prev_cash_tv > 0:
+                    st.warning(f"买入合计 ¥{total_buy:,.0f} 超过当前 Cash ¥{prev_cash_tv:,.0f}")
+                for e in entries:
+                    if e['type'] == '卖出' and e['asset_name'] and not e['is_new']:
+                        mask = template['Name'] == e['asset_name']
+                        if mask.any():
+                            asset_tv = template.loc[mask, 'Total_Value'].iloc[0]
+                            if e['amount'] > asset_tv:
+                                st.warning(f"卖出「{e['asset_name']}」¥{e['amount']:,.0f} 超过当前市值 ¥{asset_tv:,.0f}")
+
+                # 更新 Cash 行
                 cash_mask = template['Asset_Class'] == 'Cash'
                 if cash_mask.any():
-                    cash_idx = template[cash_mask].index
-                    if len(cash_idx) == 1:
-                        i = cash_idx[0]
-                        template.at[i, 'Total_Value'] = round(new_cash_tv, 2)
-                        template.at[i, 'Shares'] = round(new_cash_tv, 2)
-                        template.at[i, 'Net_Cash_Flow'] = round(external_ncf, 2)
+                    if cash_mask.sum() == 1:
+                        ci = template[cash_mask].index[0]
+                        template.at[ci, 'Total_Value']   = round(new_cash_tv, 2)
+                        template.at[ci, 'Shares']        = round(new_cash_tv, 2)
+                        template.at[ci, 'Net_Cash_Flow'] = round(external_ncf, 2)
                     else:
                         st.warning("检测到多条 Cash 行，请手动更新 Cash 的 Total_Value 和 NCF")
                 else:
                     st.warning("未找到 Cash 行，请手动更新")
+
+                # 写入各资产 NCF（已有持仓）
+                for e in entries:
+                    if e['type'] not in ('买入', '卖出') or not e['asset_name'] or e['is_new']:
+                        continue
+                    mask = template['Name'] == e['asset_name']
+                    if not mask.any():
+                        st.warning(f"找不到资产「{e['asset_name']}」，跳过 NCF 写入")
+                        continue
+                    if mask.sum() > 1:
+                        st.warning(f"「{e['asset_name']}」有 {mask.sum()} 条匹配行，NCF 写入到第一条，请手动核查其余行")
+                    ncf_sign = +1 if e['type'] == '买入' else -1
+                    idx_row = template[mask].index[0]
+                    template.at[idx_row, 'Net_Cash_Flow'] = round(
+                        (template.at[idx_row, 'Net_Cash_Flow'] or 0) + ncf_sign * e['amount'], 2
+                    )
+
+                # 追加新标的行
+                new_rows = []
+                for e in entries:
+                    if e['type'] not in ('买入', '卖出') or not e.get('is_new'):
+                        continue
+                    na = e.get('new_asset', {})
+                    if not na.get('Name'):
+                        st.warning("新增标的缺少 Name 字段，跳过追加")
+                        continue
+                    if na['Name'] in template['Name'].values:
+                        st.warning(f"「{na['Name']}」已存在于持仓表，建议改用「买入」选择现有资产")
+                    ncf_sign = +1 if e['type'] == '买入' else -1
+                    new_rows.append({
+                        'Asset_Class':   na.get('Asset_Class', ''),
+                        'Platform':      na.get('Platform', ''),
+                        'Name':          na.get('Name', ''),
+                        'Code':          na.get('Code', ''),
+                        'Currency':      na.get('Currency', 'CNY'),
+                        'Exchange_Rate': 1.0,
+                        'Shares':        0.0,
+                        'Current_Price': 0.0,
+                        'Total_Value':   0.0,
+                        'Net_Cash_Flow': round(ncf_sign * e['amount'], 2),
+                    })
+                if new_rows:
+                    template = pd.concat([template, pd.DataFrame(new_rows)], ignore_index=True)
+
                 st.session_state['update_template'] = template
                 st.session_state['rebalance_entries'] = []
-                st.success(f"已更新 Cash → Total_Value: ¥{new_cash_tv:,.0f}，NCF: ¥{external_ncf:+,.0f}")
                 st.rerun()
 
         if entries and st.button("清空所有条目", key="rb_clear", type="secondary"):
@@ -876,21 +974,19 @@ with tab_update:
         if len(df) != prev_count:
             warnings.append(f"持仓数变化: 上周 {prev_count} 条 -> 本周 {len(df)} 条，请确认是否有新增/删除")
 
-        # Non-Cash/Company_Stock rows should have NCF = 0
-        non_cash_ncf = df[
-            ~df['Asset_Class'].isin(['Cash', 'Company_Stock']) &
-            (df['Net_Cash_Flow'].fillna(0) != 0)
-        ]
-        if len(non_cash_ncf) > 0:
-            names = non_cash_ncf['Name'].tolist()
-            warnings.append(f"非现金持仓有 Net_Cash_Flow ≠ 0: {', '.join(str(n) for n in names)}。"
-                            f"外部资金进出应记录在 Cash 行（SAP 归属记录在 Company_Stock 行），内部调仓 NCF 应为 0")
+        # NCF 异常检查：只在 NCF 远超市值时警告（新语义下每行都可以有 NCF）
+        for i, row in df.iterrows():
+            ncf = abs(float(row.get('Net_Cash_Flow', 0) or 0))
+            tv  = float(row.get('Total_Value', 0) or 0)
+            if ncf > 0 and tv > 0 and ncf > tv * 2:
+                warnings.append(
+                    f"{row.get('Name','?')}: Net_Cash_Flow ¥{ncf:+,.0f} 远超市值 ¥{tv:,.0f}，请核实"
+                )
 
-        # Cash rows with NCF (informational)
-        cash_ncf = df[(df['Asset_Class'] == 'Cash') & (df['Net_Cash_Flow'].fillna(0) != 0)]
-        if len(cash_ncf) > 0:
-            total_ncf = cash_ncf['Net_Cash_Flow'].sum()
-            warnings.append(f"本期现金流: ¥{total_ncf:+,.2f}")
+        # 本期现金流汇总（所有行）
+        total_ncf = df['Net_Cash_Flow'].fillna(0).sum()
+        if total_ncf != 0:
+            warnings.append(f"本期净现金流（外部入金 - 取出）: ¥{total_ncf:+,.2f}")
 
         # Large price swings
         prev_latest = prev_df[prev_df['Date'] == last_date_str]
