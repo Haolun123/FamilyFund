@@ -15,7 +15,7 @@
   - [2. 系统架构总览](#2-系统架构总览)
   - [3. 数据契约](#3-数据契约)
   - [4. 核心算法详解](#4-核心算法详解)
-  - [5. CIO 工作流](#5-cio-工作流)
+  - [5. 系统工作流概述](#5-系统工作流概述)
   - [6. 目录结构](#6-目录结构)
   - [6.5 统一资产管理系统（已实现）](#65-统一资产管理系统已实现)
 - [第二部分：未来演进蓝图](#第二部分未来演进蓝图)
@@ -27,6 +27,8 @@
 - [第三部分：附录](#第三部分附录)
   - [12. 术语表](#12-术语表)
   - [13. 参考资料](#13-参考资料)
+
+> **操作手册（每周流程、SAP 操作、CSV 字段参考）** → [`USER_MANUAL.md`](USER_MANUAL.md)
 
 ---
 
@@ -139,13 +141,7 @@ flowchart LR
 
 ## 3. 数据契约
 
-> **当前系统使用 `portfolio.csv` 作为唯一输入。** 完整 Schema 定义见 [6.5.2 统一输入：portfolio.csv](#652-统一输入portfoliocsv)。
->
-> 以下为历史参考：旧版 `input_fund_data.csv` 已归档，不再使用。
-
-### 3.1 历史输入文件：`input_fund_data.csv`（已归档）
-
-旧版单行汇总格式，已被 `portfolio.csv` 多持仓格式替代。
+`portfolio.csv` 是系统唯一输入。完整 Schema 及字段说明见 [6.5.2](#652-统一输入portfoliocsv) 和 [`USER_MANUAL.md § 5`](USER_MANUAL.md#5-portfoliocsv-字段参考)。
 
 ---
 
@@ -189,7 +185,7 @@ Total_Shares(0) = Total_Market_Value(0) / NAV(0)
 
 ```mermaid
 flowchart TD
-    START(["开始"]) --> READ["读取 input_fund_data.csv"]
+    START(["开始"]) --> READ["读取 portfolio.csv"]
     READ --> INIT{"是否为建仓日?<br/>(index == 0)"}
     
     INIT -->|"是"| DAY0["NAV = 1.0000<br/>份额 = 总市值 / 1.0<br/>累计收益率 = 0%"]
@@ -226,43 +222,11 @@ flowchart TD
 
 ---
 
-## 5. CIO 工作流
+## 5. 系统工作流概述
 
-### 5.1 每周对账流程
+CIO 每周通过 Dashboard 的 Weekly Update tab 录入持仓快照，调仓辅助器自动将买卖金额写入各资产行的 NCF，系统在 Dashboard 加载时自动完成所有计算。
 
-```mermaid
-sequenceDiagram
-    actor CIO as 家庭 CIO
-    participant BANK as 银行/券商 APP
-    participant UI as Streamlit Dashboard
-    participant CSV as portfolio.csv
-
-    Note over CIO: 每周五收盘 / 周末对账
-
-    CIO->>BANK: 1. 打开各平台，盘点各持仓价格和市值
-    BANK-->>CIO: 返回各账户持仓详情
-
-    alt 方式 A：通过 UI
-        CIO->>UI: 2a. Weekly Update tab → 更新价格/市值/NCF
-        UI->>CSV: 自动追加新快照
-    else 方式 B：直接编辑 CSV
-        CIO->>CSV: 2b. 复制上周行，更新日期、价格、市值
-    end
-
-    CIO->>UI: 3. 刷新浏览器，查看 Dashboard tab
-    UI->>UI: nav_engine.py 自动计算 NAV、收益率、配置
-    UI-->>CIO: 4. 审计：整体收益 + 分类收益 + 配置变化
-```
-
-### 5.2 操作清单
-
-| 步骤 | 操作 | 耗时估算 | 频率 |
-|:---:|:---|:---|:---|
-| 1 | 打开银行/券商 APP，汇总各账户市值 | 5-10 分钟 | 每周 |
-| 2 | 通过 UI 或直接编辑 CSV 更新快照 | 2-3 分钟 | 每周 |
-| 3 | 刷新 Dashboard 审计净值与收益率 | 2 分钟 | 每周 |
-
-> **总计：每周仅需约 10-15 分钟。无需运行任何终端命令，所有计算在 Dashboard 加载时自动完成。**
+**详细操作步骤见** → [`USER_MANUAL.md`](USER_MANUAL.md)
 
 ---
 
@@ -272,28 +236,32 @@ sequenceDiagram
 
 ```
 FamilyFund/
-├── ARCHITECTURE_shared.md             # ★ 架构设计文档（本文档，iCloud 同步）
-├── BENCHMARKING_ANALYSIS.md           # 基准对比分析（CPI/M2/CSI300/S&P500）
-├── DESIGN_SAP_STOCK.md                # SAP 股票模块设计文档
-├── DESIGN_PDF_REPORT.md               # PDF 报告设计文档
-├── DESIGN_market_monitor.md           # 市场温度计设计文档（Tab 5，已实现）
-├── DESIGN_daily_push.md               # 每日企业微信推送设计文档（EC2 cron，已实现）
-├── QUARTERLY_REPORT_DESIGN.md         # 季度家庭财报设计文档（Tab 6，设计阶段）
 ├── README.md                          # 项目简介
-├── CurrentAsset.xlsx                  # [历史] CIO 原始 Excel 资产表
 ├── requirements.txt                   # Python 依赖声明
 ├── Dockerfile                         # Docker 镜像构建
-├── docker-compose.yml                 # Docker Compose 编排
+├── docker-compose.yml                 # Docker Compose 编排（含 volume 热重载）
 ├── .env                               # 环境变量（FAMILYFUND_DATA 路径，不入 Git）
+│
+├── docs/                              # 文档目录
+│   ├── ARCHITECTURE_shared.md         # ★ 架构设计文档（本文档）
+│   ├── USER_MANUAL.md                 # ★ 用户操作手册（每周流程/SAP/CSV 参考）
+│   ├── BENCHMARKING_ANALYSIS.md       # 基准对比分析（CPI/M2/CSI300/S&P500）
+│   ├── DESIGN_SAP_STOCK.md            # SAP 股票模块设计文档
+│   ├── DESIGN_PDF_REPORT.md           # PDF 报告设计文档
+│   ├── DESIGN_market_monitor.md       # 市场温度计设计文档（Tab 5，已实现）
+│   ├── DESIGN_daily_push.md           # 每日企业微信推送设计文档（EC2 cron，已实现）
+│   ├── DESIGN_backtest.md             # 定投回测设计文档（P2，设计阶段）
+│   ├── QUARTERLY_REPORT_DESIGN.md     # 季度家庭财报设计文档（Tab 6，设计阶段）
+│   └── IMPROVE_LIST.md                # 功能评价与改进待办列表
 │
 ├── .streamlit/                        # Streamlit 配置
 │   └── config.toml
 │
-├── data/                              # 数据层（iCloud 同步）
-│   ├── portfolio.csv                  # [手动/UI 维护] ★ 统一资产账本（唯一输入）
-│   ├── portfolio_sample.csv           # 示例数据
-│   ├── own_sap.csv                    # [手动/UI 维护] Own SAP (ESPP) 交易记录
-│   ├── move_sap.csv                   # [手动/UI 维护] Move SAP (RSU) 交易记录
+├── data/                              # 数据层（iCloud 同步，不入 Git）
+│   ├── portfolio.csv                  # ★ 统一资产账本（唯一输入）
+│   ├── portfolio_sample.csv           # 示例数据（入 Git）
+│   ├── own_sap.csv                    # Own SAP (ESPP) 交易记录
+│   ├── move_sap.csv                   # Move SAP (RSU) 交易记录
 │   └── sap_price_cache.json           # [程序生成] SAP 股价/汇率缓存
 │
 ├── src/                               # 核心逻辑层
@@ -301,26 +269,27 @@ FamilyFund/
 │   ├── sap_stock.py                   # SAP 股票成本核算引擎
 │   ├── fx_service.py                  # 实时汇率/股价获取（含 SAP 价格 iCloud 缓存）
 │   ├── pdf_report.py                  # PDF 报告生成（matplotlib PdfPages）
-│   ├── market_monitor.py              # 市场温度计：乖离率/VIX/QVIX/PE×VIX矩阵/A股PE×QVIX矩阵
-│   ├── notifier.py                    # 企业微信每日推送（格式化消息 + Webhook 发送）
+│   ├── market_monitor.py              # 市场温度计：乖离率/VIX/QVIX/PE×VIX 矩阵
+│   ├── benchmark.py                   # 基准对比（CSI300/S&P500/CPI/M2）
+│   ├── notifier.py                    # 企业微信每日推送
 │   ├── import_sap_xlsx.py             # XLSX → own_sap/move_sap CSV 迁移工具
 │   ├── migrate_xlsx.py                # XLSX → portfolio.csv 迁移工具
-│   ├── fund_calculator.py             # [历史] 旧版净值核算
-│   └── asset_breakdown.py             # XLSX 资产配置解析
+│   ├── fund_calculator.py             # [历史已弃用] 旧版净值核算
+│   └── asset_breakdown.py             # [历史] XLSX 资产配置解析（迁移工具）
 │
 ├── dashboard/                         # ★ 可视化仪表板
 │   └── app.py                         # Streamlit + Plotly 交互式仪表板（5 tabs）
 │
 ├── scripts/                           # 运维脚本
-│   ├── daily_push.py                  # 每日推送入口（EC2 cron 调用，--force 可手动触发）
-│   └── test_ec2_akshare.py            # EC2 akshare 可达性测试工具
+│   ├── daily_push.py                  # 每日推送入口（EC2 cron）
+│   └── test_ec2_akshare.py            # EC2 akshare 可达性测试
 │
-└── tests/                             # 测试（共 143 项）
-    ├── test_nav_engine.py             # 统一引擎测试（32 项）
-    ├── test_sap_stock.py              # SAP 股票测试（22 项）
-    ├── test_market_monitor.py         # 市场温度计测试（45 项）
-    ├── test_fund_calculator.py        # 旧版净值测试（16 项）
-    └── test_asset_breakdown.py        # 资产配置测试（20 项）
+└── tests/                             # 测试
+    ├── test_nav_engine.py
+    ├── test_sap_stock.py
+    ├── test_market_monitor.py
+    ├── test_fund_calculator.py
+    └── test_asset_breakdown.py
 ```
 
 ### 6.2 文件职责矩阵
@@ -360,46 +329,22 @@ FamilyFund/
 
 ### 6.5.2 统一输入：`portfolio.csv`
 
-每行代表一个持仓在某一日期的快照，所有持仓按周排列：
+每行代表一个持仓在某一日期的快照，所有持仓按周排列。
 
-```csv
-Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,Total_Value,Net_Cash_Flow
-2024-04-01,ETF_Stock,券商A,沪深300ETF,510300,CNY,1.0,5000,4.10,20500.00,20500.00
-2024-04-01,Company_Stock,海外券商,AAPL,AAPL,USD,7.25,50,170.50,61806.25,61806.25
-2024-04-01,Cash,银行A,现金,,CNY,1.0,50000,1,50000,50000
-2024-04-08,ETF_Stock,券商A,沪深300ETF,510300,CNY,1.0,5000,4.25,21250.00,0
-2024-04-08,Company_Stock,海外券商,AAPL,AAPL,USD,7.28,50,172.00,62588.00,0
-2024-04-08,Cash,银行A,现金,,CNY,1.0,50000,1,50000,0
-```
+**完整字段定义与 NCF 填写规则** → [`USER_MANUAL.md § 5`](USER_MANUAL.md#5-portfoliocsv-字段参考)
 
-#### 字段定义
-
-| 字段 | 类型 | 必填 | 说明 |
-|:---|:---|:---|:---|
-| `Date` | YYYY-MM-DD | 是 | 对账日期，严格递增 |
-| `Asset_Class` | string | 是 | 资产类别（8 选 1，见下表） |
-| `Platform` | string | 是 | 交易平台/账户名 |
-| `Name` | string | 是 | 持仓名称 |
-| `Code` | string | 否 | 证券代码/基金代码 |
-| `Currency` | string | 是 | 币种（CNY/HKD/USD/EUR） |
-| `Exchange_Rate` | float | 是 | 该币种→CNY 汇率（CNY=1.0，USD≈7.25） |
-| `Shares` | float | 是 | 持有份额/股数 |
-| `Current_Price` | float | 是 | 当前单价（原始币种） |
-| `Total_Value` | float | 是 | 当前总市值（CNY），= Shares × Price × Exchange_Rate |
-| `Net_Cash_Flow` | float | 是 | 本期资金变动。**建仓日** = Total_Value；**内部调仓**：买入方 = +买入金额，卖出/赎回方 = -到账金额（通过调仓辅助器自动填写）；**外部入金/取出** = 记在 Cash 行；**SAP Own SAP 归属** = Company_Stock 行 NCF = Cost_CNY；**SAP Move SAP 归属** = NCF = 归属市值（CNY）；**无操作持仓** = 0 |
-
-#### 资产类别
+#### 资产类别（8 种）
 
 | 代码 | 中文名 | 典型持仓 |
 |:---|:---|:---|
-| `US_Blend_Fund`  | 美股宽基基金 | 标普500 QDII 等宽基指数基金 |
-| `US_Growth_Fund` | 美股成长基金 | 纳指100 QDII 等科技成长指数基金 |
-| `CN_Index_Fund`  | A股指数基金  | 沪深300、中证A500 等宽基指数 |
-| `ETF_Stock`      | ETF与股票   | 红利 ETF、个股等 |
-| `Fixed_Income`   | 固定收益    | 银行理财、短债基金等 |
-| `Gold`           | 黄金        | 实物黄金、纸黄金、黄金 ETF |
-| `Company_Stock`  | 公司股票    | 雇主公司股票等 |
-| `Cash`           | 现金        | 固定现金储备（10万 CNY），不追踪银行全部余额 |
+| `US_Blend_Fund`  | 美股宽基基金 | 标普500 QDII |
+| `US_Growth_Fund` | 美股成长基金 | 纳指100 QDII |
+| `CN_Index_Fund`  | A股指数基金 | 沪深300、中证A500 |
+| `ETF_Stock`      | ETF与股票 | 红利ETF、个股、港股 |
+| `Fixed_Income`   | 固定收益 | 银行理财、短债基金 |
+| `Gold`           | 黄金 | 实物黄金、纸黄金 |
+| `Company_Stock`  | 公司股票 | SAP（ESPP + RSU） |
+| `Cash`           | 现金 | 固定现金储备（约10万） |
 
 ### 6.5.3 多级净值核算
 
@@ -436,134 +381,35 @@ flowchart TD
 
 **核心算法完全复用**：`_run_nav_calculation()` 是同一个函数，在基金整体和每个资产类别各跑一次。算法逻辑与原始 `fund_calculator.py` 完全一致（份额净值法）。
 
-### 6.5.4 新版 CIO 工作流
+### 6.5.4 CIO 工作流
 
-```mermaid
-sequenceDiagram
-    actor CIO as 家庭 CIO
-    participant BANK as 银行/券商 APP
-    participant UI as Streamlit Dashboard
-    participant CSV as portfolio.csv
+每周通过 Dashboard 录入持仓快照，调仓辅助器自动写入各资产 NCF，Dashboard 加载时自动计算所有指标。
 
-    Note over CIO: 每周五收盘 / 周末对账
+**详细操作步骤见** → [`USER_MANUAL.md`](USER_MANUAL.md)
 
-    CIO->>BANK: 1. 打开各平台，盘点各持仓价格和市值
-    BANK-->>CIO: 返回各账户持仓详情
+#### 调仓辅助器 NCF 规则（v1.3）
 
-    CIO->>UI: 2. Weekly Update tab → 更新各持仓 Price/Shares/Total_Value
-    Note over UI: 所有 NCF 默认为 0
-
-    alt 本期有调仓（买卖基金）
-        CIO->>UI: 3. 打开"调仓辅助器"，按操作类型（买入/卖出/外部入金/取出）填入流水，下拉选择关联资产
-        UI-->>CIO: 实时显示 Cash 变化预览 + 买入/卖出合计
-        CIO->>UI: 4. 点"应用到持仓表"→ Cash TV/NCF + 各资产 NCF 自动写入；新增标的自动追加行
-        CIO->>UI: 5. 补全新标的的份额/价格/市值
-    end
-
-    alt 本期有 SAP 股票归属
-        CIO->>UI: 6. 在 Company_Stock 行手动填 NCF = 归属成本/市值
-    end
-
-    UI->>CSV: 7. 保存快照（追加新日期行）
-    CIO->>UI: 8. 刷新浏览器，Dashboard 自动计算并展示
-    UI-->>CIO: NAV、收益率、配置占比等实时呈现
-```
-
-#### 调仓辅助器逻辑（重新设计，v1.3）
-
-Weekly Update tab 内置"调仓辅助器"折叠区，统一管理所有 NCF 录入：
-
-| 操作类型 | Cash 变动 | 资产行 NCF | 计入 Cash NCF？ |
+| 操作类型 | Cash 变化 | 资产行 NCF | 计入 Cash NCF |
 |:---|:---|:---|:---|
-| 买入基金/ETF | -买入金额 | +买入金额 | 否 |
+| 买入基金/ETF/黄金 | -买入金额 | +买入金额 | 否 |
 | 卖出/赎回 | +到账金额 | -到账金额 | 否 |
-| 外部入金（工资等） | +入金金额 | — | **是** |
-| 外部取出（消费等） | -取出金额 | — | **是** |
-
-点击「应用到持仓表」后自动：
-1. 更新 Cash 行 `Total_Value` 和 `Net_Cash_Flow`（仅外部部分）
-2. 将买入/卖出 NCF 写入对应资产行（按名称下拉匹配）
-3. 新增标的自动追加到持仓表底部（需事后手动补填份额/价格/市值）
-
-Company_Stock 的 NCF（SAP 归属）与此完全独立，照常在持仓表直接填写。
+| 外部入金 | +入金金额 | — | **是** |
+| 外部取出 | -取出金额 | — | **是** |
 
 ### 6.5.5 运行方式
 
-Dashboard 在加载时自动调用 `nav_engine.py` 进行所有计算，无需手动运行任何脚本。
-
 ```bash
-# 本地启动
-streamlit run dashboard/app.py
-
 # Docker 启动（推荐）
-docker compose up --build -d
-# Dashboard 访问：http://localhost:8501
+docker compose up -d
+# 访问 http://localhost:8501
+# 代码修改后：docker compose restart（无需重建）
 ```
 
-### 6.5.6 输出
+### 6.5.6 SAP 股票工作流
 
-所有计算结果在 Dashboard 加载时实时生成，无需写入文件：
+SAP 股票由 Own SAP (ESPP) 和 Move SAP (RSU) 两个计划组成，各有独立的 CSV 和录入节奏。
 
-| 内容 | 展示位置 |
-|:---|:---|
-| 基金整体净值走势 | Dashboard tab — NAV 折线图 |
-| 各类别净值对比 | Dashboard tab — 分类净值折线图 |
-| 资产配置占比 | Dashboard tab — 饼图 |
-| 持仓盈亏明细 | Dashboard tab — P/L 表格 |
-| SAP 股票成本分析 | SAP Stock tab |
-
-### 6.5.7 SAP 股票工作流
-
-SAP 公司股票由两个独立计划组成，各有独立的 CSV 和录入流程。SAP Stock tab 的价格和汇率由用户手动输入，**不依赖 portfolio.csv**。
-
-#### Monthly — Own SAP (ESPP)
-
-```mermaid
-sequenceDiagram
-    actor CIO as 家庭 CIO
-    participant BROKER as 券商账户
-    participant DASH as Dashboard SAP Tab
-    participant CSV as own_sap.csv
-    participant PORT as portfolio.csv
-
-    Note over CIO: 每月 5 号左右
-    CIO->>BROKER: 1. 查看本月 ESPP 归属明细
-    BROKER-->>CIO: Date, Price, Type(Match/Purchase), CNY, Qty
-    CIO->>DASH: 2. 打开 SAP Stock → Add Own SAP Transaction
-    CIO->>DASH: 3. 填写 Date, Price, Tax Rate, 逐行录入 Type/CNY/Qty
-    DASH->>CSV: 4. Save → 追加行到 own_sap.csv
-    Note over CIO: 下一个周末对账时
-    CIO->>PORT: 5. 更新 Company_Stock "Own SAP" 行
-    Note right of PORT: Shares = sap_stock 总股数<br/>Total_Value = Shares × Price × FX<br/>NCF = 本月新交易 Cost_CNY 之和
-```
-
-#### Quarterly — Move SAP (RSU)
-
-```mermaid
-sequenceDiagram
-    actor CIO as 家庭 CIO
-    participant HR as HR/Equity Portal
-    participant DASH as Dashboard SAP Tab
-    participant CSV as move_sap.csv
-    participant PORT as portfolio.csv
-
-    Note over CIO: 每季 11 号 (Mar/Jun/Sep/Dec)
-    CIO->>HR: 1. 查看本季 RSU 归属明细
-    HR-->>CIO: Date, Price, FX Rate, Qty per tranche
-    CIO->>DASH: 2. 打开 SAP Stock → Add Move SAP Transaction
-    CIO->>DASH: 3. 填写 Date, Price, FX Rate, 逐行录入 Qty
-    DASH->>CSV: 4. Save → 追加行到 move_sap.csv
-    Note over CIO: 下一个周末对账时
-    CIO->>PORT: 5. 更新 Company_Stock "Move SAP" 行
-    Note right of PORT: Shares = sap_stock 总股数<br/>Total_Value = Shares × Price × FX<br/>NCF = 0（免费获得）
-```
-
-#### Annual — Dividends (~May)
-
-两个计划的分红均以股票形式再投资。收到分红后：
-1. 在 SAP Stock tab 添加 Dividend 交易（Date, Price, Qty）
-2. 下次对账：更新对应 Company_Stock 行的 Shares 和 Total_Value
-3. Own SAP Dividend: NCF = Cost_CNY（全额成本）; Move SAP Dividend: NCF = CNY（分红全额市值）
+**详细流程见** → [`USER_MANUAL.md § 4`](USER_MANUAL.md#4-sap-股票操作)
 
 ---
 
@@ -638,141 +484,9 @@ graph TB
 
 ### 8.1 多资产类别追踪（已实现）
 
-#### 概述
+`asset_breakdown.py` 解析 `CurrentAsset.xlsx`（分区式布局），将持仓按资产类别聚合，输出结构化 CSV 和饼图。目前已被 `portfolio.csv` 统一方案取代，保留作为历史迁移工具。
 
-资产配置追踪工具 `asset_breakdown.py` 可直接解析 CIO 维护的 `CurrentAsset.xlsx` 工作表，自动识别分区、分类持仓、生成结构化报告。
-
-#### 数据源与解析策略
-
-输入文件 `CurrentAsset.xlsx` 采用分区式布局，每个分区代表一个交易平台/账户：
-
-```mermaid
-flowchart TD
-    XLSX["CurrentAsset.xlsx"] --> PARSER["XLSX 解析器"]
-    
-    PARSER --> S1["场外基金A"]
-    PARSER --> S2["场外基金B"]
-    PARSER --> S3["场外基金C"]
-    PARSER --> S4["券商A"]
-    PARSER --> S5["银行A"]
-    PARSER --> S6["银行B"]
-    PARSER --> S7["公司股票"]
-    PARSER --> S8["实物"]
-    PARSER --> S9["独立现金行"]
-    
-    S1 --> CLS["资产分类引擎"]
-    S2 --> CLS
-    S3 --> CLS
-    S4 --> CLS
-    S5 --> CLS
-    S6 --> CLS
-    S7 --> CLS
-    S8 --> CLS
-    S9 --> CLS
-    
-    CLS --> USB["US_Blend_Fund<br/>美股宽基基金"]
-    CLS --> USG["US_Growth_Fund<br/>美股成长基金"]
-    CLS --> CN["CN_Index_Fund<br/>A股指数基金"]
-    CLS --> ETF["ETF_Stock<br/>ETF与股票"]
-    CLS --> FI["Fixed_Income<br/>固定收益"]
-    CLS --> GOLD["Gold<br/>黄金"]
-    CLS --> CS["Company_Stock<br/>公司股票"]
-    CLS --> CASH["Cash<br/>现金"]
-
-    style XLSX fill:#fce4ec,stroke:#e91e63
-    style CLS fill:#e3f2fd,stroke:#2196f3
-```
-
-#### 分区解析规则
-
-XLSX 中每个分区遵循固定模式：
-
-```
-[分区标题行] — col A 有值，其余为空（如"场外基金A"、"券商A"）
-[列标题行]   — col A 为"基金公司"或"标的"
-[数据行 ×N]  — 各持仓明细
-[空行]
-[小计行]     — col A 为空，总成本/当前金额/总金额有汇总数值
-```
-
-解析器通过以下逻辑逐行处理：
-1. 单值行 → 识别为分区标题，更新 `current_section`
-2. col A 为"基金公司/标的" → 跳过列标题
-3. col A 有值且有财务数据 → 提取为持仓记录
-4. col A 为空 → 跳过（小计行/空行）
-5. 特殊行（汇率、独立现金）→ 单独处理
-
-#### 资产分类映射
-
-分类采用两级匹配策略：
-
-**第一级：持仓名称覆写**（优先级最高）
-
-| 持仓名称 | 强制分类 | 原因 |
-|:---|:---|:---|
-| 现金 | `Cash` | 固定现金储备（单行，10万 CNY） |
-| 国债ETF / 短融ETF | `Fixed_Income` | 虽在券商分区但本质是债券 |
-| 黄金 | `Gold` | 跨平台统一归类（银行+实物） |
-
-**第二级：分区默认映射**
-
-| 分区 | 默认资产类别 |
-|:---|:---|
-| 标普场外 | `US_Blend_Fund` |
-| 纳指场外 | `US_Growth_Fund` |
-| 场外基金（A股） | `CN_Index_Fund` |
-| 券商（ETF/股票） | `ETF_Stock` |
-| 银行理财 | `Fixed_Income` |
-| 公司股票 | `Company_Stock` |
-| 实物 | `Gold` |
-
-#### 输出产物
-
-```mermaid
-flowchart LR
-    TOOL["asset_breakdown.py"] --> CSV1["output_asset_breakdown.csv<br/>逐笔持仓明细"]
-    TOOL --> CSV2["output_asset_summary.csv<br/>资产类别汇总"]
-    TOOL --> PIE["asset_allocation.png<br/>配置饼图"]
-    TOOL --> TERM["终端报告"]
-```
-
-**逐笔持仓明细 CSV (`output_asset_breakdown.csv`)**
-
-| 字段 | 类型 | 说明 |
-|:---|:---|:---|
-| `Asset_Class` | string | 资产类别代码 |
-| `Platform` | string | 来源分区（券商A、银行A等） |
-| `Name` | string | 持仓名称 |
-| `Code` | string | 证券代码/基金代码 |
-| `Cost_Price` | float | 成本价 |
-| `Current_Price` | float | 当前价/净值 |
-| `Shares` | float | 持有份额/股数 |
-| `Total_Cost` | float | 总成本 |
-| `Current_Value` | float | 当前金额 |
-| `Pending_Amount` | float | 待确认金额 |
-| `Total_Value` | float | 总金额（含待确认） |
-| `PnL_Amount` | float | 浮盈/浮亏金额 |
-| `PnL_Percent` | float | 浮盈/浮亏比例 |
-
-**资产类别汇总 CSV (`output_asset_summary.csv`)**
-
-| 字段 | 类型 | 说明 |
-|:---|:---|:---|
-| `Asset_Class` | string | 类别代码 |
-| `Display_Name` | string | 中文显示名 |
-| `Total_Cost` | float | 类别总成本 |
-| `Total_Value` | float | 类别总市值 |
-| `PnL_Amount` | float | 类别盈亏 |
-| `PnL_Percent` | float | 类别盈亏比例 |
-| `Allocation_Percent` | float | 占总资产比例 |
-
-#### 运行方式
-
-```bash
-python src/asset_breakdown.py
-```
-
-输出：终端配置报告 + `data/output_asset_breakdown.csv` + `data/output_asset_summary.csv` + `output/asset_allocation.png`
+资产分类规则：持仓名称覆写（优先级最高）→ 分区默认映射（见 `src/asset_breakdown.py` SECTION_CLASS_MAP）。
 
 ### 8.2 基准对比
 
