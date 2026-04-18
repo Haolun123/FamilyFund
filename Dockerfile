@@ -2,7 +2,7 @@ FROM python:3.13-slim
 
 # Chinese font for matplotlib chart rendering
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends fonts-noto-cjk curl && \
+    apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

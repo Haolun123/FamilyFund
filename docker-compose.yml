@@ -6,4 +6,6 @@ services:
       - "8501:8501"
     volumes:
       - ${FAMILYFUND_DATA:-./data}:/app/data
+      - ./src:/app/src
+      - ./dashboard:/app/dashboard
     restart: unless-stopped

@@ -116,8 +116,9 @@ else:
 
 # Asset class filter
 st.sidebar.subheader("资产类别")
-all_classes = sorted(raw_df['Asset_Class'].unique())
-display_map = {cls: CLASS_DISPLAY_NAMES.get(cls, cls) for cls in all_classes}
+# Asset class filter（Cash 作为流动性储备，不参与分类对比）
+all_classes = sorted(c for c in raw_df['Asset_Class'].unique() if c != 'Cash')
+display_map = {cls: CLASS_DISPLAY_NAMES.get(cls, cls) for cls in raw_df['Asset_Class'].unique()}
 
 select_all = st.sidebar.checkbox("全选", value=True)
 if select_all:
@@ -168,14 +169,18 @@ with tab_dashboard:
     latest_date = latest_fund['Date']
     latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
 
+    # 简单收益率：(当前总资产 - 初始投入) / 初始投入
+    initial_investment = fund_nav_df.iloc[0]['Total_Value']
+    simple_return = (latest_fund['Total_Value'] - initial_investment) / initial_investment * 100 if initial_investment else 0.0
+    simple_profit = latest_fund['Total_Value'] - initial_investment
+
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("总资产", f"¥{latest_fund['Total_Value']:,.0f}")
     with col2:
         st.metric("单位净值", f"{latest_fund['NAV']:.4f}")
     with col3:
-        ret = latest_fund['Cumulative_Return(%)']
-        st.metric("累计收益率", f"{ret:+.2f}%")
+        st.metric("累计收益", f"¥{simple_profit:+,.0f}", delta=f"{simple_return:+.2f}%", help="(当前总资产 - 初始投入) / 初始投入")
     with col4:
         ann = latest_fund.get('Annualized_Return(%)')
         if ann is not None and not pd.isna(ann):
@@ -475,9 +480,15 @@ with tab_dashboard:
     st.header("盈亏分析")
 
     if cost_basis_df is not None and len(cost_basis_df) > 0:
+        # Cash 作为调仓中转池不计入盈亏；Market_Value=0 为已清仓持仓也排除
+        pl_df = cost_basis_df[
+            (cost_basis_df['Asset_Class'] != 'Cash') &
+            (cost_basis_df['Market_Value'] > 0)
+        ].copy()
+
         # Summary KPIs
-        total_cost = cost_basis_df['Cost_Basis'].sum()
-        total_market = cost_basis_df['Market_Value'].sum()
+        total_cost = pl_df['Cost_Basis'].sum()
+        total_market = pl_df['Market_Value'].sum()
         total_pl = total_market - total_cost
         total_pl_rate = (total_pl / total_cost * 100) if total_cost > 0 else 0
 
@@ -492,7 +503,7 @@ with tab_dashboard:
             st.metric("总收益率", f"{total_pl_rate:+.2f}%")
 
         # P/L bar chart
-        chart_data = cost_basis_df.copy()
+        chart_data = pl_df.copy()
         chart_data['Display_Name'] = chart_data['Name']
         chart_data['Color'] = chart_data['Profit_Loss'].apply(lambda x: '盈利' if x >= 0 else '亏损')
 
@@ -507,7 +518,7 @@ with tab_dashboard:
         st.plotly_chart(fig_pl, use_container_width=True)
 
         # P/L detail table
-        pl_display = cost_basis_df.copy()
+        pl_display = pl_df.copy()
         pl_display['Asset_Class'] = pl_display['Asset_Class'].map(display_map)
         pl_display = pl_display.rename(columns={
             'Asset_Class': '资产类别',
