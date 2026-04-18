@@ -1,8 +1,9 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v1.0  
+> **版本**: v1.3  
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
+> **最后更新**: 2026-04-18  
 > **状态**: 活跃迭代中
 
 ---
@@ -385,7 +386,7 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 | `Shares` | float | 是 | 持有份额/股数 |
 | `Current_Price` | float | 是 | 当前单价（原始币种） |
 | `Total_Value` | float | 是 | 当前总市值（CNY），= Shares × Price × Exchange_Rate |
-| `Net_Cash_Flow` | float | 是 | 本期外部资金变动。建仓日 = Total_Value，正常周 = 0。特殊情况：主动存取 → Cash 行 NCF；SAP Own SAP 归属 → Company_Stock 行 NCF = 归属成本（Cost_CNY）；SAP Move SAP 归属 → NCF = 归属市值（CNY 列，FMV）；内部调仓 → NCF = 0。注意：基金仅追踪固定现金储备（10万），工资/日常消费在基金边界之外 |
+| `Net_Cash_Flow` | float | 是 | 本期资金变动。**建仓日** = Total_Value；**内部调仓**：买入方 = +买入金额，卖出/赎回方 = -到账金额（通过调仓辅助器自动填写）；**外部入金/取出** = 记在 Cash 行；**SAP Own SAP 归属** = Company_Stock 行 NCF = Cost_CNY；**SAP Move SAP 归属** = NCF = 归属市值（CNY）；**无操作持仓** = 0 |
 
 #### 资产类别
 
@@ -452,35 +453,37 @@ sequenceDiagram
     CIO->>UI: 2. Weekly Update tab → 更新各持仓 Price/Shares/Total_Value
     Note over UI: 所有 NCF 默认为 0
 
-    alt 本期有调仓（买卖基金）或外部入金
-        CIO->>UI: 3. 打开"调仓辅助器"，按操作类型填入流水
-        UI-->>CIO: 自动计算 Cash Total_Value 和 Cash NCF（仅外部入金计入）
-        CIO->>UI: 4. 点"应用到持仓表"，Cash 行自动更新
+    alt 本期有调仓（买卖基金）
+        CIO->>UI: 3. 打开"调仓辅助器"，按操作类型（买入/卖出/外部入金/取出）填入流水，下拉选择关联资产
+        UI-->>CIO: 实时显示 Cash 变化预览 + 买入/卖出合计
+        CIO->>UI: 4. 点"应用到持仓表"→ Cash TV/NCF + 各资产 NCF 自动写入；新增标的自动追加行
+        CIO->>UI: 5. 补全新标的的份额/价格/市值
     end
 
     alt 本期有 SAP 股票归属
-        CIO->>UI: 5. 在 Company_Stock 行手动填 NCF = 归属成本/市值
+        CIO->>UI: 6. 在 Company_Stock 行手动填 NCF = 归属成本/市值
     end
 
-    UI->>CSV: 6. 保存快照（追加新日期行）
-    CIO->>UI: 7. 刷新浏览器，Dashboard 自动计算并展示
+    UI->>CSV: 7. 保存快照（追加新日期行）
+    CIO->>UI: 8. 刷新浏览器，Dashboard 自动计算并展示
     UI-->>CIO: NAV、收益率、配置占比等实时呈现
 ```
 
-#### 调仓辅助器逻辑
+#### 调仓辅助器逻辑（重新设计，v1.3）
 
-Weekly Update tab 内置"调仓辅助器"折叠区，解决调仓后 Cash 余额心算问题：
+Weekly Update tab 内置"调仓辅助器"折叠区，统一管理所有 NCF 录入：
 
-| 操作类型 | Cash 变动 | 计入 NCF？ |
-|:---|:---|:---|
-| 卖出基金/ETF | +卖出金额 | 否（内部调仓） |
-| 买入基金/ETF | -买入金额 | 否（内部调仓） |
-| 外部入金（工资等） | +入金金额 | **是** |
-| 外部取出（消费等） | -取出金额 | **是** |
+| 操作类型 | Cash 变动 | 资产行 NCF | 计入 Cash NCF？ |
+|:---|:---|:---|:---|
+| 买入基金/ETF | -买入金额 | +买入金额 | 否 |
+| 卖出/赎回 | +到账金额 | -到账金额 | 否 |
+| 外部入金（工资等） | +入金金额 | — | **是** |
+| 外部取出（消费等） | -取出金额 | — | **是** |
 
-辅助器输出两个值并自动回填 Cash 行：
-- `Total_Value` = 上周 Cash + 所有买卖净额 + 外部入金/取出
-- `Net_Cash_Flow` = 仅外部入金/取出之和（内部调仓不计）
+点击「应用到持仓表」后自动：
+1. 更新 Cash 行 `Total_Value` 和 `Net_Cash_Flow`（仅外部部分）
+2. 将买入/卖出 NCF 写入对应资产行（按名称下拉匹配）
+3. 新增标的自动追加到持仓表底部（需事后手动补填份额/价格/市值）
 
 Company_Stock 的 NCF（SAP 归属）与此完全独立，照常在持仓表直接填写。
 
@@ -936,7 +939,7 @@ graph TB
 | **风险集中度** | 类别/单持仓占比 warning + 横向柱状图（40% 警示线） | 自动计算，无需配置 |
 | **货币敞口** | CNY/USD/EUR/HKD 市值分布 metrics + 圆环饼图 | 按 Currency 字段自动汇总 |
 | **盈亏分析** | KPI 卡片 + 水平柱状图 + 明细表 | 持仓级盈亏（绿盈红亏） |
-| **周报更新** | 上周模板复用 + 调仓辅助器（Cash 余额/NCF 自动计算）+ 批量 CSV 导入 + 校验保存 | 调仓流水录入、一键回填 Cash 行 |
+| **周报更新** | 上周模板复用 + 调仓辅助器（买入/卖出下拉关联资产，自动写 NCF；新增标的自动追加行）+ 批量 CSV 导入 + 校验保存 | 调仓流水录入、一键回填各资产 NCF |
 | **历史记录** | 历史快照浏览与编辑 | 日期选择、行内编辑、删除 |
 | **SAP 股票** | Own/Move SAP 成本核算 | 手动输入价格汇率、自动计算归属成本 |
 | **侧边栏** | 日期范围 + 类别筛选 + PDF 下载 | 全局联动 |
@@ -1132,9 +1135,9 @@ P1 市场温度计已全部实现：
 | 中文术语 | 英文术语 | 缩写 | 定义 |
 |:---|:---|:---|:---|
 | 单位净值 | Net Asset Value | NAV | 基金每一份额的当前价值，反映真实投资回报 |
-| 累计收益率 | Cumulative Return | — | 自建仓以来的总回报比例，= NAV - 1 |
+| 累计收益率 | Cumulative Return | — | 自建仓以来的总回报比例，= (当前总资产 - 初始投入) / 初始投入（简单收益率，非 TWR） |
 | 总份额 | Total Shares | — | 基金发行的所有份额之和 |
-| 净现金流 | Net Cash Flow | NCF | 一个统计周期内的外部资金净变动 |
+| 净现金流 | Net Cash Flow | NCF | 一个统计周期内的资金变动。建仓日 = Total_Value；买入资产 = +买入金额；卖出/赎回 = -到账金额；外部入金/取出记在 Cash 行；无操作 = 0 |
 | 总市值 | Total Market Value | TMV | 所有资产的当期市场价值总和 |
 | 年化收益率 | Annualized Return | — | 将任意期限收益折算为等效年度收益 |
 | 年化波动率 | Annualized Volatility | — | 收益率的标准差，按年折算后的风险度量 |
