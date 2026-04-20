@@ -1577,7 +1577,7 @@ with tab_market:
     # ─── Section 1: 乖离率监测 ───
 
     st.subheader("乖离率监测")
-    st.caption("乖离率 = (当前价 − MAn) / MAn × 100%　｜　**粗体**为主要参考均线")
+    st.caption("乖离率 = (当前价 − MAn) / MAn × 100%　｜　主要信号列显示主要参考均线信号")
 
     # 颜色图例
     st.markdown(
@@ -1613,8 +1613,7 @@ with tab_market:
             if b is None:
                 return '—'
             sign = '+' if b >= 0 else ''
-            text = f"{emoji} {sign}{b:.2f}%"
-            return f"**{text}**" if is_primary else text
+            return f"{emoji} {sign}{b:.2f}%"
 
         bias60_str  = _fmt_bias(bias['bias60'],  bias['signal60'],  bias['emoji60'],  primary_ma == 60)
         bias200_str = _fmt_bias(bias['bias200'], bias['signal200'], bias['emoji200'], primary_ma == 200)
