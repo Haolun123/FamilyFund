@@ -61,10 +61,9 @@
 
 ### 🐛 小问题/代码改进建议
 
-- **`fx_service.py` 没有重试机制** — 网络请求应加 retry（`requests.adapters.HTTPAdapter` + `urllib3.util.retry.Retry`）
-- **SAP Tab 的默认价格硬编码为 170.0 / 8.0** — 如果缓存为空，应该提示用户手动输入而不是给一个可能过时的默认值
-- **`load_data()` 缓存问题** — `@st.cache_data` 按 `csv_path` 缓存，但如果文件内容变了（比如用户在 History tab 编辑后），需要手动 `st.cache_data.clear()`（已做，但散落在多处，容易遗漏）
-- **缺少 `.streamlit/config.toml`** — Git 仓库里没有这个文件，Docker 构建时 `COPY .streamlit/ .streamlit/` 可能会失败
+- **`fx_service.py` 没有重试机制** — ~~网络请求应加 retry~~ 评估后不做：调用的是 frankfurter.app 和 yfinance，两者均有隐性 rate limit，激进 retry 反而容易触发限流；失败时 UI 已有 warning，影响可接受。
+- **SAP Tab 的默认价格硬编码为 170.0 / 8.0** — ~~缓存为空时应提示用户手动输入~~ 评估后不做：`sap_price_cache.json` 存于 iCloud 同步目录，缓存为空的场景（新机器/手动删除）实际不存在于正常使用路径中。
+- **`load_data()` 缓存问题** — `@st.cache_data` 按 `csv_path` 缓存，文件内容变了需手动 `st.cache_data.clear()`（已在各处添加，但散落多处容易遗漏）。非紧急，现有 workaround 够用。
 - **[待办] Weekly Update：Total_Value 自动计算** — 当前 `Total_Value` 需手动填写，与 `Shares × Current_Price × Exchange_Rate` 不联动。三种方案：
   - **方案 A（推荐）：增加"重算市值"按钮** — 点击后批量更新所有 `Shares > 0 AND Current_Price > 0` 的行，Cash 类跳过。约 20 行代码，保留手动覆盖能力，实现最简单。
   - **方案 B：提交前不一致警告** — 在提交按钮上方实时对比"系统计算值 vs 用户填值"，差异 > 1% 时高亮提示，用户选择采用哪个值。透明度更高，实现中等复杂度。
