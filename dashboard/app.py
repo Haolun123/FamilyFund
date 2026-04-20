@@ -23,7 +23,7 @@ from benchmark import get_benchmarks, BENCHMARK_DISPLAY_NAMES, BENCHMARK_COLORS
 from market_monitor import (
     get_market_data, set_pe_override,
     compute_bias, compute_vix_signal, compute_pe_signal, compute_qvix_signal,
-    lookup_multiplier, lookup_a_share_multiplier,
+    lookup_multiplier, lookup_a_share_multiplier, lookup_gold_multiplier,
     TARGETS,
 )
 
@@ -1833,3 +1833,38 @@ with tab_market:
         "倍数以您自身基准定投金额为基础执行。"
     )
     st.caption("⚠️ 仅供参考，不构成投资建议。数据来自公开市场，存在延迟。")
+
+    st.divider()
+
+    # ─── Section 5: 黄金定投倍数建议 ───
+
+    st.subheader("黄金定投倍数建议")
+    st.caption(
+        "基于 MA200乖离率 × VIX 矩阵。黄金无PE，以MA200乖离率作为估值锚。"
+        "黄金定位为对冲/压舱石仓位，顶格=5x，整体倍数低于权益类。"
+    )
+
+    gold_entry = market_data.get('gold')
+    gold_bias200 = None
+    gold_bias_emoji = None
+    if gold_entry:
+        gold_bias_data = compute_bias(gold_entry)
+        gold_bias200 = gold_bias_data.get('bias200')
+        gold_bias_emoji = gold_bias_data.get('emoji200')
+
+    mult_gold = lookup_gold_multiplier(gold_bias200, vix_val)
+    color = _mult_color(mult_gold)
+
+    if gold_bias200 is not None and vix_val:
+        sign = '+' if gold_bias200 >= 0 else ''
+        st.markdown(
+            f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center; max-width:300px;'>"
+            f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>黄金 (USD/oz)</div>"
+            f"<div style='font-size:13px; color:#999;'>MA200乖离 {sign}{gold_bias200:.1f}% {gold_bias_emoji or ''} × VIX {vix_val:.1f}</div>"
+            f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_gold}</div>"
+            f"<div style='font-size:11px; color:#aaa;'>顶格 = 5x（对冲仓，低于权益类顶格10x）</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("黄金: 数据不完整，无法计算")

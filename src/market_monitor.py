@@ -168,6 +168,21 @@ CSI_A500_MATRIX = [
     ['2.0x',  '3.0x',  '5.0x',  '顶格'],  # PE < 30th (低估)
 ]
 
+# ── 黄金 乖离率(MA200)×VIX 定投倍数矩阵 ──────────────────────
+# 黄金无PE，用 MA200 乖离率作为估值锚（对冲/压舱石角色，顶格=5x）
+# 乖离率行分界（从高到低）：> +20%, +10~+20%, -5~+10%, -10~-5%, < -10%
+GOLD_BIAS_BANDS = [20.0, 10.0, -5.0, -10.0]   # 乖离率行分界（> 各值）
+GOLD_VIX_BANDS  = [18, 25, 35]                 # VIX 列分界（< 各值）
+
+GOLD_MATRIX = [
+    # VIX: <18     18-25    25-35    >35
+    ['暂停',  '暂停',  '观望',  '0.5x'],   # 乖离 > +20%（严重超买）
+    ['观望',  '0.3x',  '0.5x',  '1.0x'],   # 乖离 +10% ~ +20%（偏高）
+    ['0.5x',  '1.0x',  '1.5x',  '2.0x'],   # 乖离 -5% ~ +10%（正常）
+    ['1.0x',  '1.5x',  '2.5x',  '3.5x'],   # 乖离 -10% ~ -5%（偏低）
+    ['1.5x',  '2.5x',  '4.0x',  '顶格'],   # 乖离 < -10%（明显超卖）
+]
+
 
 # ══════════════════════════════════════════════════════════════
 # Cache I/O
@@ -570,3 +585,34 @@ def lookup_a_share_multiplier(pe: float | None, qvix: float | None, target: str)
             break
 
     return matrix[pe_row][qvix_col]
+
+
+def lookup_gold_multiplier(bias200: float | None, vix: float | None) -> str:
+    """查黄金 乖离率(MA200)×VIX 矩阵，返回定投倍数建议。
+
+    Args:
+        bias200: 黄金 MA200 乖离率（%），如 +5.2 或 -8.1
+        vix:     VIX 值
+
+    Returns:
+        '暂停' / '观望' / '0.5x' / ... / '顶格'
+        若任一为 None，返回 '—'
+    """
+    if bias200 is None or vix is None:
+        return '—'
+
+    # 乖离率行定位（从高到低找第一个 bias > band）
+    bias_row = len(GOLD_BIAS_BANDS)  # 默认最后行（< 最小值）
+    for i, band in enumerate(GOLD_BIAS_BANDS):
+        if bias200 > band:
+            bias_row = i
+            break
+
+    # VIX 列定位（< 各分界值）
+    vix_col = len(GOLD_VIX_BANDS)
+    for j, band in enumerate(GOLD_VIX_BANDS):
+        if vix < band:
+            vix_col = j
+            break
+
+    return GOLD_MATRIX[bias_row][vix_col]

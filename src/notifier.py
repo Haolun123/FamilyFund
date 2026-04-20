@@ -24,6 +24,7 @@ from market_monitor import (
     compute_qvix_signal,
     compute_vix_signal,
     lookup_a_share_multiplier,
+    lookup_gold_multiplier,
     lookup_multiplier,
 )
 
@@ -140,6 +141,19 @@ def _format_message(market_data: dict) -> str:
     a500_str  = f'PE {pe_csi_a500:.1f} × QVIX {qvix_val:.1f} → **{mult_csi_a500}**' if pe_csi_a500 and qvix_val else '⚠️ 数据不完整'
     lines.append(f'> CSI300　　{c300_str}')
     lines.append(f'> 中证A500　{a500_str} _(PE代理:中证500)_')
+
+    # 黄金
+    gold_entry  = market_data.get('gold')
+    gold_bias200 = None
+    if gold_entry:
+        gold_bias = compute_bias(gold_entry)
+        gold_bias200 = gold_bias.get('bias200')
+    mult_gold = lookup_gold_multiplier(gold_bias200, vix_val)
+    if gold_bias200 is not None and vix_val:
+        gold_str = f'乖离(MA200) {gold_bias200:+.1f}% × VIX {vix_val:.1f} → **{mult_gold}**'
+    else:
+        gold_str = '⚠️ 数据不完整'
+    lines.append(f'> 黄金　　　{gold_str}')
 
     lines.append('')
     lines.append('> 数据为前一交易日收盘，仅供参考，不构成投资建议。')
