@@ -729,6 +729,25 @@ with tab_update:
         key="weekly_editor",
     )
 
+    # ─── 重算市值（在 data_editor 之后，读 edited_df）───
+    if st.button("🔄 重算市值 (Shares × Price × Rate)", type="secondary",
+                 help="对所有 Shares > 0 且 Current_Price > 0 的非 Cash 行，自动计算 Total_Value = Shares × Current_Price × Exchange_Rate。手动填写的 Total_Value 仍可在表格中直接覆盖。"):
+        recalc = edited_df.copy()
+        mask = (
+            (recalc['Asset_Class'] != 'Cash') &
+            (pd.to_numeric(recalc['Shares'], errors='coerce').fillna(0) > 0) &
+            (pd.to_numeric(recalc['Current_Price'], errors='coerce').fillna(0) > 0)
+        )
+        recalc.loc[mask, 'Total_Value'] = (
+            pd.to_numeric(recalc.loc[mask, 'Shares'], errors='coerce') *
+            pd.to_numeric(recalc.loc[mask, 'Current_Price'], errors='coerce') *
+            pd.to_numeric(recalc.loc[mask, 'Exchange_Rate'], errors='coerce').fillna(1.0)
+        ).round(2)
+        updated_count = mask.sum()
+        st.session_state['update_template'] = recalc
+        st.success(f"已重算 {updated_count} 行市值")
+        st.rerun()
+
     # ─── 调仓辅助器（在编辑持仓表之后，确保 edited_df 已赋值）───
     with st.expander("⚖️ 调仓辅助器（设置每行 NCF）", expanded=False):
         st.caption(

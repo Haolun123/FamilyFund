@@ -41,6 +41,7 @@
 | Cash 从分类对比/盈亏中排除 | `dashboard/app.py` Tab1 | Cash 仅在基金总览体现，不参与分类 NAV、饼图、盈亏分析 |
 | NCF 全资产写入调仓辅助器 | `dashboard/app.py` Tab2 | 买入/卖出自动写对应资产行 NCF，支持新增标的追加行 |
 | Docker 代码热重载 | `docker-compose.yml` | src/ 和 dashboard/ 挂载为 volume，代码改动 restart 即生效 |
+| Weekly Update 重算市值 | `dashboard/app.py` Tab2 | 「🔄 重算市值」按钮，批量更新 Total_Value = Shares × Price × Rate，Cash 跳过，手动值可覆盖 |
 
 ---
 
@@ -64,10 +65,7 @@
 - **`fx_service.py` 没有重试机制** — ~~网络请求应加 retry~~ 评估后不做：调用的是 frankfurter.app 和 yfinance，两者均有隐性 rate limit，激进 retry 反而容易触发限流；失败时 UI 已有 warning，影响可接受。
 - **SAP Tab 的默认价格硬编码为 170.0 / 8.0** — ~~缓存为空时应提示用户手动输入~~ 评估后不做：`sap_price_cache.json` 存于 iCloud 同步目录，缓存为空的场景（新机器/手动删除）实际不存在于正常使用路径中。
 - **`load_data()` 缓存问题** — `@st.cache_data` 按 `csv_path` 缓存，文件内容变了需手动 `st.cache_data.clear()`（已在各处添加，但散落多处容易遗漏）。非紧急，现有 workaround 够用。
-- **[待办] Weekly Update：Total_Value 自动计算** — 当前 `Total_Value` 需手动填写，与 `Shares × Current_Price × Exchange_Rate` 不联动。三种方案：
-  - **方案 A（推荐）：增加"重算市值"按钮** — 点击后批量更新所有 `Shares > 0 AND Current_Price > 0` 的行，Cash 类跳过。约 20 行代码，保留手动覆盖能力，实现最简单。
-  - **方案 B：提交前不一致警告** — 在提交按钮上方实时对比"系统计算值 vs 用户填值"，差异 > 1% 时高亮提示，用户选择采用哪个值。透明度更高，实现中等复杂度。
-  - **方案 C：Total_Value 列只读，完全自动计算** — 从 `data_editor` 移除 `Total_Value` 列，改为 Python 层根据 `Shares × Price × Rate` 自动计算后展示；Cash 类 `Shares == Total_Value`。最彻底但需重构数据录入约定，破坏"直接填市值"的现有习惯，不推荐。
+- **~~[待办] Weekly Update：Total_Value 自动计算~~** ✅ 已实现（方案 A）— 在 data_editor 下方新增「🔄 重算市值」按钮，对所有 `Shares > 0 AND Current_Price > 0` 的非 Cash 行批量更新 `Total_Value = Shares × Price × Rate`，用户可在表格中直接覆盖。
 
 ---
 
