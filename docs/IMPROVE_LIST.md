@@ -49,14 +49,47 @@
 
 #### **P2 — 中等复杂度**
 
-1. **资金效率分析** — 每笔 NCF（外部资金流入）对应的实际回报，回答"哪些时点买入决策好/差"
-2. **持仓回测** — 模拟定投策略（固定倍数 vs PE×VIX 矩阵倍数），验证矩阵有效性；基于 yfinance/akshare 历史行情
+1. **调仓决策复盘**（原"资金效率分析"）— 回答"这笔买入/卖出决策好不好"，通过对比成交后该资产的后续表现来评估。
+
+   **依赖新文件 `transaction.csv`**，记录每笔实际成交明细：
+
+   ```
+   Date, Asset_Class, Platform, Name, Code, Type, Shares, Price, Amount_CNY, Fee_CNY
+   ```
+
+   - `transaction.csv` 由调仓辅助器在 Apply 时自动写入（一次 Apply 可生成多行）
+   - 用户可选填"成交价"和"手续费"字段（调仓辅助器需新增这两个可选输入）；不填则按快照价格估算
+   - 分析维度：按资产类别、买/卖方向，统计各笔交易的后续 1M/3M/6M 收益
+   - **实施计划**：
+     1. 调仓辅助器新增"成交价/手续费"字段
+     2. Apply 时自动追加写入 `transaction.csv`
+     3. 积累 3-6 个月数据后，再建复盘分析 UI
+   - **当前状态**：`transaction.csv` 基础设施待建；数据积累阶段 P2，分析 UI 阶段 P3
+
+2. **持仓回测** — 模拟定投策略（固定金额 vs PE×VIX / MA200×VIX 矩阵倍数），验证矩阵有效性；基于 yfinance/akshare 历史行情。
+   - **A股（CSI300/A500）**：P2，akshare 有完整 PE + QVIX 历史数据
+   - **黄金**：P2，使用 MA200 偏离度 × VIX 矩阵（`GOLD_BIAS_BANDS`/`GOLD_VIX_BANDS`/`GOLD_MATRIX` 已在 `market_monitor.py` 中定义），yfinance `GC=F` 价格历史充足
+   - **美股（S&P500/NDX100）**：P3，待历史 PE 数据源确认后补充
 
 #### **P3 — 高复杂度 / 需前置工作**
 
-3. **季度财报（Tab 6）** — 资产负债表 + 净资产瀑布图；前置：迁移 25Q4+26Q1 历史 xlsx 数据
+3. **季度财报（Tab 6）** — 资产负债表 + 净资产瀑布图；设计已完成（见 `docs/QUARTERLY_REPORT_DESIGN.md`）；前置：用户需先将 25Q4 + 26Q1 历史数据录入 `balance_sheet.csv` 和 `cashflow_log.csv`
 4. **收益归因分析** — 各资产类别对总收益的贡献度分解
 5. **再平衡建议** — 基于目标配置比例，自动计算各类别买入/卖出金额
+
+---
+
+### 数据文件分层说明
+
+FamilyFund 的数据层分三个层次，各自服务不同的分析目的：
+
+| 文件 | 频率 | 内容 | 支撑分析 |
+|------|------|------|------|
+| `portfolio.csv` | 周频快照 | 各持仓当期市值/份额/NCF | NAV 净值走势、P&L、基准对比 |
+| `transaction.csv`（待建） | 每笔交易 | 单笔成交价/手续费/数量 | 调仓决策复盘（"这笔买卖决策好不好"） |
+| `balance_sheet.csv` + `cashflow_log.csv`（待建） | 季频 | 家庭全量资产负债、外部现金流 | 季度家庭财报、净资产 QoQ |
+
+三者互不覆盖，`portfolio.csv` 的投资类汇总会被季度财报引擎自动聚合进 `balance_sheet.csv` 对应行。
 
 ---
 
