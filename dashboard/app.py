@@ -24,6 +24,11 @@ from market_monitor import (
     get_market_data, set_pe_override,
     compute_bias, compute_vix_signal, compute_pe_signal, compute_qvix_signal,
     lookup_multiplier, lookup_a_share_multiplier, lookup_gold_multiplier,
+    SP500_PE_BANDS, SP500_VIX_BANDS, SP500_MATRIX,
+    NDX100_PE_BANDS, NDX100_VIX_BANDS, NDX100_MATRIX,
+    CSI300_PE_BANDS, CSI300_QVIX_BANDS, CSI300_MATRIX,
+    CSI_A500_PE_BANDS, CSI_A500_QVIX_BANDS, CSI_A500_MATRIX,
+    GOLD_BIAS_BANDS, GOLD_VIX_BANDS, GOLD_MATRIX,
     TARGETS,
 )
 
@@ -1738,6 +1743,32 @@ with tab_market:
             return '#1565c0'
         return '#2e7d32'
 
+    def _render_matrix(matrix, row_labels, col_labels, current_row, current_col):
+        """将矩阵渲染为带高亮的 DataFrame，current_row/col 为当前所在格子索引。"""
+        import pandas as pd
+
+        df = pd.DataFrame(matrix, index=row_labels, columns=col_labels)
+
+        def style_cell(val):
+            return ''
+
+        def highlight(df):
+            styles = pd.DataFrame('', index=df.index, columns=df.columns)
+            for i in range(len(df)):
+                for j in range(len(df.columns)):
+                    cell_val = df.iloc[i, j]
+                    if i == current_row and j == current_col:
+                        styles.iloc[i, j] = 'background-color: #fff9c4; font-weight: bold; border: 2px solid #f9a825;'
+                    elif cell_val == '暂停':
+                        styles.iloc[i, j] = 'color: #d32f2f; opacity: 0.5;'
+                    elif cell_val == '顶格':
+                        styles.iloc[i, j] = 'color: #1565c0;'
+                    else:
+                        styles.iloc[i, j] = 'color: #2e7d32;'
+            return styles
+
+        return df.style.apply(highlight, axis=None)
+
     mult_col1, mult_col2 = st.columns(2)
 
     with mult_col1:
@@ -1772,6 +1803,54 @@ with tab_market:
         "**倍数说明**: 暂停 = 不建议定投（原『观望』已合并）；顶格 = 全力加仓。"
         "倍数以您自身基准定投金额为基础执行。"
     )
+
+    # 美股矩阵表格（当前位置高亮）
+    sp_col_labels  = ['VIX<18', 'VIX 18-25', 'VIX 25-35', 'VIX>35']
+    ndx_col_labels = ['VIX<18', 'VIX 18-24', 'VIX 24-31', 'VIX>31']
+    sp_row_labels  = ['>32', '29-32', '26-29', '23-26', '20-23', '17-20', '14-17', '<14']
+    ndx_row_labels = ['>37', '35-37', '32-35', '28-32', '24-28', '20-24', '16-20', '<16']
+
+    def _find_row(val, bands):
+        """找当前值所在行索引。"""
+        if val is None:
+            return None
+        for i, b in enumerate(bands):
+            if val > b:
+                return i
+        return len(bands)
+
+    def _find_col(val, bands):
+        """找当前值所在列索引。"""
+        if val is None:
+            return None
+        for j, b in enumerate(bands):
+            if val < b:
+                return j
+        return len(bands)
+
+    mat_col1, mat_col2 = st.columns(2)
+    with mat_col1:
+        st.caption("标普500 完整矩阵（🟨 当前位置）")
+        sp_row = _find_row(pe_sp, SP500_PE_BANDS) if pe_sp else None
+        sp_col = _find_col(vix_val, SP500_VIX_BANDS) if vix_val else None
+        if sp_row is not None and sp_col is not None:
+            st.dataframe(_render_matrix(SP500_MATRIX, sp_row_labels, sp_col_labels, sp_row, sp_col),
+                         use_container_width=True)
+        else:
+            st.dataframe(pd.DataFrame(SP500_MATRIX, index=sp_row_labels, columns=sp_col_labels),
+                         use_container_width=True)
+
+    with mat_col2:
+        st.caption("纳指100 完整矩阵（🟨 当前位置）")
+        ndx_row = _find_row(pe_ndx, NDX100_PE_BANDS) if pe_ndx else None
+        ndx_col = _find_col(vix_val, NDX100_VIX_BANDS) if vix_val else None
+        if ndx_row is not None and ndx_col is not None:
+            st.dataframe(_render_matrix(NDX100_MATRIX, ndx_row_labels, ndx_col_labels, ndx_row, ndx_col),
+                         use_container_width=True)
+        else:
+            st.dataframe(pd.DataFrame(NDX100_MATRIX, index=ndx_row_labels, columns=ndx_col_labels),
+                         use_container_width=True)
+
     st.caption("⚠️ 仅供参考，不构成投资建议。数据来自公开市场，存在延迟。")
 
     st.divider()
@@ -1830,6 +1909,42 @@ with tab_market:
         "**倍数说明**: 暂停 = 不建议定投（原『观望』已合并）；顶格 = 全力加仓。"
         "倍数以您自身基准定投金额为基础执行。"
     )
+
+    # A股矩阵表格
+    a_row_labels  = ['PE>80th 高估', 'PE 60-80th 偏贵', 'PE 30-60th 合理', 'PE<30th 低估']
+    a_col_labels  = ['QVIX<30th', 'QVIX 30-60th', 'QVIX 60-80th', 'QVIX>80th']
+
+    def _find_a_row(pe, bands):
+        if pe is None:
+            return None
+        for i, b in enumerate(bands):
+            if pe > b:
+                return i
+        return len(bands)
+
+    amat_col1, amat_col2 = st.columns(2)
+    with amat_col1:
+        st.caption("CSI300 完整矩阵（🟨 当前位置）")
+        csi300_row = _find_a_row(pe_csi300, CSI300_PE_BANDS) if pe_csi300 else None
+        csi300_col = _find_col(qvix_val, CSI300_QVIX_BANDS) if qvix_val else None
+        if csi300_row is not None and csi300_col is not None:
+            st.dataframe(_render_matrix(CSI300_MATRIX, a_row_labels, a_col_labels, csi300_row, csi300_col),
+                         use_container_width=True)
+        else:
+            st.dataframe(pd.DataFrame(CSI300_MATRIX, index=a_row_labels, columns=a_col_labels),
+                         use_container_width=True)
+
+    with amat_col2:
+        st.caption("中证A500 完整矩阵（🟨 当前位置）")
+        a500_row = _find_a_row(pe_csi_a500, CSI_A500_PE_BANDS) if pe_csi_a500 else None
+        a500_col = _find_col(qvix_val, CSI_A500_QVIX_BANDS) if qvix_val else None
+        if a500_row is not None and a500_col is not None:
+            st.dataframe(_render_matrix(CSI_A500_MATRIX, a_row_labels, a_col_labels, a500_row, a500_col),
+                         use_container_width=True)
+        else:
+            st.dataframe(pd.DataFrame(CSI_A500_MATRIX, index=a_row_labels, columns=a_col_labels),
+                         use_container_width=True)
+
     st.caption("⚠️ 仅供参考，不构成投资建议。数据来自公开市场，存在延迟。")
 
     st.divider()
@@ -1866,3 +1981,18 @@ with tab_market:
         )
     else:
         st.info("黄金: 数据不完整，无法计算")
+
+    # 黄金矩阵表格
+    gold_row_labels = ['乖离>+20%', '乖离+10~+20%', '乖离-5~+10%', '乖离-10~-5%', '乖离<-10%']
+    gold_col_labels = ['VIX<18', 'VIX 18-25', 'VIX 25-35', 'VIX>35']
+
+    st.caption("黄金完整矩阵（🟨 当前位置）")
+    gold_row = _find_a_row(gold_bias200, GOLD_BIAS_BANDS) if gold_bias200 is not None else None
+    gold_col = _find_col(vix_val, GOLD_VIX_BANDS) if vix_val else None
+    if gold_row is not None and gold_col is not None:
+        st.dataframe(_render_matrix(GOLD_MATRIX, gold_row_labels, gold_col_labels, gold_row, gold_col),
+                     use_container_width=True)
+    else:
+        st.dataframe(pd.DataFrame(GOLD_MATRIX, index=gold_row_labels, columns=gold_col_labels),
+                     use_container_width=True)
+    st.caption("⚠️ 仅供参考，不构成投资建议。数据来自公开市场，存在延迟。")
