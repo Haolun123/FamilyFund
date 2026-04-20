@@ -1024,12 +1024,20 @@ with tab_update:
         # Large price swings
         prev_latest = prev_df[prev_df['Date'] == last_date_str]
         for i, row in df.iterrows():
-            name = row.get('Name', '')
-            prev_row = prev_latest[prev_latest['Name'] == name]
+            name     = row.get('Name', '')
+            platform = row.get('Platform', '')
+            code     = row.get('Code', '')
+            # 用 (Platform, Name, Code) 精确匹配，避免同名不同标的误报
+            mask = (
+                (prev_latest['Name'] == name) &
+                (prev_latest['Platform'] == platform) &
+                (prev_latest['Code'].fillna('') == (code or ''))
+            )
+            prev_row = prev_latest[mask]
             if len(prev_row) > 0:
                 old_tv = prev_row.iloc[0]['Total_Value']
                 new_tv = row.get('Total_Value', 0)
-                if old_tv > 0 and not pd.isna(new_tv):
+                if old_tv > 0 and not pd.isna(new_tv) and new_tv > 0:
                     pct_change = abs(new_tv - old_tv) / old_tv
                     if pct_change > 0.2:
                         warnings.append(f"{name}: 市值变化 {pct_change*100:.1f}%，请核实")
