@@ -148,6 +148,15 @@ benchmark_data = get_benchmarks(fund_start_date) if selected_benchmarks else {}
 filtered_raw = raw_df[(raw_df['Date'] >= date_start) & (raw_df['Date'] <= date_end)]
 filtered_fund = fund_nav_df[(fund_nav_df['Date'] >= date_start) & (fund_nav_df['Date'] <= date_end)]
 
+# ─── Global session_state initialization ───
+# Must run before any tab widgets to prevent widget value= overriding cache
+if 'sap_price_initialized' not in st.session_state:
+    _sap_cache = load_sap_price_cache()
+    if _sap_cache:
+        st.session_state['sap_current_price'] = _sap_cache['price_eur']
+        st.session_state['sap_fx_rate'] = _sap_cache['fx_rate']
+    st.session_state['sap_price_initialized'] = True
+
 # ─── Tabs ───
 
 tab_dashboard, tab_update, tab_history, tab_sap, tab_market = st.tabs(
@@ -1189,14 +1198,6 @@ with tab_sap:
 
         st.subheader("持仓概览")
 
-        # Initialize from iCloud-synced cache on first visit (before widgets render)
-        if 'sap_price_initialized' not in st.session_state:
-            cache = load_sap_price_cache()
-            if cache:
-                st.session_state['sap_current_price'] = cache['price_eur']
-                st.session_state['sap_fx_rate'] = cache['fx_rate']
-            st.session_state['sap_price_initialized'] = True
-
         # Handle refresh: try Yahoo Finance for price, frankfurter for FX
         if st.session_state.get('_sap_do_refresh'):
             st.session_state['_sap_do_refresh'] = False
@@ -1229,12 +1230,18 @@ with tab_sap:
         price_col, fx_col, refresh_col = st.columns([2, 2, 1])
         with price_col:
             sap_price_eur = st.number_input(
-                "SAP Price (EUR)", value=170.0, min_value=0.01,
-                format="%.2f", key="sap_current_price")
+                "SAP Price (EUR)",
+                value=float(st.session_state.get('sap_current_price', 170.0)),
+                min_value=0.01,
+                format="%.2f",
+                key="sap_current_price")
         with fx_col:
             sap_fx_rate = st.number_input(
-                "EUR/CNY Rate", value=8.0, min_value=0.01,
-                format="%.4f", key="sap_fx_rate")
+                "EUR/CNY Rate",
+                value=float(st.session_state.get('sap_fx_rate', 8.0)),
+                min_value=0.01,
+                format="%.4f",
+                key="sap_fx_rate")
         with refresh_col:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Refresh", key="sap_refresh"):
