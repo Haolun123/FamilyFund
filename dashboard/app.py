@@ -31,6 +31,8 @@ from market_monitor import (
     GOLD_BIAS_BANDS, GOLD_VIX_BANDS, GOLD_MATRIX,
     TARGETS,
 )
+from backtest import run_backtest
+)
 
 # ─── Page Config ───
 
@@ -164,8 +166,8 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_history, tab_sap, tab_market = st.tabs(
-    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor"]
+tab_dashboard, tab_update, tab_history, tab_sap, tab_market, tab_backtest = st.tabs(
+    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor", "回测"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -2004,3 +2006,237 @@ with tab_market:
         st.dataframe(pd.DataFrame(GOLD_MATRIX, index=gold_row_labels, columns=gold_col_labels),
                      use_container_width=True)
     st.caption("⚠️ 仅供参考，不构成投资建议。数据来自公开市场，存在延迟。")
+
+# ═══════════════════════════════════════════════════════════
+# Tab 7: 回测
+# ═══════════════════════════════════════════════════════════
+
+with tab_backtest:
+    st.header("定投策略回测")
+    st.caption(
+        "对比「固定金额定投」与「PE×VIX/QVIX 矩阵策略定投」的历史表现。"
+        "相同起始日期、相同基准金额，验证市场温度计矩阵是否真正有效。"
+    )
+
+    from datetime import date as _date
+
+    _TARGET_NAMES = {
+        'csi300':   'CSI 300 沪深300',
+        'csi_a500': '中证A500',
+        'sp500':    '标普500 (^GSPC)',
+        'ndx100':   '纳指100 (^NDX)',
+        'gold':     '黄金 (GC=F)',
+    }
+    _DEFAULT_STARTS = {
+        'csi300': _date(2015, 1, 1), 'csi_a500': _date(2015, 1, 1),
+        'sp500':  _date(2000, 1, 1), 'ndx100':   _date(2000, 1, 1),
+        'gold':   _date(2000, 1, 1),
+    }
+    _MIN_DATES = {
+        'csi300': _date(2015, 1, 1), 'csi_a500': _date(2015, 1, 1),
+        'sp500':  _date(1990, 1, 1), 'ndx100':   _date(1990, 1, 1),
+        'gold':   _date(1990, 1, 1),
+    }
+    _CURRENCY = {
+        'csi300': '¥', 'csi_a500': '¥',
+        'sp500': '$', 'ndx100': '$', 'gold': '$',
+    }
+
+    # ─── Controls ───────────────────────────────────────────
+    bt_col1, bt_col2, bt_col3 = st.columns(3)
+    with bt_col1:
+        bt_target = st.selectbox(
+            "回测标的", options=list(_TARGET_NAMES.keys()),
+            format_func=lambda t: _TARGET_NAMES[t], key='bt_target',
+        )
+    with bt_col2:
+        bt_start = st.date_input(
+            "回测起始日期",
+            value=_DEFAULT_STARTS.get(bt_target, _date(2015, 1, 1)),
+            min_value=_MIN_DATES.get(bt_target, _date(2000, 1, 1)),
+            max_value=_date.today() - timedelta(days=365),
+            key='bt_start_date',
+        )
+    with bt_col3:
+        bt_base_amount = st.number_input(
+            "每期基准金额", min_value=100.0, max_value=1_000_000.0,
+            value=1000.0, step=100.0, key='bt_base_amount',
+        )
+
+    bt_col4, bt_col5, bt_col6 = st.columns(3)
+    with bt_col4:
+        bt_top_equity = st.number_input(
+            "顶格上限（权益类）", min_value=1.0, max_value=20.0,
+            value=10.0, step=0.5,
+            help="矩阵'顶格'对应的实际倍数（权益类标的）",
+            key='bt_top_equity',
+        )
+    with bt_col5:
+        bt_top_gold = st.number_input(
+            "顶格上限（黄金）", min_value=1.0, max_value=10.0,
+            value=5.0, step=0.5,
+            help="矩阵'顶格'对应的实际倍数（黄金）",
+            key='bt_top_gold',
+        )
+    with bt_col6:
+        st.markdown("<br>", unsafe_allow_html=True)
+        bt_run = st.button("▶ 运行回测", type="primary", key='bt_run', use_container_width=True)
+
+    if bt_target == 'ndx100':
+        st.info(
+            "**纳指100 回测说明**：纳指历史 PE 无免费数据源，回测使用标普500 PE（Shiller）作为代理信号。"
+            "纳指实际 PE 历史上高于标普（科技溢价），代理信号在科技泡沫期（2000年、2021年）偏乐观。"
+            "当前实时展示仍使用 QQQ 真实 PE，本说明仅适用于回测历史数据。"
+        )
+
+    st.divider()
+
+    # ─── Run ────────────────────────────────────────────────
+    if bt_run:
+        top_mult = bt_top_gold if bt_target == 'gold' else bt_top_equity
+        with st.spinner(f"正在拉取 {_TARGET_NAMES[bt_target]} 历史数据并运行回测..."):
+            try:
+                result = run_backtest(
+                    target=bt_target,
+                    start_date=bt_start.strftime('%Y-%m-%d'),
+                    base_amount=bt_base_amount,
+                    freq='M',
+                    top_multiplier=top_mult,
+                )
+                st.session_state['bt_result'] = result
+            except Exception as e:
+                st.error(f"回测运行失败: {e}")
+
+    result = st.session_state.get('bt_result')
+
+    if result is None:
+        st.info("配置回测参数后，点击「▶ 运行回测」开始")
+    else:
+        fixed      = result['fixed']
+        matrix     = result['matrix']
+        history_df = result['history']
+        cur        = _CURRENCY.get(result['target'], '¥')
+
+        # ─── Section 1: 对比指标卡 ──────────────────────────
+        st.subheader("策略对比")
+
+        def _fmt_money(v, currency=cur):
+            return f'{currency}{v:,.0f}' if v is not None else '—'
+
+        def _fmt_pct(v):
+            return f'{v:+.2f}%' if v is not None else '—'
+
+        def _card(label, f_val, m_val, fmt_fn, higher_is_better=True):
+            if f_val is not None and m_val is not None:
+                delta = m_val - f_val
+                if higher_is_better:
+                    dc = '#2e7d32' if delta > 0 else ('#d32f2f' if delta < 0 else '#888')
+                else:
+                    dc = '#2e7d32' if delta < 0 else ('#d32f2f' if delta > 0 else '#888')
+                delta_str = fmt_fn(delta) if callable(fmt_fn) else str(delta)
+            else:
+                dc, delta_str = '#888', '—'
+            return (
+                f"<div style='border:1px solid #e0e0e0;border-radius:8px;padding:14px;'>"
+                f"<div style='font-size:12px;color:#888;'>{label}</div>"
+                f"<div style='font-size:13px;color:#444;margin-top:4px;'>固定: {fmt_fn(f_val)}</div>"
+                f"<div style='font-size:13px;color:#444;'>矩阵: {fmt_fn(m_val)}</div>"
+                f"<div style='font-size:15px;font-weight:bold;color:{dc};margin-top:6px;'>"
+                f"超额: {delta_str}</div></div>"
+            )
+
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(_card('总投入成本',   fixed['total_cost'],   matrix['total_cost'],   _fmt_money, False), unsafe_allow_html=True)
+        c2.markdown(_card('最终市值',     fixed['final_value'],  matrix['final_value'],  _fmt_money, True),  unsafe_allow_html=True)
+        c3.markdown(_card('绝对盈亏',     fixed['profit_loss'],  matrix['profit_loss'],  _fmt_money, True),  unsafe_allow_html=True)
+
+        c4, c5, c6 = st.columns(3)
+        c4.markdown(_card('XIRR（年化）', fixed['xirr'],         matrix['xirr'],         _fmt_pct,   True),  unsafe_allow_html=True)
+        c5.markdown(_card('最大回撤',     fixed['max_drawdown'], matrix['max_drawdown'], _fmt_pct,   False), unsafe_allow_html=True)
+
+        # 定投次数单独展示（无超额概念）
+        c6.markdown(
+            f"<div style='border:1px solid #e0e0e0;border-radius:8px;padding:14px;'>"
+            f"<div style='font-size:12px;color:#888;'>定投次数</div>"
+            f"<div style='font-size:13px;color:#444;margin-top:4px;'>固定: {fixed['periods']} 期</div>"
+            f"<div style='font-size:13px;color:#444;'>矩阵: {matrix['periods']} 期（暂停{fixed['periods']-matrix['periods']}期）</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+
+        # ─── Section 2: 累计市值对比 ────────────────────────
+        st.subheader("累计市值走势")
+
+        fig_val = go.Figure()
+        fig_val.add_trace(go.Scatter(x=history_df['date'], y=history_df['fixed_cum_value'],
+                                     name='固定策略 市值', line=dict(color='#4ECDC4', width=2)))
+        fig_val.add_trace(go.Scatter(x=history_df['date'], y=history_df['matrix_cum_value'],
+                                     name='矩阵策略 市值', line=dict(color='#FF6B6B', width=2)))
+        fig_val.add_trace(go.Scatter(x=history_df['date'], y=history_df['fixed_cum_cost'],
+                                     name='固定策略 成本', line=dict(color='#4ECDC4', width=1, dash='dash'), opacity=0.5))
+        fig_val.add_trace(go.Scatter(x=history_df['date'], y=history_df['matrix_cum_cost'],
+                                     name='矩阵策略 成本', line=dict(color='#FF6B6B', width=1, dash='dash'), opacity=0.5))
+        fig_val.update_layout(height=400, hovermode='x unified',
+                              legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                              yaxis_title=f'金额 ({cur})', margin=dict(t=40, b=40))
+        st.plotly_chart(fig_val, use_container_width=True)
+
+        # ─── Section 3: 每期倍数柱状图 ──────────────────────
+        st.subheader("每期矩阵倍数 & 指数价格")
+
+        bar_colors = [
+            '#d32f2f' if m == 0
+            else ('#1565c0' if m >= result['top_multiplier'] * 0.9 else '#2e7d32')
+            for m in history_df['multiplier']
+        ]
+        fig_mult = go.Figure()
+        fig_mult.add_trace(go.Bar(x=history_df['date'], y=history_df['multiplier'],
+                                  name='矩阵倍数', marker_color=bar_colors, yaxis='y1', opacity=0.8))
+        fig_mult.add_trace(go.Scatter(x=history_df['date'], y=history_df['price'],
+                                      name='价格', line=dict(color='#FFA726', width=2), yaxis='y2'))
+        fig_mult.update_layout(
+            height=350,
+            yaxis=dict(title='定投倍数', side='left'),
+            yaxis2=dict(title=f'价格 ({cur})', side='right', overlaying='y'),
+            hovermode='x unified',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+            margin=dict(t=40, b=40),
+        )
+        st.plotly_chart(fig_mult, use_container_width=True)
+
+        # ─── Section 4: 暂停占比饼图 + 明细表 ──────────────
+        pie_col, tbl_col = st.columns([1, 2])
+        with pie_col:
+            st.subheader("资金利用效率")
+            pause_n  = int((history_df['multiplier'] == 0).sum())
+            invest_n = int((history_df['multiplier'] > 0).sum())
+            fig_pie = go.Figure(go.Pie(
+                labels=['定投期', '暂停期'],
+                values=[invest_n, pause_n],
+                marker_colors=['#2e7d32', '#d32f2f'],
+                hole=0.4, textinfo='label+percent',
+            ))
+            fig_pie.update_layout(height=260, margin=dict(t=20, b=20))
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with tbl_col:
+            st.subheader("逐期明细")
+            show_df = history_df[[
+                'date', 'price', 'pe_or_bias', 'vol', 'raw_mult',
+                'matrix_amount', 'matrix_cum_cost', 'matrix_cum_value',
+            ]].rename(columns={
+                'date': '日期', 'price': '价格',
+                'pe_or_bias': 'PE/乖离率', 'vol': 'VIX/QVIX',
+                'raw_mult': '矩阵倍数',
+                'matrix_amount': '矩阵投入', 'matrix_cum_cost': '矩阵累计成本',
+                'matrix_cum_value': '矩阵累计市值',
+            })
+            st.dataframe(show_df, use_container_width=True, height=260, hide_index=True)
+
+        pe_note = '纳指100使用标普500 PE作为历史代理信号，存在系统性低估风险。 | ' if result['target'] == 'ndx100' else ''
+        st.caption(
+            f"⚠️ {pe_note}仅供参考，不构成投资建议。"
+            "历史回测不代表未来收益。XIRR 为资金加权年化收益率。"
+        )
