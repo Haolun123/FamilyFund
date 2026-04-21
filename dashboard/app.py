@@ -1739,7 +1739,7 @@ with tab_market:
     # ─── Section 3: 定投倍数建议（标普 + 纳指） ───
 
     st.subheader("定投倍数建议")
-    st.caption("基于 PE × VIX 矩阵，仅适用于标普500和纳指100。A股和黄金请参考乖离率颜色自行判断。")
+    st.caption("基于 PE × VIX 矩阵，适用于标普500和纳指100。A股请参考下方A股矩阵，黄金请参考黄金矩阵。")
 
     mult_sp  = lookup_multiplier(pe_sp,  vix_val, 'sp500')
     mult_ndx = lookup_multiplier(pe_ndx, vix_val, 'ndx100')
@@ -1801,6 +1801,7 @@ with tab_market:
                 f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>纳指100</div>"
                 f"<div style='font-size:13px; color:#999;'>PE {pe_ndx:.1f} × VIX {vix_val:.1f}</div>"
                 f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_ndx}</div>"
+                f"<div style='font-size:11px; color:#e65100;'>⚠️ PE 使用标普500代理（纳指历史PE无免费数据源），纳指实际估值通常更高，矩阵信号偏乐观</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
@@ -1849,7 +1850,7 @@ with tab_market:
                          use_container_width=True)
 
     with mat_col2:
-        st.caption("纳指100 完整矩阵（🟨 当前位置）")
+        st.caption("纳指100 完整矩阵（🟨 当前位置）⚠️ PE 使用标普代理，信号偏乐观")
         ndx_row = _find_row(pe_ndx, NDX100_PE_BANDS) if pe_ndx else None
         ndx_col = _find_col(vix_val, NDX100_VIX_BANDS) if vix_val else None
         if ndx_row is not None and ndx_col is not None:
