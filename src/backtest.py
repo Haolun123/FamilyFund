@@ -141,10 +141,8 @@ def _fetch_pe_akshare(symbol: str, start_date: str) -> list[dict] | None:
     try:
         import akshare as ak
         df = ak.stock_index_pe_lg(symbol=symbol)
-        # 列名通常为 ['日期', '滚动市盈率', ...]
-        date_col = df.columns[0]
-        pe_col   = df.columns[1]
-        df = df[[date_col, pe_col]].rename(columns={date_col: 'date', pe_col: 'value'})
+        # 明确取'滚动市盈率'列（与 market_monitor.py 保持一致）
+        df = df[['日期', '滚动市盈率']].rename(columns={'日期': 'date', '滚动市盈率': 'value'})
         df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
         df['value'] = pd.to_numeric(df['value'], errors='coerce')
         df = df.dropna(subset=['value'])
