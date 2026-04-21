@@ -779,22 +779,22 @@ with tab_update:
         with col_add1:
             if st.button("＋ 买入", key="rb_add_buy"):
                 st.session_state['rebalance_entries'].append(
-                    {'type': '买入', 'asset_name': '', 'amount': 0.0, 'is_new': False, 'new_asset': {}})
+                    {'type': '买入', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
                 st.rerun()
         with col_add2:
             if st.button("＋ 卖出", key="rb_add_sell"):
                 st.session_state['rebalance_entries'].append(
-                    {'type': '卖出', 'asset_name': '', 'amount': 0.0, 'is_new': False, 'new_asset': {}})
+                    {'type': '卖出', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
                 st.rerun()
         with col_add3:
             if st.button("＋ 外部入金", key="rb_add_ext_in"):
                 st.session_state['rebalance_entries'].append(
-                    {'type': '外部入金', 'asset_name': '', 'amount': 0.0, 'is_new': False, 'new_asset': {}})
+                    {'type': '外部入金', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
                 st.rerun()
         with col_add4:
             if st.button("＋ 外部取出", key="rb_add_ext_out"):
                 st.session_state['rebalance_entries'].append(
-                    {'type': '外部取出', 'asset_name': '', 'amount': 0.0, 'is_new': False, 'new_asset': {}})
+                    {'type': '外部取出', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
                 st.rerun()
 
         # Build asset name list from current holdings (excluding Cash)
@@ -831,6 +831,24 @@ with tab_update:
             with c4:
                 if st.button("✕", key=f"rb_del_{idx}"):
                     to_remove.append(idx)
+
+            # 买入/卖出：展示成交价和手续费（可选，用于 transaction.csv 记录）
+            if entry['type'] in ('买入', '卖出'):
+                p_col, f_col = st.columns(2)
+                with p_col:
+                    entry['price'] = st.number_input(
+                        "成交价（可选，不填则用快照价格）",
+                        value=float(entry.get('price', 0.0)), min_value=0.0, format="%.4f",
+                        key=f"rb_price_{idx}",
+                        help="实际申购/赎回确认净值，用于调仓决策复盘记录",
+                    )
+                with f_col:
+                    entry['fee'] = st.number_input(
+                        "手续费 CNY（可选，默认0）",
+                        value=float(entry.get('fee', 0.0)), min_value=0.0, format="%.2f",
+                        key=f"rb_fee_{idx}",
+                        help="已被扣除的手续费，不含在 Amount_CNY 中",
+                    )
 
             # 新增标的子表单
             if entry.get('is_new'):
@@ -955,6 +973,37 @@ with tab_update:
                     })
                 if new_rows:
                     template = pd.concat([template, pd.DataFrame(new_rows)], ignore_index=True)
+
+                # ─── 写入 transaction.csv ───
+                tx_rows = []
+                for e in entries:
+                    if e['type'] not in ('买入', '卖出') or not e['asset_name'] or e['is_new']:
+                        continue
+                    # 查找资产的 Asset_Class、Platform、Code（用于完整记录）
+                    asset_mask = template['Name'] == e['asset_name']
+                    asset_row = template[asset_mask].iloc[0] if asset_mask.any() else None
+                    # 成交价：用户填了则用，否则从快照 Current_Price 估算
+                    price_val = e.get('price', 0.0)
+                    if not price_val or price_val <= 0:
+                        price_val = float(asset_row['Current_Price']) if asset_row is not None else 0.0
+                    tx_rows.append({
+                        'Date':        new_date_str,
+                        'Asset_Class': asset_row['Asset_Class'] if asset_row is not None else '',
+                        'Platform':    asset_row['Platform']    if asset_row is not None else '',
+                        'Name':        e['asset_name'],
+                        'Code':        asset_row['Code']        if asset_row is not None else '',
+                        'Type':        e['type'],
+                        'Amount_CNY':  round(e['amount'], 2),
+                        'Price':       round(price_val, 4),
+                        'Fee_CNY':     round(e.get('fee', 0.0), 2),
+                    })
+                if tx_rows:
+                    tx_df = pd.DataFrame(tx_rows)
+                    tx_path = csv_path.replace('portfolio.csv', 'transaction.csv')
+                    if os.path.exists(tx_path):
+                        existing = pd.read_csv(tx_path)
+                        tx_df = pd.concat([existing, tx_df], ignore_index=True)
+                    tx_df.to_csv(tx_path, index=False)
 
                 st.session_state['update_template'] = template
                 st.session_state['rebalance_entries'] = []
