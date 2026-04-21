@@ -32,7 +32,6 @@ from market_monitor import (
     TARGETS,
 )
 from backtest import run_backtest
-)
 
 # ─── Page Config ───
 
