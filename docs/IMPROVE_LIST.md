@@ -45,6 +45,7 @@
 | 黄金定投矩阵 | `src/market_monitor.py` + `dashboard/app.py` Tab5 | MA200乖离率×VIX 矩阵，顶格=5x，对冲仓角色；企业微信推送已包含黄金信号 |
 | 完整矩阵表格展示（当前位置高亮）| `dashboard/app.py` Tab5 | 5个标的矩阵全部展示，黄色高亮当前所处格子 |
 | 定投策略回测 | `src/backtest.py` + `dashboard/app.py` Tab6 | 固定策略 vs 矩阵策略历史对比，支持CSI300/A500/SP500/NDX100/黄金，月频/周频，XIRR+最大回撤指标 |
+| transaction.csv 基础设施 | `dashboard/app.py` Tab2 调仓辅助器 | Apply 时自动写入成交记录；成交价/手续费可选填；历史首笔数据已手动补录（2026-04-17） |
 
 ---
 
@@ -54,24 +55,20 @@
 
 1. **调仓决策复盘**（原"资金效率分析"）— 回答"这笔买入/卖出决策好不好"，通过对比成交后该资产的后续表现来评估。
 
-   **依赖新文件 `transaction.csv`**，记录每笔实际成交明细：
+   **`transaction.csv` 基础设施已完成**：
+   - 文件已创建（iCloud 同步路径），含 2026-04-17 首次调仓的 11 笔历史记录
+   - 调仓辅助器每条买入/卖出条目已新增**成交价**（可选，不填用快照价代替）和**手续费**（可选，默认 0）输入
+   - Apply 时自动追加写入 `transaction.csv`，从此每周调仓自动积累数据
 
-   ```
-   Date, Asset_Class, Platform, Name, Code, Type, Shares, Price, Amount_CNY, Fee_CNY
-   ```
+   **schema**：`Date, Asset_Class, Platform, Name, Code, Type, Amount_CNY, Price, Fee_CNY`
 
-   - `transaction.csv` 由调仓辅助器在 Apply 时自动写入（一次 Apply 可生成多行）
-   - 用户可选填"成交价"和"手续费"字段（调仓辅助器需新增这两个可选输入）；不填则按快照价格估算
-   - 分析维度：按资产类别、买/卖方向，统计各笔交易的后续 1M/3M/6M 收益
-   - **实施计划**：
-     1. 调仓辅助器新增"成交价/手续费"字段
-     2. Apply 时自动追加写入 `transaction.csv`
-     3. 积累 3-6 个月数据后，再建复盘分析 UI
-   - **当前状态**：`transaction.csv` 基础设施待建；依赖 transaction.csv 基础设施先行，数据积累阶段 P2，分析 UI 阶段 P3
+   **下一步**（P3，等待数据积累）：
+   - 积累 3-6 个月数据后，建复盘分析 UI
+   - 分析维度：按资产类别/买卖方向，统计各笔交易的后续 1M/3M/6M 收益
 
 #### **P3 — 高复杂度 / 需前置工作**
 
-3. **季度财报（Tab 6）** — 资产负债表 + 净资产瀑布图；设计已完成（见 `docs/QUARTERLY_REPORT_DESIGN.md`）；前置：用户需先将 25Q4 + 26Q1 历史数据录入 `balance_sheet.csv` 和 `cashflow_log.csv`
+3. **季度财报（Tab 7）** — 资产负债表 + 净资产瀑布图；设计已完成（见 `docs/QUARTERLY_REPORT_DESIGN.md`）；前置：用户需先将 25Q4 + 26Q1 历史数据录入 `balance_sheet.csv` 和 `cashflow_log.csv`
 4. **收益归因分析** — 各资产类别对总收益的贡献度分解
 5. **再平衡建议** — 基于目标配置比例，自动计算各类别买入/卖出金额
 
@@ -84,7 +81,7 @@ FamilyFund 的数据层分三个层次，各自服务不同的分析目的：
 | 文件 | 频率 | 内容 | 支撑分析 |
 |------|------|------|------|
 | `portfolio.csv` | 周频快照 | 各持仓当期市值/份额/NCF | NAV 净值走势、P&L、基准对比 |
-| `transaction.csv`（待建） | 每笔交易 | 单笔成交价/手续费/数量 | 调仓决策复盘（"这笔买卖决策好不好"） |
+| `transaction.csv` | 每笔交易 | 单笔成交价/手续费/数量 | 调仓决策复盘（"这笔买卖决策好不好"） |
 | `balance_sheet.csv` + `cashflow_log.csv`（待建） | 季频 | 家庭全量资产负债、外部现金流 | 季度家庭财报、净资产 QoQ |
 
 三者互不覆盖，`portfolio.csv` 的投资类汇总会被季度财报引擎自动聚合进 `balance_sheet.csv` 对应行。
