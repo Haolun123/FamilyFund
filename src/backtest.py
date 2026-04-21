@@ -453,8 +453,9 @@ def run_backtest(
             'top_multiplier': float,
         }
     """
+    # 价格往前多取 10 天，确保月初节假日也能通过 asof 找到最近交易日价格
     # 黄金需要额外拉取 MA200 预热数据
-    fetch_start = start_date
+    fetch_start = (pd.Timestamp(start_date) - timedelta(days=10)).strftime('%Y-%m-%d')
     if target == 'gold':
         fetch_start = (pd.Timestamp(start_date) - timedelta(days=_MA200_WARMUP_DAYS)).strftime('%Y-%m-%d')
 
