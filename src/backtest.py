@@ -463,11 +463,11 @@ def run_backtest(
     pe_series  = get_pe_series(target, start_date)
     vol_series = get_vol_series(target, start_date)
 
-    # 生成月度模拟日期序列（月初）
+    # 生成定投日期序列（月频=每月1日，周频=每周一）
     monthly_dates = pd.date_range(
         start=start_date,
         end=pd.Timestamp.today().normalize(),
-        freq='MS',
+        freq='MS' if freq == 'M' else 'W-MON',
     ).tolist()
 
     if len(monthly_dates) < 2:

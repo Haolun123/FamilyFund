@@ -2057,27 +2057,32 @@ with tab_backtest:
             key='bt_start_date',
         )
     with bt_col3:
+        bt_freq = st.radio(
+            "定投频率", options=['月频', '周频'], horizontal=True, key='bt_freq',
+            help="周频使用每周一作为定投日；PE 数据为月频，同月内各周使用同一 PE 值",
+        )
+
+    bt_col4, bt_col5, bt_col6, bt_col7 = st.columns(4)
+    with bt_col4:
         bt_base_amount = st.number_input(
             "每期基准金额", min_value=100.0, max_value=1_000_000.0,
             value=1000.0, step=100.0, key='bt_base_amount',
         )
-
-    bt_col4, bt_col5, bt_col6 = st.columns(3)
-    with bt_col4:
+    with bt_col5:
         bt_top_equity = st.number_input(
             "顶格上限（权益类）", min_value=1.0, max_value=20.0,
             value=10.0, step=0.5,
             help="矩阵'顶格'对应的实际倍数（权益类标的）",
             key='bt_top_equity',
         )
-    with bt_col5:
+    with bt_col6:
         bt_top_gold = st.number_input(
             "顶格上限（黄金）", min_value=1.0, max_value=10.0,
             value=5.0, step=0.5,
             help="矩阵'顶格'对应的实际倍数（黄金）",
             key='bt_top_gold',
         )
-    with bt_col6:
+    with bt_col7:
         st.markdown("<br>", unsafe_allow_html=True)
         bt_run = st.button("▶ 运行回测", type="primary", key='bt_run', use_container_width=True)
 
@@ -2099,7 +2104,7 @@ with tab_backtest:
                     target=bt_target,
                     start_date=bt_start.strftime('%Y-%m-%d'),
                     base_amount=bt_base_amount,
-                    freq='M',
+                    freq='W' if bt_freq == '周频' else 'M',
                     top_multiplier=top_mult,
                 )
                 st.session_state['bt_result'] = result
