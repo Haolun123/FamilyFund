@@ -1801,7 +1801,6 @@ with tab_market:
                 f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>纳指100</div>"
                 f"<div style='font-size:13px; color:#999;'>PE {pe_ndx:.1f} × VIX {vix_val:.1f}</div>"
                 f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_ndx}</div>"
-                f"<div style='font-size:11px; color:#e65100;'>⚠️ PE 使用标普500代理（纳指历史PE无免费数据源），纳指实际估值通常更高，矩阵信号偏乐观</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
@@ -1850,7 +1849,7 @@ with tab_market:
                          use_container_width=True)
 
     with mat_col2:
-        st.caption("纳指100 完整矩阵（🟨 当前位置）⚠️ PE 使用标普代理，信号偏乐观")
+        st.caption("纳指100 完整矩阵（🟨 当前位置）")
         ndx_row = _find_row(pe_ndx, NDX100_PE_BANDS) if pe_ndx else None
         ndx_col = _find_col(vix_val, NDX100_VIX_BANDS) if vix_val else None
         if ndx_row is not None and ndx_col is not None:
