@@ -119,13 +119,15 @@ def _fetch_pe_shiller(start_date: str) -> list[dict] | None:
             except (ValueError, TypeError):
                 return None
 
-        df['date'] = df.iloc[:, 0].apply(_parse_date)
+        df['date'] = df['Date'].apply(_parse_date)
         df = df.dropna(subset=['date'])
 
         # Trailing PE = P / E
-        p_col = df['P'] if 'P' in df.columns else df.iloc[:, 2]
-        e_col = df['E'] if 'E' in df.columns else df.iloc[:, 4]
-        df['value'] = pd.to_numeric(p_col, errors='coerce') / pd.to_numeric(e_col, errors='coerce')
+        # E（12个月滚动收益）最近几个月可能为 NaN（Shiller 数据滞后），
+        # 用 forward-fill 填补：收益变化缓慢，用上一个月值代替合理
+        p_col = pd.to_numeric(df['P'], errors='coerce')
+        e_col = pd.to_numeric(df['E'], errors='coerce').ffill()
+        df['value'] = p_col / e_col
         df = df[df['value'] > 0].dropna(subset=['value'])
         df = df[df['date'] >= start_date][['date', 'value']]
         return df.to_dict('records')

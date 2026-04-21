@@ -166,7 +166,7 @@ if 'sap_price_initialized' not in st.session_state:
 # ─── Tabs ───
 
 tab_dashboard, tab_update, tab_history, tab_sap, tab_market, tab_backtest = st.tabs(
-    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor", "回测"]
+    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor", "Backtest"]
 )
 
 # ═══════════════════════════════════════════════════════════
