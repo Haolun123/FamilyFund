@@ -1,9 +1,9 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v1.3  
+> **版本**: v1.4  
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
-> **最后更新**: 2026-04-18  
+> **最后更新**: 2026-04-21  
 > **状态**: 活跃迭代中
 
 ---
@@ -272,13 +272,14 @@ FamilyFund/
 │   ├── market_monitor.py              # 市场温度计：乖离率/VIX/QVIX/PE×VIX 矩阵
 │   ├── benchmark.py                   # 基准对比（CSI300/S&P500/CPI/M2）
 │   ├── notifier.py                    # 企业微信每日推送
+│   ├── backtest.py                    # DCA 回测引擎：固定策略 vs 矩阵策略历史模拟，支持5个标的，含 Shiller PE 数据拉取与缓存
 │   ├── import_sap_xlsx.py             # XLSX → own_sap/move_sap CSV 迁移工具
 │   ├── migrate_xlsx.py                # XLSX → portfolio.csv 迁移工具
 │   ├── fund_calculator.py             # [历史已弃用] 旧版净值核算
 │   └── asset_breakdown.py             # [历史] XLSX 资产配置解析（迁移工具）
 │
 ├── dashboard/                         # ★ 可视化仪表板
-│   └── app.py                         # Streamlit + Plotly 交互式仪表板（5 tabs）
+│   └── app.py                         # Streamlit + Plotly 交互式仪表板（6 tabs）
 │
 ├── scripts/                           # 运维脚本
 │   ├── daily_push.py                  # 每日推送入口（EC2 cron）
@@ -656,6 +657,8 @@ graph TB
 | **周报更新** | 上周模板复用 + 调仓辅助器（买入/卖出下拉关联资产，自动写 NCF；新增标的自动追加行）+ 批量 CSV 导入 + 校验保存 | 调仓流水录入、一键回填各资产 NCF |
 | **历史记录** | 历史快照浏览与编辑 | 日期选择、行内编辑、删除 |
 | **SAP 股票** | Own/Move SAP 成本核算 | 手动输入价格汇率、自动计算归属成本 |
+| **市场温度计** | Tab 5 | 乖离率/VIX/QVIX/PE×VIX/黄金矩阵，全标的矩阵表格+当前位置高亮 |
+| **定投策略回测** | Backtest tab (Tab 6) | 5个标的，月/周频，XIRR+MDD对比，当前位置高亮矩阵 |
 | **侧边栏** | 日期范围 + 类别筛选 + PDF 下载 | 全局联动 |
 
 #### 技术要点
@@ -752,6 +755,9 @@ timeline
               : 标普/纳指 PE×VIX 定投倍数矩阵
               : A股 PE百分位×QVIX百分位 矩阵（CSI300/中证A500）
               : EC2 每日企业微信推送（cron，北京时间 8:30）
+              : 黄金定投矩阵（MA200×VIX）
+              : 完整矩阵当前位置高亮
+              : 定投策略回测（Backtest Tab）
     section Phase 5 — 家庭资产负债表（设计阶段）
         待实现 : 季度财报 Tab（Tab 6）
               : 全量资产负债表（含不动产/坏账准备）
@@ -819,8 +825,8 @@ P1 市场温度计已全部实现：
 | ~~**卡尔马比率**~~ | ✅ 已实现：`compute_calmar()`，Dashboard KPI 展示，年化收益 / 最大回撤 |
 | ~~**风险集中度警示**~~ | ✅ 已实现：类别 > 40% / 单持仓 > 20% 自动 warning + 柱状图，Dashboard Tab1 |
 | ~~**货币敞口可视化**~~ | ✅ 已实现：CNY/USD/EUR/HKD metrics + 圆环饼图，Dashboard Tab1 |
+| ~~**持仓回测**~~ | ✅ 已实现：`src/backtest.py`，固定策略 vs 矩阵策略，支持5个标的，Dashboard Tab6 |
 | **资金效率分析** | 每笔 NCF 对应的实际回报，回答"哪些时点买入决策好/差" |
-| **持仓回测** | 模拟固定倍数 vs PE×VIX 矩阵倍数定投策略，验证矩阵有效性 |
 | **收益归因分析** | 各资产类别对总收益的贡献度分解 |
 | **再平衡建议** | 基于目标配置比例，自动计算各类别买入/卖出金额 |
 

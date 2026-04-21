@@ -10,7 +10,7 @@
 
 1. **核心算法正确且优雅** — `_run_nav_calculation()` 单一函数复用于基金整体和每个资产类别，份额净值法实现准确
 2. **数据安全** — `_atomic_write_csv()` 用文件锁 + 原子替换 + 自动备份（保留最近 30 份），防止写入中断导致数据损坏
-3. **Dashboard 完整度高** — 5 个 Tab（总览/周更/历史/SAP/市场温度计）覆盖了日常所有操作场景
+3. **Dashboard 完整度高** — 6 个 Tab（总览/周更/历史/SAP/市场温度计/定投回测）覆盖了日常所有操作场景
 4. **输入校验严格** — `validate_snapshot()` 对空值、异常波动、NCF 一致性等都有检查
 5. **批量导入** — CSV/TSV 粘贴导入很实用，自动补全缺失字段
 6. **PDF 报告** — 4 页 A4 横版报告，零额外依赖，可直接下载
@@ -42,6 +42,9 @@
 | NCF 全资产写入调仓辅助器 | `dashboard/app.py` Tab2 | 买入/卖出自动写对应资产行 NCF，支持新增标的追加行 |
 | Docker 代码热重载 | `docker-compose.yml` | src/ 和 dashboard/ 挂载为 volume，代码改动 restart 即生效 |
 | Weekly Update 重算市值 | `dashboard/app.py` Tab2 | 「🔄 重算市值」按钮，批量更新 Total_Value = Shares × Price × Rate，Cash 跳过，手动值可覆盖 |
+| 黄金定投矩阵 | `src/market_monitor.py` + `dashboard/app.py` Tab5 | MA200乖离率×VIX 矩阵，顶格=5x，对冲仓角色；企业微信推送已包含黄金信号 |
+| 完整矩阵表格展示（当前位置高亮）| `dashboard/app.py` Tab5 | 5个标的矩阵全部展示，黄色高亮当前所处格子 |
+| 定投策略回测 | `src/backtest.py` + `dashboard/app.py` Tab6 | 固定策略 vs 矩阵策略历史对比，支持CSI300/A500/SP500/NDX100/黄金，月频/周频，XIRR+最大回撤指标 |
 
 ---
 
@@ -64,12 +67,7 @@
      1. 调仓辅助器新增"成交价/手续费"字段
      2. Apply 时自动追加写入 `transaction.csv`
      3. 积累 3-6 个月数据后，再建复盘分析 UI
-   - **当前状态**：`transaction.csv` 基础设施待建；数据积累阶段 P2，分析 UI 阶段 P3
-
-2. **持仓回测** — 模拟定投策略（固定金额 vs PE×VIX / MA200×VIX 矩阵倍数），验证矩阵有效性；基于 yfinance/akshare 历史行情。
-   - **A股（CSI300/A500）**：P2，akshare 有完整 PE + QVIX 历史数据
-   - **黄金**：P2，使用 MA200 偏离度 × VIX 矩阵（`GOLD_BIAS_BANDS`/`GOLD_VIX_BANDS`/`GOLD_MATRIX` 已在 `market_monitor.py` 中定义），yfinance `GC=F` 价格历史充足
-   - **美股（S&P500/NDX100）**：P3，待历史 PE 数据源确认后补充
+   - **当前状态**：`transaction.csv` 基础设施待建；依赖 transaction.csv 基础设施先行，数据积累阶段 P2，分析 UI 阶段 P3
 
 #### **P3 — 高复杂度 / 需前置工作**
 
