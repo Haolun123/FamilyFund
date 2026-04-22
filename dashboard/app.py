@@ -165,8 +165,8 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_history, tab_sap, tab_market, tab_backtest = st.tabs(
-    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor", "Backtest"]
+tab_dashboard, tab_update, tab_history, tab_sap, tab_market, tab_backtest, tab_quarterly = st.tabs(
+    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor", "Backtest", "Quarterly Report"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -2293,3 +2293,121 @@ with tab_backtest:
             f"⚠️ {pe_note}仅供参考，不构成投资建议。"
             "历史回测不代表未来收益。XIRR 为资金加权年化收益率。"
         )
+
+# ═══════════════════════════════════════════════════════════
+# Tab 7: Quarterly Report
+# ═══════════════════════════════════════════════════════════
+
+with tab_quarterly:
+    st.header("Quarterly Report")
+    st.caption("家庭全量资产负债表 · QoQ 净资产对比 · 财务比率")
+
+    try:
+        from quarterly_engine import (
+            load_balance_sheet, available_quarters, compute_net_worth,
+            compute_qoq, generate_balance_sheet_table, generate_waterfall_data,
+            CATEGORY_DISPLAY,
+        )
+        bs_df = load_balance_sheet()
+        quarters = available_quarters(bs_df)
+    except Exception as e:
+        st.error(f"加载 balance_sheet.csv 失败: {e}")
+        st.stop()
+
+    if not quarters:
+        st.info("balance_sheet.csv 暂无数据")
+    else:
+        ctrl1, ctrl2 = st.columns(2)
+        with ctrl1:
+            q_curr = st.selectbox("当前季度", options=quarters[::-1], key='qr_curr')
+        with ctrl2:
+            prev_options = [q for q in quarters[::-1] if q < q_curr]
+            q_prev = st.selectbox("对比季度",
+                                  options=prev_options if prev_options else ['—'],
+                                  key='qr_prev')
+            if q_prev == '—':
+                q_prev = None
+
+        curr = compute_net_worth(bs_df, q_curr)
+
+        # KPI
+        st.subheader("核心指标")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("家庭净资产", f"¥{curr['net_worth']:,.0f}")
+        k2.metric("总资产", f"¥{curr['total_assets']:,.0f}")
+        k3.metric("总负债", f"¥{curr['total_liabilities']:,.0f}")
+        k4.metric("资产负债率", f"{curr['debt_ratio']:.1f}%")
+
+        k5, k6, k7, k8 = st.columns(4)
+        k5.metric("金融投资占比", f"{curr['investment_ratio']:.1f}%")
+        cr = curr['current_ratio']
+        k6.metric("流动比率", f"{cr:.2f}" if cr else "—", help="流动资产/流动负债")
+        k7.metric("季度", q_curr)
+        if q_prev:
+            qoq = compute_qoq(bs_df, q_prev, q_curr)
+            k8.metric("QoQ 净资产", f"¥{qoq['net_worth_delta']:+,.0f}",
+                      delta=f"{qoq['net_worth_pct']:+.2f}%")
+
+        st.divider()
+
+        # 资产负债表
+        st.subheader("资产负债表")
+        asset_df, liab_df = generate_balance_sheet_table(bs_df, q_curr)
+        tbl1, tbl2 = st.columns(2)
+        with tbl1:
+            st.markdown("**资产端**")
+            st.dataframe(asset_df.drop(columns=['Notes']), use_container_width=True,
+                         hide_index=True,
+                         column_config={'金额(CNY)': st.column_config.NumberColumn(format="¥%.0f")})
+            st.markdown(f"**总资产: ¥{curr['total_assets']:,.0f}**")
+        with tbl2:
+            st.markdown("**负债端**")
+            st.dataframe(liab_df.drop(columns=['Notes']), use_container_width=True,
+                         hide_index=True,
+                         column_config={'金额(CNY)': st.column_config.NumberColumn(format="¥%.0f")})
+            st.markdown(f"**总负债: ¥{curr['total_liabilities']:,.0f}**")
+            st.markdown(f"**净资产: ¥{curr['net_worth']:,.0f}**")
+
+        st.divider()
+
+        # 瀑布图 + QoQ 对比
+        if q_prev:
+            st.subheader(f"净资产变化 ({q_prev} → {q_curr})")
+            waterfall = generate_waterfall_data(qoq)
+            fig_wf = go.Figure(go.Waterfall(
+                orientation='v',
+                measure=[d['type'] for d in waterfall],
+                x=[d['label'] for d in waterfall],
+                y=[d['value'] for d in waterfall],
+                connector={'line': {'color': '#888'}},
+                increasing={'marker': {'color': '#2e7d32'}},
+                decreasing={'marker': {'color': '#d32f2f'}},
+                totals={'marker': {'color': '#1565c0'}},
+                texttemplate='¥%{y:,.0f}',
+                textposition='outside',
+            ))
+            fig_wf.update_layout(height=420, margin=dict(t=40, b=60), yaxis_title='金额 (¥)')
+            st.plotly_chart(fig_wf, use_container_width=True)
+
+            st.subheader("资产结构对比")
+            prev_nw = compute_net_worth(bs_df, q_prev)
+            compare_rows = []
+            all_cats = sorted(set(list(curr['asset_breakdown']) + list(prev_nw['asset_breakdown'])))
+            for cat in all_cats:
+                compare_rows.append({
+                    '大类':  CATEGORY_DISPLAY.get(cat, cat),
+                    q_prev:  prev_nw['asset_breakdown'].get(cat, 0),
+                    q_curr:  curr['asset_breakdown'].get(cat, 0),
+                    '变化':  curr['asset_breakdown'].get(cat, 0) - prev_nw['asset_breakdown'].get(cat, 0),
+                })
+            compare_df = pd.DataFrame(compare_rows)
+            fig_cmp = go.Figure()
+            fig_cmp.add_trace(go.Bar(name=q_prev, x=compare_df['大类'], y=compare_df[q_prev],
+                                     marker_color='#90CAF9'))
+            fig_cmp.add_trace(go.Bar(name=q_curr, x=compare_df['大类'], y=compare_df[q_curr],
+                                     marker_color='#1565c0'))
+            fig_cmp.update_layout(barmode='group', height=360,
+                                   yaxis_title='金额 (¥)', margin=dict(t=40, b=40))
+            st.plotly_chart(fig_cmp, use_container_width=True)
+
+        st.caption("⚠️ 房产/车辆为估算公允价值，非精确市场价。损益表分解从 2026Q2 起可用（需 portfolio.csv 投资收益数据）。")
