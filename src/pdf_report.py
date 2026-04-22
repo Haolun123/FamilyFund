@@ -6,7 +6,8 @@ Generates a 4-page A4 landscape PDF:
   Page 3: P/L Analysis (KPIs + bar chart + table)
   Page 4: Holdings Detail (full table)
 
-Uses matplotlib PdfPages — zero extra dependencies.
+Uses matplotlib PdfPages — zero extra dependencies beyond requirements.txt.
+CJK font loaded via mpl-fontkit (Noto Sans SC, cross-platform).
 """
 
 import io
@@ -16,9 +17,17 @@ from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 from datetime import datetime
 
+# Load CJK font via mpl-fontkit (cross-platform, pip-installed Noto fonts)
+try:
+    import mpl_fontkit as fk
+    fk.install('NotoSansSC', verbose=False)
+except Exception:
+    pass  # fallback gracefully — CJK may show boxes but won't crash
+
 matplotlib.rcParams['font.sans-serif'] = [
-    'Arial Unicode MS', 'PingFang SC', 'SimHei',       # macOS / Windows
-    'Noto Sans CJK JP', 'Noto Sans CJK SC',            # Docker (fonts-noto-cjk)
+    'Arial Unicode MS',                            # Docker (copied to matplotlib fonts dir)
+    'Noto Sans CJK SC', 'Noto Sans SC',            # Linux system or mpl-fontkit
+    'PingFang SC', 'SimHei',                       # macOS / Windows fallback
 ]
 matplotlib.rcParams['axes.unicode_minus'] = False
 

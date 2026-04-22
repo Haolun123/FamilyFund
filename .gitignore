@@ -16,6 +16,11 @@ data/backups/
 
 # Reference files (local use only, not in repo)
 reference/
+
+# Assets — fonts are large binaries, not versioned
+# (ArialUnicodeMS.ttf must be present locally for Docker build)
+assets/fonts/*.ttf
+
 ~$*.xlsx
 
 # Private docs

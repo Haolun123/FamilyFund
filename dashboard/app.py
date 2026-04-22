@@ -2420,9 +2420,14 @@ with tab_quarterly:
             import matplotlib
             import matplotlib.pyplot as plt
             from matplotlib.backends.backend_pdf import PdfPages
+            try:
+                import mpl_fontkit as fk
+                fk.install('NotoSansSC', verbose=False)
+            except Exception:
+                pass
             matplotlib.rcParams['font.sans-serif'] = [
+                'Noto Sans CJK SC', 'Noto Sans SC',
                 'Arial Unicode MS', 'PingFang SC', 'SimHei',
-                'Noto Sans CJK JP', 'Noto Sans CJK SC',
             ]
             matplotlib.rcParams['axes.unicode_minus'] = False
 
