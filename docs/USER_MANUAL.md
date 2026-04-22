@@ -293,23 +293,26 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 
 > **Asset_Investment 特别说明**：`2026Q2` 起，`Sub_Category` 为 `auto` 的行引擎会自动从 `portfolio.csv` 中取季末（最近快照）的 `Total_Value` 合计填入，无需手动填数字，保持 `Amount=0, CNY_Amount=0` 即可。
 
-**Step 2 — 更新 `cashflow_log.csv`**
+**Step 2 — 更新 `cashflow_log.csv`**（通常可跳过）
 
 文件路径：`$FAMILYFUND_DATA/cashflow_log.csv`
 
-只需记录**实际划入家庭基金**的外部资金，每季度通常 0-3 条：
+**重要**：`cashflow_log.csv` 只记录**家庭基金外**的特殊现金流。
+
+- ❌ **不需要填**：打入家庭基金的工资/注资 → 已在 `portfolio.csv` Cash NCF 里有记录
+- ✅ **需要填**：鲨鱼记账捕捉不到的基金外特殊项
+
+实际每季度通常 0-2 条，大多数季度可直接跳过此步骤：
 
 ```csv
-2026Q2,2026-05-01,50000,Inflow_Salary,工资划入基金（如有）
-2026Q2,2026-06-15,230000,Inflow_Other,旧车出售款划入基金（示例）
+2026Q2,2026-05-15,-15000,Outflow_Major,保险年费（基金外支出）
+2026Q2,2026-06-01,23000,Inflow_Other,旧车置换补贴已收款（未打入基金）
 ```
 
 Type 枚举：
-- `Inflow_Salary`：工资/奖金主动划入基金
-- `Inflow_Other`：其他收入划入（出售资产等）
-- `Inflow_Family`：家庭内部注资（需同步在 balance_sheet 负债端记录）
-
-> 若本季度无外部资金划入家庭基金，跳过此步骤。
+- `Inflow_Salary`：工资净储蓄（未来由鲨鱼记账脚本自动生成）
+- `Inflow_Other`：基金外特殊收入
+- `Outflow_Major`：基金外大额支出
 
 **Step 3 — 刷新 Dashboard**
 

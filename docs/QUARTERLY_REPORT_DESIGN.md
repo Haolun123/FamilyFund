@@ -104,22 +104,44 @@ Quarter,Category,Sub_Category,Account,Amount,Currency,FX_Rate,CNY_Amount,Notes
 
 ### 3.3 新增：`data/cashflow_log.csv`
 
-季度级外部现金流，用于损益表反推储蓄率和大额消费。
+**重新澄清定位（2026-04-22）**
+
+`cashflow_log.csv` **只记录家庭基金外的现金流**，用于季度损益表中解释"家庭净资产变化 - 投资收益"的剩余部分。
+
+**不需要记录**在 `cashflow_log.csv` 的内容：
+- 打入家庭基金的外部资金 → 已在 `portfolio.csv` 的 Cash NCF 中记录，季度财报引擎可直接汇总
+- 家庭注资（如丈母娘注资）→ 同上，打入基金时已在 Cash NCF 有记录
+
+**需要记录**在 `cashflow_log.csv` 的内容：
+- **工资净储蓄**：工资收入 - 日常消费（家庭基金外，来自鲨鱼记账聚合脚本，未来可自动化）
+- **基金外大额特殊项**：出售资产但未打入基金的收入、大额支出等
+- 若鲨鱼记账脚本已实现，工资净储蓄可自动算入，无需手填
+
+**损益表公式**：
+```
+家庭净资产 QoQ 变化
+  = 投资收益（portfolio.csv NAV 引擎，2026Q2 起）
+  + 家庭基金外部净流入（portfolio.csv Cash NCF 季度汇总）
+  + 工资净储蓄（鲨鱼记账聚合）
+  + 基金外大额特殊项（cashflow_log.csv 手动补录）
+```
+
+**实操上**：日常基本不需要填 `cashflow_log.csv`，只有鲨鱼记账捕捉不到的基金外特殊收支才手动补录（每季度通常 0-2 条）。
 
 ```csv
-Quarter, Date, Amount, Type, Note
-2026Q1, 2026-01-31, 50000, Inflow_Salary, 工资净结余
-2026Q1, 2026-01-15, 500000, Inflow_Family, 丈母娘注资（同步录入balance_sheet负债端）
-2026Q1, 2026-02-20, -10000, Outflow_Major, 保险费
+Quarter,Date,Amount,Type,Note
+2026Q2,2026-05-15,-15000,Outflow_Major,保险年费（基金外支出）
+2026Q2,2026-06-01,23000,Inflow_Other,旧车X3置换补贴已收款（未打入基金）
 ```
 
 **Type 枚举：**
 ```
-Inflow_Salary    工资/奖金净结余（税后到手 - 日常消费）
-Inflow_Other     其他收入（出售资产等）
-Inflow_Family    家庭内部注资（需同步在负债端记录）
-Outflow_Major    大额支出（保险、装修、医疗等）
+Inflow_Salary    工资净储蓄（鲨鱼记账聚合，未来自动化）
+Inflow_Other     基金外特殊收入（出售资产等未打入基金的部分）
+Outflow_Major    基金外大额支出（保险/装修等）
 ```
+
+> ⚠️ **已打入家庭基金的资金不要在此重复记录**，portfolio.csv Cash NCF 已是 source of truth。
 
 ---
 
