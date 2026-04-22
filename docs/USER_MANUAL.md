@@ -13,6 +13,7 @@
 3. [调仓辅助器使用](#3-调仓辅助器使用)
 4. [SAP 股票操作](#4-sap-股票操作)
 5. [portfolio.csv 字段参考](#5-portfoliocsv-字段参考)
+6. [季度财报操作](#6-季度财报操作)
 
 ---
 
@@ -256,3 +257,104 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 ```
 
 > 第二周博时标普买入了 ¥800，黄金买入了 ¥1572.75，Cash 减少对应金额，无外部入金所以 Cash NCF = 0。
+
+---
+
+## 6. 季度财报操作
+
+**频率**：每季末（3月/6月/9月/12月底）  
+**耗时**：约 15-20 分钟  
+**入口**：Dashboard → Quarterly Report Tab
+
+---
+
+### 6.1 新增季度数据（手动编辑 CSV）
+
+**Step 1 — 更新 `balance_sheet.csv`**
+
+文件路径：`$FAMILYFUND_DATA/balance_sheet.csv`（iCloud 同步目录）
+
+1. 用文本编辑器或 Excel 打开文件
+2. 复制上一季度的所有行（例如复制所有 `2026Q1` 行）
+3. 粘贴到文件末尾，将 `Quarter` 列全部改为新季度（如 `2026Q2`）
+4. 逐行更新各账户余额：
+
+| 类别 | 更新方式 |
+|------|---------|
+| `Asset_Current` Cash 各账户 | 查各银行/支付宝 APP 查季末余额 |
+| `Asset_Current` ProvidentFund | 查公积金 APP 账户余额 |
+| `Asset_Investment` | **2026Q2 起填 0**，引擎自动从 portfolio.csv 聚合季末市值 |
+| `Asset_RealEstate` | 房产估值按需更新（每年 1-2 次即可），车辆按市场行情估算 |
+| `Asset_PrivateEquity` | 按实际变化更新 |
+| `Asset_BadDebt` Provision | 如坏账比例有变化，更新计提金额 |
+| `Liability_Current` CreditCard | 查各信用卡当期账单余额 |
+| `Liability_LongTerm` 贷款 | 查银行 APP 贷款剩余本金 |
+| `Liability_Family` | 按实际变化更新 |
+
+> **Asset_Investment 特别说明**：`2026Q2` 起，`Sub_Category` 为 `auto` 的行引擎会自动从 `portfolio.csv` 中取季末（最近快照）的 `Total_Value` 合计填入，无需手动填数字，保持 `Amount=0, CNY_Amount=0` 即可。
+
+**Step 2 — 更新 `cashflow_log.csv`**
+
+文件路径：`$FAMILYFUND_DATA/cashflow_log.csv`
+
+只需记录**实际划入家庭基金**的外部资金，每季度通常 0-3 条：
+
+```csv
+2026Q2,2026-05-01,50000,Inflow_Salary,工资划入基金（如有）
+2026Q2,2026-06-15,230000,Inflow_Other,旧车出售款划入基金（示例）
+```
+
+Type 枚举：
+- `Inflow_Salary`：工资/奖金主动划入基金
+- `Inflow_Other`：其他收入划入（出售资产等）
+- `Inflow_Family`：家庭内部注资（需同步在 balance_sheet 负债端记录）
+
+> 若本季度无外部资金划入家庭基金，跳过此步骤。
+
+**Step 3 — 刷新 Dashboard**
+
+保存 CSV 后，刷新浏览器，Quarterly Report Tab 自动加载新季度数据。选择 `2026Q2` 作为当前季度，`2026Q1` 作为对比季度，即可查看 QoQ 对比和瀑布图。
+
+---
+
+### 6.2 查看与导出
+
+1. 打开 Dashboard → **Quarterly Report** Tab
+2. 顶部下拉选择**当前季度**和**对比季度**
+3. 查看 KPI 卡片、资产负债表、瀑布图、资产结构对比图
+4. 点击「📄 下载季度 PDF 报告」导出 2 页 A4 横版报告
+
+---
+
+### 6.3 balance_sheet.csv 字段说明
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| `Quarter` | 季度标识 | `2026Q2` |
+| `Category` | 大类（见枚举） | `Asset_Current` |
+| `Sub_Category` | 子类 | `Cash`, `Mortgage`, `auto` |
+| `Account` | 账户/项目名称 | `招商银行` |
+| `Amount` | 原币金额 | `102011` |
+| `Currency` | 货币 | `CNY` |
+| `FX_Rate` | 原币→CNY 汇率 | `1.0` |
+| `CNY_Amount` | 人民币金额（= Amount × FX_Rate） | `102011` |
+| `Notes` | 备注 | `剩余本金`, `估算` |
+
+**Category 枚举：**
+
+| 代码 | 含义 | 录入方式 |
+|------|------|---------|
+| `Asset_Current` | 流动资产（现金/公积金） | 手动 |
+| `Asset_Investment` | 金融投资 | 2026Q2 起自动聚合，早期手动 |
+| `Asset_RealEstate` | 不动产/车辆 | 手动估算 |
+| `Asset_PrivateEquity` | 私募股权 | 手动 |
+| `Asset_BadDebt` | 坏账（原值 + Provision 抵减行） | 手动 |
+| `Liability_Current` | 流动负债（信用卡等） | 手动 |
+| `Liability_LongTerm` | 长期负债（房贷/车贷） | 手动，填剩余本金 |
+| `Liability_Family` | 家庭内部负债 | 手动 |
+
+**坏账计提写法**（原值 + 抵减行各一行）：
+```csv
+2026Q2,Asset_BadDebt,Loan,基础工程投资,3400000,CNY,1.0,3400000,原始出资额
+2026Q2,Asset_BadDebt,Provision,坏账准备,-1700000,CNY,1.0,-1700000,50%计提
+```
