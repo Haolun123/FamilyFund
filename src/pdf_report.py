@@ -42,7 +42,7 @@ COLOR_LOSS = '#d32f2f'
 TITLE_COLOR = '#1a237e'
 HEADER_BG = '#2196F3'
 ALT_ROW_BG = '#f5f5f5'
-TOTAL_PAGES = 4
+TOTAL_PAGES = 6
 
 
 # ── Helpers ──
@@ -150,54 +150,36 @@ def _page_overview(pdf, fund_nav_df):
 # ── Page 2: Asset Class Comparison ──
 
 def _page_class(pdf, class_nav_dict, allocation_df):
+    # ── Page 2: 分类净值走势 + 业绩表 ──
     fig = plt.figure(figsize=PAGE_SIZE, dpi=150)
-
-    fig.text(0.5, 0.93, '\u8d44\u4ea7\u7c7b\u522b\u5bf9\u6bd4',
+    fig.text(0.5, 0.93, '分类净值对比',
              fontsize=16, fontweight='bold', ha='center', color=TITLE_COLOR)
 
-    # Left: multi-line NAV chart
-    ax_lines = fig.add_axes([0.06, 0.38, 0.42, 0.48])
+    # 全宽 NAV 折线图（排除 Cash）
+    ax_lines = fig.add_axes([0.07, 0.38, 0.86, 0.50])
     for i, (cls, nav_df) in enumerate(sorted(class_nav_dict.items())):
+        if cls == 'Cash':
+            continue
         dates = pd.to_datetime(nav_df['Date'])
         display = CLASS_DISPLAY_NAMES.get(cls, cls)
         color = COLORS[i % len(COLORS)]
-        ax_lines.plot(dates, nav_df['NAV'], color=color, linewidth=1.5,
-                      marker='o', markersize=3, label=display)
+        ax_lines.plot(dates, nav_df['NAV'], color=color, linewidth=2.0,
+                      marker='o', markersize=4, label=display)
 
-    ax_lines.axhline(y=1.0, color='red', linestyle='--', linewidth=0.7, alpha=0.3)
-    ax_lines.set_title('\u5206\u7c7b\u51c0\u503c\u5bf9\u6bd4', fontsize=10, fontweight='bold', pad=8)
-    ax_lines.legend(fontsize=6.5, loc='best')
+    ax_lines.axhline(y=1.0, color='red', linestyle='--', linewidth=0.8, alpha=0.4)
+    ax_lines.set_title('分类净值走势（不含现金）', fontsize=11, fontweight='bold', pad=10)
+    ax_lines.legend(fontsize=8, loc='best', framealpha=0.8)
     ax_lines.grid(True, linestyle='--', alpha=0.3)
-    ax_lines.tick_params(labelsize=7)
+    ax_lines.tick_params(labelsize=8)
     for label in ax_lines.get_xticklabels():
-        label.set_rotation(30)
+        label.set_rotation(20)
 
-    # Right: donut pie chart
-    ax_pie = fig.add_axes([0.55, 0.38, 0.40, 0.48])
-    pie_data = allocation_df[allocation_df['Total_Value'] > 0].sort_values('Total_Value', ascending=False)
-    labels = pie_data['Display_Name'].tolist()
-    values = pie_data['Total_Value'].tolist()
-    pie_colors = COLORS[:len(values)]
-
-    wedges, texts, autotexts = ax_pie.pie(
-        values, labels=labels,
-        autopct=lambda pct: f'{pct:.1f}%',
-        colors=pie_colors, startangle=90, pctdistance=0.78,
-        wedgeprops=dict(width=0.4, edgecolor='white', linewidth=1.5),
-    )
-    for t in texts:
-        t.set_fontsize(7)
-    for t in autotexts:
-        t.set_fontsize(6.5)
-    ax_pie.set_title('\u8d44\u4ea7\u914d\u7f6e', fontsize=10, fontweight='bold', pad=8)
-    total_val = sum(values)
-    ax_pie.text(0, 0, f'\u00a5{total_val:,.0f}', ha='center', va='center',
-                fontsize=9, fontweight='bold')
-
-    # Bottom: class performance table
+    # 底部业绩表
     perf_rows = []
     for _, alloc_row in allocation_df.iterrows():
         cls = alloc_row['Asset_Class']
+        if cls == 'Cash':
+            continue
         display = CLASS_DISPLAY_NAMES.get(cls, cls)
         if cls in class_nav_dict:
             cls_latest = class_nav_dict[cls].iloc[-1]
@@ -206,84 +188,123 @@ def _page_class(pdf, class_nav_dict, allocation_df):
         else:
             nav = '1.0000'
             ret = '0.00%'
-        tv = f'\u00a5{alloc_row["Total_Value"]:,.0f}'
+        tv = f'¥{alloc_row["Total_Value"]:,.0f}'
         alloc_pct = f'{alloc_row["Allocation_Percent"] * 100:.1f}%'
         perf_rows.append([display, nav, ret, tv, alloc_pct])
 
-    ax_table = fig.add_axes([0.08, 0.05, 0.84, 0.28])
+    ax_table = fig.add_axes([0.08, 0.04, 0.84, 0.30])
     _render_table(ax_table,
-                  ['\u8d44\u4ea7\u7c7b\u522b', '\u51c0\u503c', '\u6536\u76ca\u7387', '\u5e02\u503c', '\u5360\u6bd4'],
+                  ['资产类别', '净值', '收益率', '市值', '占比'],
                   perf_rows,
-                  col_widths=[0.3, 0.15, 0.15, 0.25, 0.15])
+                  col_widths=[0.30, 0.15, 0.15, 0.25, 0.15])
 
     report_date = allocation_df['Date'].iloc[0] if 'Date' in allocation_df.columns else ''
     _add_footer(fig, 2, report_date)
     pdf.savefig(fig)
     plt.close(fig)
 
+    # ── Page 3: 资产配置饼图 ──
+    fig3 = plt.figure(figsize=PAGE_SIZE, dpi=150)
+    fig3.text(0.5, 0.93, '资产配置',
+              fontsize=16, fontweight='bold', ha='center', color=TITLE_COLOR)
 
-# ── Page 3: P/L Analysis ──
+    ax_pie = fig3.add_axes([0.15, 0.12, 0.70, 0.75])
+    pie_data = allocation_df[allocation_df['Total_Value'] > 0].sort_values('Total_Value', ascending=False)
+    pie_labels = pie_data['Display_Name'].tolist()
+    pie_values = pie_data['Total_Value'].tolist()
+    pie_colors = COLORS[:len(pie_values)]
+
+    wedges, texts, autotexts = ax_pie.pie(
+        pie_values, labels=pie_labels,
+        autopct=lambda pct: f'{pct:.1f}%',
+        colors=pie_colors, startangle=90, pctdistance=0.78,
+        wedgeprops=dict(width=0.45, edgecolor='white', linewidth=2),
+        textprops={'fontsize': 10},
+    )
+    for t in autotexts:
+        t.set_fontsize(9)
+    total_val = sum(pie_values)
+    ax_pie.text(0, 0, f'¥{total_val:,.0f}', ha='center', va='center',
+                fontsize=12, fontweight='bold', color=TITLE_COLOR)
+
+    _add_footer(fig3, 3, report_date)
+    pdf.savefig(fig3)
+    plt.close(fig3)
+
+
+# ── Page 4 & 5: P/L Analysis ──
 
 def _page_pnl(pdf, cost_basis_df):
-    fig = plt.figure(figsize=PAGE_SIZE, dpi=150)
+    # 过滤掉 Cash 和零市值（保持和 dashboard 一致）
+    pnl_df = cost_basis_df[
+        (cost_basis_df.get('Asset_Class', pd.Series([''] * len(cost_basis_df))) != 'Cash') &
+        (cost_basis_df['Market_Value'] > 0)
+    ].copy() if 'Asset_Class' in cost_basis_df.columns else cost_basis_df[cost_basis_df['Market_Value'] > 0].copy()
 
-    fig.text(0.5, 0.93, '\u76c8\u4e8f\u5206\u6790',
-             fontsize=16, fontweight='bold', ha='center', color=TITLE_COLOR)
-
-    # KPI row
-    total_cost = cost_basis_df['Cost_Basis'].sum()
-    total_market = cost_basis_df['Market_Value'].sum()
-    total_pl = total_market - total_cost
+    total_cost   = pnl_df['Cost_Basis'].sum()
+    total_market = pnl_df['Market_Value'].sum()
+    total_pl     = total_market - total_cost
     total_pl_rate = (total_pl / total_cost * 100) if total_cost > 0 else 0
+
+    # ── Page 4: KPI + 持仓盈亏柱状图 ──
+    fig = plt.figure(figsize=PAGE_SIZE, dpi=150)
+    fig.text(0.5, 0.93, '盈亏分析 — 持仓概览',
+             fontsize=16, fontweight='bold', ha='center', color=TITLE_COLOR)
 
     ax_kpi = fig.add_axes([0.05, 0.82, 0.9, 0.08])
     _render_kpi_row(ax_kpi, [
-        ('\u603b\u6210\u672c', f'\u00a5{total_cost:,.0f}'),
-        ('\u603b\u5e02\u503c', f'\u00a5{total_market:,.0f}'),
-        ('\u603b\u76c8\u4e8f', f'\u00a5{total_pl:+,.0f}'),
-        ('\u603b\u6536\u76ca\u7387', f'{total_pl_rate:+.2f}%'),
+        ('总成本',   f'¥{total_cost:,.0f}'),
+        ('总市值',   f'¥{total_market:,.0f}'),
+        ('总盈亏',   f'¥{total_pl:+,.0f}'),
+        ('总收益率', f'{total_pl_rate:+.2f}%'),
     ])
 
-    # Horizontal bar chart
-    chart_data = cost_basis_df.sort_values('Profit_Loss', ascending=True).copy()
+    chart_data = pnl_df.sort_values('Profit_Loss', ascending=True).copy()
     bar_colors = [COLOR_PROFIT if v >= 0 else COLOR_LOSS for v in chart_data['Profit_Loss']]
     names = chart_data['Name'].tolist()
-
     n_bars = len(names)
-    chart_height = min(0.42, max(0.2, n_bars * 0.025))
-    ax_bar = fig.add_axes([0.12, 0.78 - chart_height, 0.80, chart_height])
+
+    ax_bar = fig.add_axes([0.18, 0.08, 0.74, 0.68])
     ax_bar.barh(range(n_bars), chart_data['Profit_Loss'], color=bar_colors, height=0.6)
     ax_bar.set_yticks(range(n_bars))
-    ax_bar.set_yticklabels(names, fontsize=7)
-    ax_bar.set_xlabel('\u76c8\u4e8f (CNY)', fontsize=8)
-    ax_bar.set_title('\u6301\u4ed3\u76c8\u4e8f', fontsize=10, fontweight='bold', pad=8)
-    ax_bar.axvline(x=0, color='#333', linewidth=0.5)
+    ax_bar.set_yticklabels(names, fontsize=9)
+    ax_bar.set_xlabel('盈亏 (CNY)', fontsize=9)
+    ax_bar.set_title('持仓盈亏', fontsize=11, fontweight='bold', pad=10)
+    ax_bar.axvline(x=0, color='#333', linewidth=0.8)
     ax_bar.grid(True, axis='x', linestyle='--', alpha=0.3)
-    ax_bar.tick_params(labelsize=7)
+    ax_bar.tick_params(labelsize=9)
+    ax_bar.spines['top'].set_visible(False)
+    ax_bar.spines['right'].set_visible(False)
 
-    # P/L detail table
+    _add_footer(fig, 4, '')
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    # ── Page 5: 盈亏明细表 ──
+    fig2 = plt.figure(figsize=PAGE_SIZE, dpi=150)
+    fig2.text(0.5, 0.93, '盈亏分析 — 明细表',
+              fontsize=16, fontweight='bold', ha='center', color=TITLE_COLOR)
+
     table_rows = []
-    for _, row in cost_basis_df.iterrows():
+    for _, row in pnl_df.iterrows():
         pl_rate = f'{row["Profit_Loss_Rate"]:.2f}%' if pd.notna(row.get('Profit_Loss_Rate')) else '-'
         table_rows.append([
             row['Name'],
-            f'\u00a5{row["Cost_Basis"]:,.0f}',
-            f'\u00a5{row["Market_Value"]:,.0f}',
-            f'\u00a5{row["Profit_Loss"]:+,.0f}',
+            f'¥{row["Cost_Basis"]:,.0f}',
+            f'¥{row["Market_Value"]:,.0f}',
+            f'¥{row["Profit_Loss"]:+,.0f}',
             pl_rate,
         ])
 
-    table_top = 0.78 - chart_height - 0.04
-    table_height = max(0.05, table_top - 0.06)
-    ax_table = fig.add_axes([0.08, 0.06, 0.84, table_height])
+    ax_table = fig2.add_axes([0.06, 0.08, 0.88, 0.80])
     _render_table(ax_table,
-                  ['\u540d\u79f0', '\u6210\u672c', '\u5e02\u503c', '\u76c8\u4e8f', '\u6536\u76ca\u7387'],
+                  ['名称', '成本', '市值', '盈亏', '收益率'],
                   table_rows,
-                  col_widths=[0.3, 0.2, 0.2, 0.2, 0.1])
+                  col_widths=[0.30, 0.20, 0.20, 0.20, 0.10])
 
-    _add_footer(fig, 3, '')
-    pdf.savefig(fig)
-    plt.close(fig)
+    _add_footer(fig2, 5, '')
+    pdf.savefig(fig2)
+    plt.close(fig2)
 
 
 # ── Page 4: Holdings Detail ──
@@ -317,7 +338,7 @@ def _page_holdings(pdf, df):
                   rows,
                   col_widths=[0.15, 0.12, 0.15, 0.1, 0.15, 0.15, 0.18])
 
-    _add_footer(fig, 4, latest_date)
+    _add_footer(fig, 6, latest_date)
     pdf.savefig(fig)
     plt.close(fig)
 
