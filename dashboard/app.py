@@ -2426,24 +2426,39 @@ with tab_quarterly:
             except Exception:
                 pass
             matplotlib.rcParams['font.sans-serif'] = [
-                'Noto Sans CJK SC', 'Noto Sans SC',
-                'Arial Unicode MS', 'PingFang SC', 'SimHei',
+                'Arial Unicode MS', 'Noto Sans CJK SC', 'Noto Sans SC',
+                'PingFang SC', 'SimHei',
             ]
             matplotlib.rcParams['axes.unicode_minus'] = False
 
             PAGE = (11.69, 8.27)
             buf = io.BytesIO()
 
-            with PdfPages(buf) as pdf:
-                # ── Page 1: KPI + 资产负债汇总 ──
-                fig, axes = plt.subplots(2, 1, figsize=PAGE,
-                                          gridspec_kw={'height_ratios': [1, 3]})
-                fig.suptitle(f'FamilyFund 家庭财报  {q_curr}', fontsize=16,
-                             fontweight='bold', color='#1a237e', y=0.97)
+            def _style_table(tbl, fontsize=7):
+                tbl.auto_set_font_size(False)
+                tbl.set_fontsize(fontsize)
+                tbl.scale(1, 1.4)
+                for (row, col), cell in tbl.get_celld().items():
+                    cell.set_edgecolor('#e0e0e0')
+                    cell.PAD = 0.04
+                    if row == 0:
+                        cell.set_facecolor('#2196F3')
+                        cell.set_text_props(color='white', fontweight='bold', fontsize=fontsize)
+                    elif '小计' in str(cell.get_text().get_text()):
+                        cell.set_facecolor('#e3f2fd')
+                        cell.set_text_props(fontweight='bold')
+                    elif row % 2 == 0:
+                        cell.set_facecolor('#fafafa')
 
-                # KPI row
-                ax0 = axes[0]
-                ax0.axis('off')
+            with PdfPages(buf) as pdf:
+                # ── Page 1: KPI + 资产负债表（左右分列）──
+                fig = plt.figure(figsize=PAGE)
+                fig.suptitle(f'FamilyFund 家庭财报  {q_curr}', fontsize=15,
+                             fontweight='bold', color='#1a237e', y=0.98)
+
+                # KPI 行（顶部 12% 高度）
+                ax_kpi = fig.add_axes([0.02, 0.86, 0.96, 0.10])
+                ax_kpi.axis('off')
                 kpis = [
                     ('家庭净资产', f'¥{curr["net_worth"]:,.0f}'),
                     ('总资产',     f'¥{curr["total_assets"]:,.0f}'),
@@ -2456,104 +2471,126 @@ with tab_quarterly:
                 n = len(kpis)
                 for i, (label, val) in enumerate(kpis):
                     x = (i + 0.5) / n
-                    ax0.text(x, 0.7, val, ha='center', va='center',
-                             fontsize=13, fontweight='bold', color='#1565c0',
-                             transform=ax0.transAxes)
-                    ax0.text(x, 0.2, label, ha='center', va='center',
-                             fontsize=8, color='#666', transform=ax0.transAxes)
+                    ax_kpi.text(x, 0.75, val, ha='center', va='center',
+                                fontsize=12, fontweight='bold', color='#1565c0',
+                                transform=ax_kpi.transAxes)
+                    ax_kpi.text(x, 0.15, label, ha='center', va='center',
+                                fontsize=7.5, color='#666', transform=ax_kpi.transAxes)
 
-                # Balance sheet table
-                ax1 = axes[1]
-                ax1.axis('off')
-                # 合并资产和负债表展示
-                a_data = asset_df[['大类','账户/项目','金额(CNY)']].copy()
-                a_data.columns = ['大类','项目','金额']
-                a_data['side'] = '资产'
-                l_data = liab_df[['大类','账户/项目','金额(CNY)']].copy()
-                l_data.columns = ['大类','项目','金额']
-                l_data['side'] = '负债'
-                combined = pd.concat([a_data, l_data], ignore_index=True)
-                combined = combined[combined['项目'] != '']  # 去掉小计空行
+                # 分隔线
+                fig.add_axes([0.02, 0.845, 0.96, 0.005]).set_axis_off()
 
-                vals = []
-                for _, r in combined.iterrows():
-                    is_subtotal = '小计' in str(r['项目'])
-                    fmt_val = f'¥{r["金额"]:,.0f}'
-                    vals.append([r['side'], r['大类'], r['项目'], fmt_val])
-
-                if vals:
-                    tbl = ax1.table(
-                        cellText=vals,
-                        colLabels=['', '大类', '项目', '金额'],
-                        loc='center', cellLoc='left',
+                # 资产端表格（左半）
+                ax_a = fig.add_axes([0.02, 0.06, 0.47, 0.77])
+                ax_a.axis('off')
+                ax_a.set_title('资产端', fontsize=10, fontweight='bold',
+                               color='#1565c0', pad=4, loc='left')
+                a_vals = []
+                for _, r in asset_df.iterrows():
+                    if r['账户/项目'] == '':
+                        continue
+                    a_vals.append([r['大类'], r['账户/项目'],
+                                   f'¥{r["金额(CNY)"]:,.0f}'])
+                if a_vals:
+                    tbl_a = ax_a.table(
+                        cellText=a_vals,
+                        colLabels=['大类', '项目', '金额'],
+                        loc='upper center', cellLoc='left',
+                        colWidths=[0.28, 0.42, 0.30],
                     )
-                    tbl.auto_set_font_size(False)
-                    tbl.set_fontsize(7.5)
-                    tbl.scale(1, 1.3)
-                    # 样式
-                    for (row, col), cell in tbl.get_celld().items():
-                        if row == 0:
-                            cell.set_facecolor('#2196F3')
-                            cell.set_text_props(color='white', fontweight='bold')
-                        elif '小计' in str(cell.get_text().get_text()):
-                            cell.set_facecolor('#e3f2fd')
-                            cell.set_text_props(fontweight='bold')
-                        elif row % 2 == 0:
-                            cell.set_facecolor('#f5f5f5')
-                        cell.set_edgecolor('#e0e0e0')
+                    _style_table(tbl_a)
+                ax_a.text(0.0, -0.02, f'总资产  ¥{curr["total_assets"]:,.0f}',
+                          transform=ax_a.transAxes, fontsize=9,
+                          fontweight='bold', color='#1565c0')
 
-                fig.text(0.5, 0.02,
+                # 负债端表格（右半）
+                ax_l = fig.add_axes([0.51, 0.06, 0.47, 0.77])
+                ax_l.axis('off')
+                ax_l.set_title('负债端', fontsize=10, fontweight='bold',
+                               color='#c62828', pad=4, loc='left')
+                l_vals = []
+                for _, r in liab_df.iterrows():
+                    if r['账户/项目'] == '':
+                        continue
+                    l_vals.append([r['大类'], r['账户/项目'],
+                                   f'¥{r["金额(CNY)"]:,.0f}'])
+                if l_vals:
+                    tbl_l = ax_l.table(
+                        cellText=l_vals,
+                        colLabels=['大类', '项目', '金额'],
+                        loc='upper center', cellLoc='left',
+                        colWidths=[0.28, 0.42, 0.30],
+                    )
+                    _style_table(tbl_l)
+                ax_l.text(0.0, -0.02,
+                          f'总负债  ¥{curr["total_liabilities"]:,.0f}    '
+                          f'净资产  ¥{curr["net_worth"]:,.0f}',
+                          transform=ax_l.transAxes, fontsize=9,
+                          fontweight='bold', color='#c62828')
+
+                # 垂直分隔线
+                fig.add_axes([0.494, 0.06, 0.003, 0.80]).set_axis_off()
+
+                fig.text(0.5, 0.01,
                          f'FamilyFund Quarterly Report · {q_curr} · Generated by FamilyFund',
                          ha='center', fontsize=7, color='#999')
-                plt.tight_layout(rect=[0, 0.04, 1, 0.95])
                 pdf.savefig(fig, bbox_inches='tight')
                 plt.close(fig)
 
                 # ── Page 2: 瀑布图 + 资产结构对比 ──
                 if q_prev and qoq and compare_df is not None:
-                    fig2, (ax_wf, ax_bar) = plt.subplots(1, 2, figsize=PAGE)
+                    fig2, (ax_wf, ax_bar) = plt.subplots(
+                        1, 2, figsize=PAGE,
+                        gridspec_kw={'wspace': 0.35},
+                    )
                     fig2.suptitle(f'净资产变化分析  {q_prev} → {q_curr}', fontsize=14,
                                   fontweight='bold', color='#1a237e', y=0.97)
 
-                    # 瀑布图（matplotlib 模拟）
+                    # 瀑布图
                     wf_data = generate_waterfall_data(qoq)
                     labels = [d['label'] for d in wf_data]
                     values = [d['value'] for d in wf_data]
                     types  = [d['type']  for d in wf_data]
                     running = 0
-                    bottoms, heights, colors = [], [], []
+                    bottoms, heights, colors_wf = [], [], []
                     for v, t in zip(values, types):
                         if t == 'absolute':
                             bottoms.append(0)
                             heights.append(v)
-                            colors.append('#1565c0')
+                            colors_wf.append('#1565c0')
                             running = v
                         else:
                             bottoms.append(min(running, running + v))
                             heights.append(abs(v))
-                            colors.append('#2e7d32' if v >= 0 else '#d32f2f')
+                            colors_wf.append('#2e7d32' if v >= 0 else '#d32f2f')
                             running += v
                     ax_wf.bar(range(len(labels)), heights, bottom=bottoms,
-                              color=colors, width=0.6, edgecolor='white')
+                              color=colors_wf, width=0.6, edgecolor='white')
                     ax_wf.set_xticks(range(len(labels)))
-                    ax_wf.set_xticklabels(labels, rotation=30, ha='right', fontsize=7)
-                    ax_wf.set_title('净资产瀑布图', fontsize=11)
+                    # 标签换行处理：每12个字符换行
+                    wrapped = [l.replace(' → ', '\n') if len(l) > 10 else l for l in labels]
+                    ax_wf.set_xticklabels(wrapped, rotation=0, ha='center', fontsize=7)
+                    ax_wf.set_title('净资产瀑布图', fontsize=11, pad=8)
                     ax_wf.yaxis.set_major_formatter(
                         matplotlib.ticker.FuncFormatter(lambda x, _: f'¥{x/1e4:.0f}万'))
+                    ax_wf.tick_params(axis='x', which='both', length=0)
+                    fig2.subplots_adjust(bottom=0.18)
 
                     # 资产结构对比
-                    x = range(len(compare_df))
+                    x_pos = range(len(compare_df))
                     w = 0.35
-                    ax_bar.bar([i - w/2 for i in x], compare_df[q_prev],
+                    ax_bar.bar([i - w/2 for i in x_pos], compare_df[q_prev],
                                 width=w, label=q_prev, color='#90CAF9')
-                    ax_bar.bar([i + w/2 for i in x], compare_df[q_curr],
+                    ax_bar.bar([i + w/2 for i in x_pos], compare_df[q_curr],
                                 width=w, label=q_curr, color='#1565c0')
-                    ax_bar.set_xticks(list(x))
-                    ax_bar.set_xticklabels(compare_df['大类'], rotation=30, ha='right', fontsize=7)
-                    ax_bar.set_title('资产结构对比', fontsize=11)
+                    ax_bar.set_xticks(list(x_pos))
+                    ax_bar.set_xticklabels(compare_df['大类'], rotation=25,
+                                           ha='right', fontsize=7)
+                    ax_bar.set_title('资产结构对比', fontsize=11, pad=8)
                     ax_bar.legend(fontsize=8)
                     ax_bar.yaxis.set_major_formatter(
                         matplotlib.ticker.FuncFormatter(lambda x, _: f'¥{x/1e4:.0f}万'))
+                    ax_bar.tick_params(axis='x', which='both', length=0)
 
                     fig2.text(0.5, 0.02,
                               f'FamilyFund Quarterly Report · {q_curr} · Generated by FamilyFund',
