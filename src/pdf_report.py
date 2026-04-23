@@ -208,24 +208,70 @@ def _page_class(pdf, class_nav_dict, allocation_df):
     fig3.text(0.5, 0.93, '资产配置',
               fontsize=16, fontweight='bold', ha='center', color=TITLE_COLOR)
 
-    ax_pie = fig3.add_axes([0.15, 0.12, 0.70, 0.75])
     pie_data = allocation_df[allocation_df['Total_Value'] > 0].sort_values('Total_Value', ascending=False)
     pie_labels = pie_data['Display_Name'].tolist()
     pie_values = pie_data['Total_Value'].tolist()
     pie_colors = COLORS[:len(pie_values)]
+    total_val = sum(pie_values)
+
+    # 饼图占左侧 55%，图例占右侧 40%
+    ax_pie = fig3.add_axes([0.03, 0.08, 0.55, 0.80])
+
+    # 只在扇形 >= 5% 时显示百分比标注，避免小扇形文字重叠
+    def _autopct(pct):
+        return f'{pct:.1f}%' if pct >= 5.0 else ''
 
     wedges, texts, autotexts = ax_pie.pie(
-        pie_values, labels=pie_labels,
-        autopct=lambda pct: f'{pct:.1f}%',
-        colors=pie_colors, startangle=90, pctdistance=0.78,
-        wedgeprops=dict(width=0.45, edgecolor='white', linewidth=2),
-        textprops={'fontsize': 10},
+        pie_values,
+        labels=None,          # 不在饼图上直接标名称
+        autopct=_autopct,
+        colors=pie_colors, startangle=90, pctdistance=0.75,
+        wedgeprops=dict(width=0.50, edgecolor='white', linewidth=2),
     )
     for t in autotexts:
-        t.set_fontsize(9)
-    total_val = sum(pie_values)
+        t.set_fontsize(10)
+        t.set_fontweight('bold')
+
+    # 中心总金额
     ax_pie.text(0, 0, f'¥{total_val:,.0f}', ha='center', va='center',
-                fontsize=12, fontweight='bold', color=TITLE_COLOR)
+                fontsize=11, fontweight='bold', color=TITLE_COLOR)
+
+    # 右侧图例：颜色方块 + 名称 + 比例 + 金额
+    ax_legend = fig3.add_axes([0.60, 0.10, 0.38, 0.78])
+    ax_legend.axis('off')
+
+    n = len(pie_labels)
+    row_h = 1.0 / (n + 1)
+    ax_legend.text(0.0, 1.0, '资产类别', fontsize=10, fontweight='bold',
+                   color='#333', va='top', transform=ax_legend.transAxes)
+    ax_legend.text(0.72, 1.0, '占比', fontsize=10, fontweight='bold',
+                   color='#333', va='top', ha='center', transform=ax_legend.transAxes)
+    ax_legend.text(1.0, 1.0, '市值', fontsize=10, fontweight='bold',
+                   color='#333', va='top', ha='right', transform=ax_legend.transAxes)
+
+    for i, (label, val, color) in enumerate(zip(pie_labels, pie_values, pie_colors)):
+        y = 1.0 - (i + 1.5) * row_h
+        pct = val / total_val * 100
+        # 色块
+        rect = plt.Rectangle((0, y - row_h * 0.35), 0.06, row_h * 0.7,
+                              color=color, transform=ax_legend.transAxes,
+                              clip_on=False)
+        ax_legend.add_patch(rect)
+        # 名称
+        ax_legend.text(0.10, y, label, fontsize=9, va='center',
+                       transform=ax_legend.transAxes)
+        # 占比
+        ax_legend.text(0.72, y, f'{pct:.1f}%', fontsize=9, va='center',
+                       ha='center', transform=ax_legend.transAxes,
+                       color='#555')
+        # 金额
+        ax_legend.text(1.0, y, f'¥{val:,.0f}', fontsize=9, va='center',
+                       ha='right', transform=ax_legend.transAxes,
+                       color='#555')
+
+    # 分隔线
+    ax_legend.axhline(y=1.0 - row_h * 1.1, color='#ddd', linewidth=0.8,
+                      transform=ax_legend.transAxes, clip_on=False)
 
     _add_footer(fig3, 3, report_date)
     pdf.savefig(fig3)
