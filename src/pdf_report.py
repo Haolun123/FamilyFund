@@ -269,9 +269,10 @@ def _page_class(pdf, class_nav_dict, allocation_df):
                        ha='right', transform=ax_legend.transAxes,
                        color='#555')
 
-    # 分隔线
-    ax_legend.axhline(y=1.0 - row_h * 1.1, color='#ddd', linewidth=0.8,
-                      transform=ax_legend.transAxes, clip_on=False)
+    # 分隔线（用 plot 替代 axhline，避免 transform 参数冲突）
+    sep_y = 1.0 - row_h * 1.1
+    ax_legend.plot([0, 1], [sep_y, sep_y], color='#ddd', linewidth=0.8,
+                   transform=ax_legend.transAxes, clip_on=False)
 
     _add_footer(fig3, 3, report_date)
     pdf.savefig(fig3)
