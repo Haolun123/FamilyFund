@@ -1078,10 +1078,10 @@ with tab_update:
                     f"{row.get('Name','?')}: Net_Cash_Flow ¥{ncf:+,.0f} 远超市值 ¥{tv:,.0f}，请核实"
                 )
 
-        # 本期现金流汇总（所有行）
-        total_ncf = df['Net_Cash_Flow'].fillna(0).sum()
-        if total_ncf != 0:
-            warnings.append(f"本期净现金流（外部入金 - 取出）: ¥{total_ncf:+,.2f}")
+        # 本期现金流汇总（只统计 Cash 行，其他资产行 NCF 是内部调仓，不是外部入金）
+        cash_ncf = df[df['Asset_Class'] == 'Cash']['Net_Cash_Flow'].fillna(0).sum()
+        if cash_ncf != 0:
+            warnings.append(f"本期外部净现金流（Cash 行）: ¥{cash_ncf:+,.2f}")
 
         # Large price swings
         prev_latest = prev_df[prev_df['Date'] == last_date_str]
