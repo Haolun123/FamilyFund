@@ -374,6 +374,14 @@ def get_market_data(force_refresh: bool = False) -> dict:
             cache[f'{pe_key}_updated'] = today
             cache_dirty = True
 
+    # ── 美债10年期收益率（^TNX，仅展示，不参与矩阵计算）──
+    if _should_fetch('treasury_10y'):
+        series = _fetch_yfinance('^TNX', period='5d')
+        if series is not None and len(series) > 0:
+            cache['treasury_10y'] = {'price': round(float(series.iloc[-1]), 3)}
+            cache['treasury_10y_updated'] = today
+            cache_dirty = True
+
     # ── A股PE（akshare，不支持手动覆盖）──
     for pe_key, ak_symbol, source_note in [
         ('pe_csi300',   '沪深300', 'akshare 沪深300 滚动PE'),
@@ -391,7 +399,7 @@ def get_market_data(force_refresh: bool = False) -> dict:
         _save_cache(cache)
 
     # ── 组装结果 ──
-    all_keys = list(TARGETS.keys()) + ['vix', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500']
+    all_keys = list(TARGETS.keys()) + ['vix', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500', 'treasury_10y']
     result = {}
     for key in all_keys:
         result[key] = cache.get(key)

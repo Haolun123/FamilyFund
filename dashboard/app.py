@@ -1760,24 +1760,36 @@ with tab_market:
 
     st.subheader("恐慌与估值")
 
-    vix_entry    = market_data.get('vix')
-    qvix_entry   = market_data.get('qvix')
-    pe_sp_entry  = market_data.get('pe_sp500')
-    pe_ndx_entry = market_data.get('pe_ndx100')
+    vix_entry       = market_data.get('vix')
+    qvix_entry      = market_data.get('qvix')
+    pe_sp_entry     = market_data.get('pe_sp500')
+    pe_ndx_entry    = market_data.get('pe_ndx100')
+    treasury_entry  = market_data.get('treasury_10y')
 
-    vix_val  = vix_entry.get('price')    if vix_entry   else None
-    qvix_val = qvix_entry.get('price')   if qvix_entry  else None
-    pe_sp    = (pe_sp_entry.get('manual_override') or pe_sp_entry.get('value'))   if pe_sp_entry  else None
-    pe_ndx   = (pe_ndx_entry.get('manual_override') or pe_ndx_entry.get('value')) if pe_ndx_entry else None
-    sp_src   = ('手动' if (pe_sp_entry or {}).get('manual_override') else 'VOO auto') if pe_sp_entry else '—'
-    ndx_src  = ('手动' if (pe_ndx_entry or {}).get('manual_override') else 'QQQ auto') if pe_ndx_entry else '—'
+    vix_val       = vix_entry.get('price')      if vix_entry      else None
+    qvix_val      = qvix_entry.get('price')     if qvix_entry     else None
+    pe_sp         = (pe_sp_entry.get('manual_override') or pe_sp_entry.get('value'))   if pe_sp_entry  else None
+    pe_ndx        = (pe_ndx_entry.get('manual_override') or pe_ndx_entry.get('value')) if pe_ndx_entry else None
+    treasury_val  = treasury_entry.get('price') if treasury_entry else None
+    sp_src        = ('手动' if (pe_sp_entry or {}).get('manual_override') else 'VOO auto') if pe_sp_entry else '—'
+    ndx_src       = ('手动' if (pe_ndx_entry or {}).get('manual_override') else 'QQQ auto') if pe_ndx_entry else '—'
 
     vix_label,   vix_emoji   = compute_vix_signal(vix_val)
     qvix_label,  qvix_emoji  = compute_qvix_signal(qvix_val)
     sp_pe_label,  sp_pe_emoji  = compute_pe_signal(pe_sp,  'sp500')
     ndx_pe_label, ndx_pe_emoji = compute_pe_signal(pe_ndx, 'ndx100')
 
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    # 美债收益率信号（仅展示，不参与矩阵）
+    if treasury_val is None:
+        treasury_label, treasury_emoji = '数据不可用', '❓'
+    elif treasury_val >= 4.5:
+        treasury_label, treasury_emoji = '偏高（压估值）', '🔴'
+    elif treasury_val >= 3.5:
+        treasury_label, treasury_emoji = '中性', '🟡'
+    else:
+        treasury_label, treasury_emoji = '偏低（宽松）', '🟢'
+
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     with kpi1:
         st.metric("VIX 恐慌指数", f"{vix_val:.1f}" if vix_val else "—")
         st.markdown(f"{vix_emoji} **{vix_label}**")
@@ -1794,6 +1806,10 @@ with tab_market:
         st.metric("纳指100 PE", f"{pe_ndx:.1f}" if pe_ndx else "—")
         st.markdown(f"{ndx_pe_emoji} **{ndx_pe_label}**")
         st.caption(f"来源: {ndx_src}　更新: {meta.get('pe_ndx100_updated', '未知')}")
+    with kpi5:
+        st.metric("美债10Y收益率", f"{treasury_val:.2f}%" if treasury_val else "—")
+        st.markdown(f"{treasury_emoji} **{treasury_label}**")
+        st.caption(f"仅供参考，不参与矩阵计算　更新: {meta.get('treasury_10y_updated', '未知')}")
 
     # PE 手动覆盖（折叠）
     with st.expander("PE 手动覆盖（网络不可达时使用）", expanded=False):

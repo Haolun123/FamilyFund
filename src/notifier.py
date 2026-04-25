@@ -115,6 +115,17 @@ def _format_message(market_data: dict) -> str:
     vix_str  = f'{vix_val:.1f} {vix_emoji} {vix_label}'   if vix_val  else '⚠️ 无数据'
     qvix_str = f'{qvix_val:.1f} {qvix_emoji} {qvix_label}' if qvix_val else '⚠️ 无数据'
     lines.append(f'> VIX {vix_str}　｜　QVIX {qvix_str}')
+
+    treasury_entry = market_data.get('treasury_10y')
+    treasury_val   = treasury_entry.get('price') if treasury_entry else None
+    if treasury_val:
+        if treasury_val >= 4.5:
+            t_emoji = '🔴'
+        elif treasury_val >= 3.5:
+            t_emoji = '🟡'
+        else:
+            t_emoji = '🟢'
+        lines.append(f'> 美债10Y {treasury_val:.2f}% {t_emoji}（参考）')
     lines.append('')
 
     # ── 定投倍数 ──
