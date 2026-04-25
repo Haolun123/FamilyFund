@@ -193,11 +193,27 @@ def _compute_max_drawdown_series(nav_series):
 # ============================================================
 
 def compute_fund_nav(df):
-    """汇总全部持仓，计算基金整体净值。"""
-    agg = df.groupby('Date').agg(
-        Total_Value=('Total_Value', 'sum'),
-        Net_Cash_Flow=('Net_Cash_Flow', 'sum'),
-    ).reset_index().sort_values('Date')
+    """汇总全部持仓，计算基金整体净值。
+
+    整体 NCF 只取 Cash 行（外部入金/取出）。
+    其他资产行的 NCF 是内部调仓记录（买入=正、卖出=负），
+    对整体基金净影响为零（Cash 减少 = 其他资产增加），
+    不应计入整体 NCF，否则会导致 NAV 失真。
+    """
+    tv_agg = df.groupby('Date')['Total_Value'].sum().reset_index()
+
+    # 只用 Cash 行 NCF 作为整体外部现金流
+    cash_ncf = (
+        df[df['Asset_Class'] == 'Cash']
+        .groupby('Date')['Net_Cash_Flow']
+        .sum()
+        .reset_index()
+        .rename(columns={'Net_Cash_Flow': 'Net_Cash_Flow'})
+    )
+
+    agg = tv_agg.merge(cash_ncf, on='Date', how='left')
+    agg['Net_Cash_Flow'] = agg['Net_Cash_Flow'].fillna(0.0)
+    agg = agg.sort_values('Date')
 
     records = _run_nav_calculation(
         agg['Date'].tolist(),
