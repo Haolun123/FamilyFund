@@ -184,10 +184,18 @@ with tab_dashboard:
     latest_date = latest_fund['Date']
     latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
 
-    # 简单收益率：(当前总资产 - 初始投入) / 初始投入
-    initial_investment = fund_nav_df.iloc[0]['Total_Value']
-    simple_return = (latest_fund['Total_Value'] - initial_investment) / initial_investment * 100 if initial_investment else 0.0
-    simple_profit = latest_fund['Total_Value'] - initial_investment
+    # 累计投入 = 建仓日总市值（初始本金）+ 后续历次外部入金（Cash NCF，非建仓日）
+    # 建仓日：NCF = Total_Value（全部记为本金），后续日期：只有 Cash 行的 NCF 是外部入金
+    first_date = raw_df['Date'].min()
+    initial_investment = raw_df[raw_df['Date'] == first_date]['Total_Value'].sum()
+    subsequent_inflows = raw_df[
+        (raw_df['Date'] > first_date) &
+        (raw_df['Asset_Class'] == 'Cash') &
+        (raw_df['Net_Cash_Flow'] > 0)
+    ]['Net_Cash_Flow'].sum()
+    total_invested = initial_investment + subsequent_inflows
+    simple_profit = latest_fund['Total_Value'] - total_invested
+    simple_return = (simple_profit / total_invested * 100) if total_invested else 0.0
 
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
@@ -195,7 +203,8 @@ with tab_dashboard:
     with col2:
         st.metric("单位净值", f"{latest_fund['NAV']:.4f}")
     with col3:
-        st.metric("累计收益", f"¥{simple_profit:+,.0f}", delta=f"{simple_return:+.2f}%", help="(当前总资产 - 初始投入) / 初始投入")
+        st.metric("累计收益", f"¥{simple_profit:+,.0f}", delta=f"{simple_return:+.2f}%",
+                  help=f"当前总资产 - 累计投入（¥{total_invested:,.0f}）。累计投入 = 建仓本金 + 历次外部入金")
     with col4:
         ann = latest_fund.get('Annualized_Return(%)')
         if ann is not None and not pd.isna(ann):
