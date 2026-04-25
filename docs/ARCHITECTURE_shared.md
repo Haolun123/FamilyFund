@@ -1,9 +1,9 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v1.4  
+> **版本**: v1.5  
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
-> **最后更新**: 2026-04-21  
+> **最后更新**: 2026-04-25  
 > **状态**: 活跃迭代中
 
 ---
@@ -250,8 +250,8 @@ FamilyFund/
 │   ├── DESIGN_PDF_REPORT.md           # PDF 报告设计文档
 │   ├── DESIGN_market_monitor.md       # 市场温度计设计文档（Tab 5，已实现）
 │   ├── DESIGN_daily_push.md           # 每日企业微信推送设计文档（EC2 cron，已实现）
-│   ├── DESIGN_backtest.md             # 定投回测设计文档（P2，设计阶段）
-│   ├── QUARTERLY_REPORT_DESIGN.md     # 季度家庭财报设计文档（Tab 6，设计阶段）
+│   ├── DESIGN_backtest.md             # 定投回测设计文档（✅ 已实现，Tab 6）
+│   ├── QUARTERLY_REPORT_DESIGN.md     # 季度家庭财报设计文档（✅ 已实现，Tab 7）
 │   └── IMPROVE_LIST.md                # 功能评价与改进待办列表
 │
 ├── .streamlit/                        # Streamlit 配置
@@ -758,11 +758,12 @@ timeline
               : 黄金定投矩阵（MA200×VIX）
               : 完整矩阵当前位置高亮
               : 定投策略回测（Backtest Tab）
-    section Phase 5 — 家庭资产负债表（设计阶段）
-        待实现 : 季度财报 Tab（Tab 6）
+    section Phase 5 — 家庭资产负债表（✅ 已实现）
+        已完成 : 季度财报 Tab 7（Quarterly Report）
               : 全量资产负债表（含不动产/坏账准备）
-              : 净资产 QoQ 瀑布图
-              : 季度 PDF 报告生成
+              : 净资产 QoQ 瀑布图 + 资产结构对比
+              : 季度 PDF 报告生成（3页）
+              : balance_sheet.csv + cashflow_log.csv（25Q4/26Q1数据已录入）
 ```
 
 ### 11.2 待实现功能详情
@@ -785,17 +786,17 @@ P1 市场温度计已全部实现：
 **数据源**：akshare(`sh000300`, `sh000510`, 沪深300PE, 中证500PE, QVIX)，yfinance(`GC=F`, `^NDX`, `^GSPC`, `^VIX`, VOO, QQQ)  
 **部署**：AWS EC2 t3.micro ap-southeast-2，Python venv + crontab，无 Docker
 
-#### P2 — 季度家庭财报（设计阶段，需先确认数据模型）
+#### ✅ 已完成 — 季度家庭财报（Tab 7）
 
 设计文档：`QUARTERLY_REPORT_DESIGN.md`
 
-| 功能 | 新增文件 | 说明 |
+| 功能 | 文件 | 状态 |
 |:---|:---|:---|
-| **balance_sheet.csv** | `data/balance_sheet.csv` | 季度末全量资产负债快照；`Asset_Investment` 行由引擎自动从 portfolio.csv 聚合，其余手工录入 |
-| **cashflow_log.csv** | `data/cashflow_log.csv` | 季度外部现金流（工资储蓄/大额支出/家庭注资） |
-| **季度核算引擎** | `src/quarterly_engine.py` | 净资产计算、QoQ对比、财务比率（资产负债率/流动比率）、损益反推 |
-| **季度财报 Tab 6** | `dashboard/app.py` | 资产负债表（双列）/ 净资产瀑布图 / QoQ 资产结构对比；含"生成季度PDF"按钮 |
-| **季度 PDF 报告** | `src/quarterly_report.py` | 复用 pdf_report.py 基础设施，4页：封面KPI / 资产负债表 / 损益瀑布图 / 投资组合深潜 |
+| **balance_sheet.csv** | `data/balance_sheet.csv` | ✅ 已创建，含 25Q4 + 26Q1 历史数据 |
+| **cashflow_log.csv** | `data/cashflow_log.csv` | ✅ 已创建（记录家庭基金外特殊现金流）|
+| **季度核算引擎** | `src/quarterly_engine.py` | ✅ 已实现（净资产/QoQ/财务比率）|
+| **季度财报 Tab 7** | `dashboard/app.py` | ✅ 已实现（资产负债表/瀑布图/结构对比）|
+| **季度 PDF 报告** | 内嵌在 app.py Tab 7 | ✅ 已实现（3页：KPI+资产负债/瀑布图/对比图）|
 
 **资产分类体系**（基于 QuarterlyReport.xlsx 实际内容）：
 
