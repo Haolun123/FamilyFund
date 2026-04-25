@@ -797,9 +797,16 @@ with tab_update:
                     {'type': '外部取出', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
                 st.rerun()
 
-        # Build asset name list from current holdings (excluding Cash)
-        existing_names = edited_df[edited_df['Asset_Class'] != 'Cash']['Name'].dropna().tolist()
-        asset_options = existing_names + ['新增标的']
+        # Build asset options: "Name (Code)" for clarity, excluding Cash
+        asset_rows = edited_df[edited_df['Asset_Class'] != 'Cash'].dropna(subset=['Name'])
+        def _asset_label(row):
+            code = str(row.get('Code', '')).strip()
+            name = str(row.get('Name', '')).strip()
+            return f"{name} ({code})" if code else name
+        asset_options_labels = [_asset_label(r) for _, r in asset_rows.iterrows()] + ['新增标的']
+        # Keep a mapping from label back to Name (for NCF writing)
+        asset_label_to_name = {_asset_label(r): r['Name'] for _, r in asset_rows.iterrows()}
+        asset_label_to_name['新增标的'] = '新增标的'
 
         entries = st.session_state['rebalance_entries']
         to_remove = []
@@ -811,22 +818,27 @@ with tab_update:
                 st.markdown(f"**{type_labels.get(entry['type'], entry['type'])}**")
             with c2:
                 if entry['type'] in ('买入', '卖出'):
-                    selected = st.selectbox(
-                        "资产", options=[''] + asset_options,
-                        index=([''] + asset_options).index(entry['asset_name']) if entry['asset_name'] in ([''] + asset_options) else 0,
+                    # asset_label = "Name (Code)" displayed; asset_name = Name stored internally
+                    current_label = entry.get('asset_label', '')
+                    selected_label = st.selectbox(
+                        "资产", options=[''] + asset_options_labels,
+                        index=([''] + asset_options_labels).index(current_label)
+                              if current_label in ([''] + asset_options_labels) else 0,
                         key=f"rb_asset_{idx}", label_visibility="collapsed",
-                        placeholder="选择资产...",
+                        placeholder="选择资产（名称 + 代码）...",
                     )
-                    entry['asset_name'] = selected
-                    entry['is_new'] = (selected == '新增标的')
+                    entry['asset_label'] = selected_label
+                    entry['asset_name'] = asset_label_to_name.get(selected_label, selected_label)
+                    entry['is_new'] = (selected_label == '新增标的')
                 else:
                     st.markdown("*外部资金*")
                     entry['asset_name'] = ''
                     entry['is_new'] = False
             with c3:
                 entry['amount'] = st.number_input(
-                    "金额(CNY)", value=float(entry['amount']), min_value=0.0, step=100.0,
-                    format="%.2f", key=f"rb_amt_{idx}", label_visibility="collapsed",
+                    "买入/卖出总金额 (CNY)", value=float(entry['amount']), min_value=0.0, step=100.0,
+                    format="%.2f", key=f"rb_amt_{idx}",
+                    help="本次操作的总金额（人民币），买入填支付金额，卖出填到账金额",
                 )
             with c4:
                 if st.button("✕", key=f"rb_del_{idx}"):
@@ -837,10 +849,10 @@ with tab_update:
                 p_col, f_col = st.columns(2)
                 with p_col:
                     entry['price'] = st.number_input(
-                        "成交价（可选，不填则用快照价格）",
+                        "申购/赎回确认净值（单价，可选）",
                         value=float(entry.get('price', 0.0)), min_value=0.0, format="%.4f",
                         key=f"rb_price_{idx}",
-                        help="实际申购/赎回确认净值，用于调仓决策复盘记录",
+                        help="基金净值或黄金单价（原始货币），从基金平台交易记录查询。不填则用快照价格估算。",
                     )
                 with f_col:
                     entry['fee'] = st.number_input(
