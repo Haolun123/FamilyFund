@@ -24,7 +24,6 @@ assets/fonts/*.ttf
 ~$*.xlsx
 
 # Private docs
-docs/instruction.md
 docs/DESIGN_PUBLIC_PUSH.md
 docs/DESIGN_PUBLIC_PUSH.pdf
 
