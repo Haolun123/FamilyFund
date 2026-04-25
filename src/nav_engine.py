@@ -465,6 +465,94 @@ def compute_calmar(fund_nav_df) -> float | None:
     return round(ann_return / max_drawdown, 2)
 
 
+def compute_attribution(
+    raw_df: pd.DataFrame,
+    fund_nav_df: pd.DataFrame,
+    class_nav_dict: dict,
+    start_date: str,
+    end_date: str,
+) -> list[dict]:
+    """各资产类别 TWR 收益归因。
+
+    归因口径：类别NAV涨跌幅 × 期初权重（单期 Brinson 简化版）。
+    与基金总览的 TWR 口径一致，各类别贡献率之和 ≈ 基金总NAV变化幅度。
+
+    Returns:
+        list of dicts，每条含：
+          asset_class, display_name, nav_start, nav_end,
+          nav_return_pct, weight_start, contribution_pct
+        Cash 行：nav_return_pct=None, contribution_pct=None（不参与归因）
+        按贡献率绝对值降序，Cash 置末尾。
+    """
+    # 期初各类别市值（含 Cash）
+    start_tv = (
+        raw_df[raw_df['Date'] == start_date]
+        .groupby('Asset_Class')['Total_Value']
+        .sum()
+    )
+    fund_tv_start = start_tv.drop(index='Cash', errors='ignore').sum()
+    if fund_tv_start <= 0:
+        return []
+
+    rows = []
+    cash_row = None
+
+    for cls, display_name in CLASS_DISPLAY_NAMES.items():
+        cls_df = class_nav_dict.get(cls)
+
+        # Cash 特殊处理：单独列出，不参与归因计算
+        if cls == 'Cash':
+            weight = start_tv.get('Cash', 0.0) / (fund_tv_start + start_tv.get('Cash', 0.0))
+            cash_row = {
+                'asset_class': cls,
+                'display_name': display_name,
+                'nav_start': None,
+                'nav_end': None,
+                'nav_return_pct': None,
+                'weight_start': round(weight * 100, 1),
+                'contribution_pct': None,
+            }
+            continue
+
+        if cls_df is None or cls_df.empty:
+            continue
+
+        # 取 start / end NAV
+        start_rows = cls_df[cls_df['Date'] == start_date]
+        end_rows   = cls_df[cls_df['Date'] == end_date]
+        if start_rows.empty or end_rows.empty:
+            continue
+
+        nav_start = float(start_rows.iloc[-1]['NAV'])
+        nav_end   = float(end_rows.iloc[-1]['NAV'])
+        nav_return = (nav_end - nav_start) / nav_start if nav_start > 0 else 0.0
+
+        # 期初权重（分母不含 Cash）
+        cls_tv_start = start_tv.get(cls, 0.0)
+        weight = cls_tv_start / fund_tv_start if fund_tv_start > 0 else 0.0
+
+        contribution = nav_return * weight
+
+        rows.append({
+            'asset_class': cls,
+            'display_name': display_name,
+            'nav_start': round(nav_start, 4),
+            'nav_end': round(nav_end, 4),
+            'nav_return_pct': round(nav_return * 100, 2),
+            'weight_start': round(weight * 100, 1),
+            'contribution_pct': round(contribution * 100, 2),
+        })
+
+    # 按贡献率绝对值降序
+    rows.sort(key=lambda r: abs(r['contribution_pct']), reverse=True)
+
+    # Cash 置末尾
+    if cash_row:
+        rows.append(cash_row)
+
+    return rows
+
+
 def _atomic_write_csv(df, csv_path):
     """Write DataFrame to CSV with file lock + atomic replace.
 

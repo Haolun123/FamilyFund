@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
     compute_class_nav, compute_allocation, compute_cost_basis,
-    compute_xirr, compute_sharpe, compute_calmar,
+    compute_xirr, compute_sharpe, compute_calmar, compute_attribution,
     CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES,
     _atomic_write_csv, update_snapshot, delete_snapshot,
 )
@@ -585,6 +585,117 @@ with tab_dashboard:
                 '收益率(%)': st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
+
+    # ─── Section 5: 收益归因 ───
+    st.divider()
+    st.subheader("收益归因")
+    st.caption("基于 TWR 口径：各类别 NAV 涨跌幅 × 期初权重，与基金总览净值口径一致。各类别贡献率之和 ≈ 基金总 NAV 变化幅度。")
+
+    from datetime import timedelta
+
+    RANGE_OPTIONS = {
+        '本周':  8,
+        '近1月': 35,
+        '近3月': 100,
+        '近6月': 190,
+        '近1年': 370,
+        '近2年': 740,
+        '全部':  None,
+    }
+
+    attr_range = st.selectbox("时间范围", list(RANGE_OPTIONS.keys()), index=6, key='attr_range')
+
+    all_dates = sorted(fund_nav_df['Date'].unique())
+    end_date  = all_dates[-1]
+
+    if RANGE_OPTIONS[attr_range] is None:
+        start_date = all_dates[0]
+    else:
+        cutoff = (pd.Timestamp(end_date) - timedelta(days=RANGE_OPTIONS[attr_range])).strftime('%Y-%m-%d')
+        candidates = [d for d in all_dates if d >= cutoff]
+        start_date = candidates[0] if candidates else all_dates[0]
+
+    n_snapshots = len([d for d in all_dates if start_date <= d <= end_date])
+    st.caption(f"统计区间：{start_date} → {end_date}，共 {n_snapshots} 个快照")
+
+    if n_snapshots < 2:
+        st.info("当前时间范围内快照不足 2 个，无法计算归因。请选择更长的时间范围。")
+    else:
+        attr_rows = compute_attribution(raw_df, fund_nav_df, class_nav_dict, start_date, end_date)
+
+        if not attr_rows:
+            st.warning("归因计算失败，请检查数据。")
+        else:
+            # 瀑布图数据（排除 Cash）
+            wf_rows = [r for r in attr_rows if r['contribution_pct'] is not None]
+            total_contribution = sum(r['contribution_pct'] for r in wf_rows)
+
+            wf_data = []
+            for r in wf_rows:
+                wf_data.append({
+                    'label': r['display_name'],
+                    'value': r['contribution_pct'],
+                    'type': 'relative',
+                })
+            wf_data.append({'label': '合计', 'value': total_contribution, 'type': 'absolute'})
+
+            attr_left, attr_right = st.columns([6, 4])
+
+            with attr_left:
+                fig_attr = go.Figure(go.Waterfall(
+                    orientation='v',
+                    measure=[d['type'] for d in wf_data],
+                    x=[d['label'] for d in wf_data],
+                    y=[d['value'] for d in wf_data],
+                    connector={'line': {'color': '#888'}},
+                    increasing={'marker': {'color': '#2e7d32'}},
+                    decreasing={'marker': {'color': '#d32f2f'}},
+                    totals={'marker': {'color': '#1565c0'}},
+                    texttemplate='%{y:+.2f}%',
+                    textposition='outside',
+                ))
+                fig_attr.update_layout(
+                    height=400,
+                    margin=dict(t=40, b=60),
+                    yaxis_title='贡献率 (%)',
+                    yaxis_tickformat='.2f',
+                )
+                st.plotly_chart(fig_attr, use_container_width=True)
+
+            with attr_right:
+                # 归因明细表格
+                table_rows = []
+                for r in wf_rows:
+                    table_rows.append({
+                        '资产类别': r['display_name'],
+                        '期初NAV': f"{r['nav_start']:.4f}" if r['nav_start'] else '—',
+                        '期末NAV': f"{r['nav_end']:.4f}" if r['nav_end'] else '—',
+                        'NAV涨跌幅': f"{r['nav_return_pct']:+.2f}%" if r['nav_return_pct'] is not None else '—',
+                        '期初权重': f"{r['weight_start']:.1f}%",
+                        '贡献率': f"{r['contribution_pct']:+.2f}%" if r['contribution_pct'] is not None else '—',
+                    })
+                # 合计行
+                table_rows.append({
+                    '资产类别': '**合计**',
+                    '期初NAV': '—',
+                    '期末NAV': '—',
+                    'NAV涨跌幅': '—',
+                    '期初权重': '—',
+                    '贡献率': f"{total_contribution:+.2f}%",
+                })
+                # Cash 行
+                cash_row = next((r for r in attr_rows if r['asset_class'] == 'Cash'), None)
+                if cash_row:
+                    table_rows.append({
+                        '资产类别': f"{cash_row['display_name']}（不参与归因）",
+                        '期初NAV': '—',
+                        '期末NAV': '—',
+                        'NAV涨跌幅': '—',
+                        '期初权重': f"{cash_row['weight_start']:.1f}%",
+                        '贡献率': '—',
+                    })
+                attr_df = pd.DataFrame(table_rows)
+                st.dataframe(attr_df, use_container_width=True, hide_index=True)
 
 # ═══════════════════════════════════════════════════════════
 # Tab 2: Weekly Update
