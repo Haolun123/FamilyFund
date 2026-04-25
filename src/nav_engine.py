@@ -329,7 +329,8 @@ def compute_xirr(df):
     """计算基金整体的 XIRR（资金加权年化收益率）。
 
     现金流定义：
-    - 每期 Net_Cash_Flow 为外部资金流入（正）或流出（负）
+    - 只使用 Cash 行的 NCF 作为外部资金流入/流出
+      （其他资产行的 NCF 是内部调仓记录，对整体基金净影响为零）
     - 最新期总市值作为终值（以负号表示"取回"）
 
     Returns:
@@ -337,10 +338,20 @@ def compute_xirr(df):
     """
     from scipy.optimize import brentq
 
-    agg = df.groupby('Date').agg(
-        Total_Value=('Total_Value', 'sum'),
-        Net_Cash_Flow=('Net_Cash_Flow', 'sum'),
-    ).reset_index().sort_values('Date')
+    # 总市值按日期汇总
+    tv_agg = df.groupby('Date')['Total_Value'].sum().reset_index()
+
+    # 只取 Cash 行的 NCF 作为外部现金流
+    cash_ncf = (
+        df[df['Asset_Class'] == 'Cash']
+        .groupby('Date')['Net_Cash_Flow']
+        .sum()
+        .reset_index()
+    )
+
+    agg = tv_agg.merge(cash_ncf, on='Date', how='left')
+    agg['Net_Cash_Flow'] = agg['Net_Cash_Flow'].fillna(0.0)
+    agg = agg.sort_values('Date')
 
     dates = pd.to_datetime(agg['Date']).tolist()
     cashflows = agg['Net_Cash_Flow'].tolist()
