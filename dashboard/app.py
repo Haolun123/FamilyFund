@@ -276,6 +276,18 @@ with tab_dashboard:
 
     st.header("资产类别对比")
 
+    # 固定颜色映射：保证折线图和饼图颜色一致
+    CLASS_COLORS = {
+        'US_Blend_Fund':   '#2196F3',  # 蓝
+        'US_Growth_Fund':  '#9C27B0',  # 紫
+        'CN_Index_Fund':   '#FF9800',  # 橙
+        'ETF_Stock':       '#4CAF50',  # 绿
+        'Fixed_Income':    '#00BCD4',  # 青
+        'Gold':            '#FFC107',  # 金
+        'Company_Stock':   '#F44336',  # 红
+        'Cash':            '#9E9E9E',  # 灰（通常不显示）
+    }
+
     col_chart, col_pie = st.columns([3, 2])
 
     # Multi-line NAV chart
@@ -286,14 +298,19 @@ with tab_dashboard:
                 nav_df = class_nav_dict[cls].copy()
                 nav_df = nav_df[(nav_df['Date'] >= date_start) & (nav_df['Date'] <= date_end)]
                 nav_df['Display_Name'] = display_map[cls]
+                nav_df['_cls'] = cls
                 class_lines.append(nav_df)
 
         if class_lines:
             combined = pd.concat(class_lines, ignore_index=True)
+            # 按 Asset_Class 建立颜色映射（Display_Name → color）
+            color_map = {display_map[cls]: CLASS_COLORS.get(cls, '#888888')
+                         for cls in selected_classes}
             fig_class = px.line(
                 combined, x='Date', y='NAV', color='Display_Name',
                 title='分类净值对比',
                 labels={'Date': '日期', 'NAV': '净值', 'Display_Name': '资产类别'},
+                color_discrete_map=color_map,
             )
             fig_class.add_hline(y=1.0, line_dash="dash", line_color="red", opacity=0.3)
             fig_class.update_layout(hovermode='x unified', height=420, legend=dict(
@@ -308,11 +325,15 @@ with tab_dashboard:
         pie_data = allocation_df[allocation_df['Asset_Class'].isin(selected_classes)].copy()
         if len(pie_data) > 0:
             pie_data['Display_Name'] = pie_data['Asset_Class'].map(display_map)
+            # 使用与折线图一致的颜色映射
+            pie_color_map = {display_map[cls]: CLASS_COLORS.get(cls, '#888888')
+                             for cls in pie_data['Asset_Class']}
             fig_pie = px.pie(
                 pie_data, values='Total_Value', names='Display_Name',
                 title='资产配置',
                 hole=0.45,
-                color_discrete_sequence=px.colors.qualitative.Set2,
+                color='Display_Name',
+                color_discrete_map=pie_color_map,
             )
             fig_pie.update_traces(
                 textinfo='percent+label',
