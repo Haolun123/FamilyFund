@@ -243,15 +243,15 @@ FamilyFund/
 ├── .env                               # 环境变量（FAMILYFUND_DATA 路径，不入 Git）
 │
 ├── docs/                              # 文档目录
-│   ├── ARCHITECTURE_shared.md         # ★ 架构设计文档（本文档）
+│   ├── ARCHITECTURE.md         # ★ 架构设计文档（本文档）
 │   ├── USER_MANUAL.md                 # ★ 用户操作手册（每周流程/SAP/CSV 参考）
-│   ├── BENCHMARKING_ANALYSIS.md       # 基准对比分析（CPI/M2/CSI300/S&P500）
+│   ├── DESIGN_BENCHMARK.md       # 基准对比分析（CPI/M2/CSI300/S&P500）
 │   ├── DESIGN_SAP_STOCK.md            # SAP 股票模块设计文档
 │   ├── DESIGN_PDF_REPORT.md           # PDF 报告设计文档
-│   ├── DESIGN_market_monitor.md       # 市场温度计设计文档（Tab 5，已实现）
-│   ├── DESIGN_daily_push.md           # 每日企业微信推送设计文档（EC2 cron，已实现）
-│   ├── DESIGN_backtest.md             # 定投回测设计文档（✅ 已实现，Tab 6）
-│   ├── QUARTERLY_REPORT_DESIGN.md     # 季度家庭财报设计文档（✅ 已实现，Tab 7）
+│   ├── DESIGN_MARKET_MONITOR.md       # 市场温度计设计文档（Tab 5，已实现）
+│   ├── DESIGN_DAILY_PUSH.md           # 每日企业微信推送设计文档（EC2 cron，已实现）
+│   ├── DESIGN_BACKTEST.md             # 定投回测设计文档（✅ 已实现，Tab 6）
+│   ├── DESIGN_QUARTERLY_REPORT.md     # 季度家庭财报设计文档（✅ 已实现，Tab 7）
 │   └── IMPROVE_LIST.md                # 功能评价与改进待办列表
 │
 ├── .streamlit/                        # Streamlit 配置
@@ -491,7 +491,7 @@ graph TB
 
 ### 8.2 基准对比
 
-> 详细分析见 [`BENCHMARKING_ANALYSIS.md`](BENCHMARKING_ANALYSIS.md)
+> 详细分析见 [`DESIGN_BENCHMARK.md`](DESIGN_BENCHMARK.md)
 
 #### 设计思路
 
@@ -788,7 +788,7 @@ P1 市场温度计已全部实现：
 
 #### ✅ 已完成 — 季度家庭财报（Tab 7）
 
-设计文档：`QUARTERLY_REPORT_DESIGN.md`
+设计文档：`DESIGN_QUARTERLY_REPORT.md`
 
 | 功能 | 文件 | 状态 |
 |:---|:---|:---|

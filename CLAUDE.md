@@ -125,7 +125,7 @@ docker exec familyfund grep -n "关键词" /app/dashboard/app.py
 | 文档 | 何时更新 |
 |------|---------|
 | `docs/IMPROVE_LIST.md` | 完成功能后移到"已完成"；新问题/待办添加到对应分类 |
-| `docs/ARCHITECTURE_shared.md` | 架构变更、新增模块、设计决策变化时更新；版本号递增 |
+| `docs/ARCHITECTURE.md` | 架构变更、新增模块、设计决策变化时更新；版本号递增 |
 | `docs/USER_MANUAL.md` | 操作流程变更时更新（Weekly Update 步骤、调仓辅助器规则等） |
 
 ---

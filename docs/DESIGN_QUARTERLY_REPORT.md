@@ -3,7 +3,7 @@
 > **状态**: 设计已完成，待数据迁移后实现
 > **日期**: 2026-04-14
 > **目标项目**: FamilyFund（合并扩展，Tab 6）
-> **前置条件**: Tab 5 市场温度计先行实现（见 DESIGN_market_monitor.md）
+> **前置条件**: Tab 5 市场温度计先行实现（见 DESIGN_MARKET_MONITOR.md）
 > **实现前置**: 用户需先手工将 25Q4 和 26Q1 历史数据录入 `balance_sheet.csv` 和 `cashflow_log.csv`，完成数据迁移后方可开始实现阶段
 
 ---
