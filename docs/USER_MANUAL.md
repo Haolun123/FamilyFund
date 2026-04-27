@@ -325,8 +325,10 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 
 Type 枚举：
 - `Inflow_Salary`：工资净储蓄（未来由鲨鱼记账脚本自动生成）
-- `Inflow_Other`：基金外特殊收入
-- `Outflow_Major`：基金外大额支出
+- `Inflow_Other`：经营性特殊收入（政府补贴、保险理赔等）
+- `Capital_Inflow`：资本性流入（资产变现、大额补偿等，不属于日常经营）
+- `Capital_Outflow`：资本性流出（大额资产购置支出等）
+- `Outflow_Major`：基金外大额经营性支出
 
 **Step 3 — 刷新 Dashboard**
 
