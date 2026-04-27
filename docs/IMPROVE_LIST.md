@@ -72,6 +72,8 @@
 
 4. **AI 周度评估**（详见下方专项分析）— 基于当前持仓结构、市场温度计信号、本周 NAV 变化，由 Claude 生成 3-5 句中文周报，推送企业微信或展示在 Dashboard。
 
+5. **鲨鱼记账解析 + 季度现金流分析**（详见下方专项分析）— 解析鲨鱼记账导出 CSV，在季度财报 Tab 展示消费结构、自由现金流、DSCR 等指标。前置条件：鲨鱼记账建立「债务还本」分类并从 2026Q2 起持续记录。
+
 #### **P3 — 高复杂度 / 需前置工作**
 
 5. **季度财报（Tab 7）** ✅ 已实现 — `src/quarterly_engine.py` + `dashboard/app.py` Tab 7；`balance_sheet.csv`（25Q4+26Q1）和 `cashflow_log.csv` 已初始化。每季末手动更新 CSV，详见 `docs/USER_MANUAL.md` 第 6 节。
@@ -120,6 +122,63 @@
 - 缺点：增加实现复杂度；用户仍需选择具体标的（类别内可能有多个标的）
 
 **当前倾向**：暂不做，仅展示建议，用户手动操作调仓辅助器。
+
+---
+
+### 🔍 专项分析：鲨鱼记账解析 + 季度现金流分析
+
+**日期**：2026-04-27
+**状态**：待实现，前置条件未满足（需 2026Q2 鲨鱼记账数据）
+
+#### 背景
+
+鲨鱼记账采用双轨制记账（详见 `docs/DESIGN_ACCOUNTING_PRINCIPLES.md`）：
+- 所有现金流出都记录，本金还款记「债务还本」一级分类
+- FamilyFund 后端解析时剔除「债务还本」还原净资产口径
+
+#### 前置条件
+
+- [ ] 鲨鱼记账 App 新建「债务还本」一级分类
+- [ ] 从 2026Q2 起每月记录房贷本金、车贷本金（¥5,000）
+- [ ] 每季末导出明细 CSV，存入 `$FAMILYFUND_DATA/<季度>/鲨鱼记账明细.csv`
+
+#### 数据格式
+
+文件编码：UTF-16，制表符分隔。列：`日期、收支类型、类别、金额、备注`
+
+#### 后端实现（`src/cashflow_engine.py`，新文件）
+
+```python
+def parse_shark_csv(path) -> pd.DataFrame
+    # 读取 UTF-16 CSV，标准化日期格式
+
+def compute_cashflow_summary(df) -> dict
+    # 返回：
+    # - income_total: 总收入
+    # - expense_total: 总支出（含债务还本）
+    # - expense_net: 净支出（剔除债务还本）
+    # - debt_service: 债务还本合计
+    # - free_cashflow: income - expense_total（真实可支配）
+    # - net_savings: income - expense_net（净资产视角）
+    # - dscr: income / debt_service
+    # - by_category: 各类别支出明细
+```
+
+#### Dashboard 展示（季度财报 Tab7 新增 Section）
+
+- **KPI 卡片**：季度收入 / 自由现金流 / 净储蓄率 / DSCR
+- **支出结构饼图**：各类别占比（剔除「债务还本」，展示真实消费结构）
+- **现金流瀑布图**：收入 → 各类支出 → 债务还本 → 净储蓄
+- **DSCR 警示**：< 1.5x 时黄色警示，< 1.2x 时红色警示
+
+#### 净资产核对公式（季末对账）
+
+```
+期末净资产 ≈ 期初净资产
+           + 鲨鱼收入合计
+           - 鲨鱼支出合计（剔除「债务还本」）
+           ± 资产估值变化（balance_sheet QoQ）
+```
 
 ---
 
