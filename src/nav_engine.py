@@ -4,6 +4,7 @@ import matplotlib
 import os
 import sys
 import fcntl
+import json
 
 matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'PingFang SC']
 matplotlib.rcParams['axes.unicode_minus'] = False
@@ -551,6 +552,42 @@ def compute_attribution(
         rows.append(cash_row)
 
     return rows
+
+
+_TARGET_ALLOC_DEFAULT = {
+    'US_Blend_Fund':  0.20,
+    'US_Growth_Fund': 0.10,
+    'CN_Index_Fund':  0.15,
+    'ETF_Stock':      0.15,
+    'Gold':           0.15,
+    'Fixed_Income':   0.10,
+    'Company_Stock':  0.10,
+    'Cash':           0.05,
+}
+
+
+def load_target_allocation(data_dir: str) -> dict:
+    """从 iCloud 目录加载目标配置比例。文件不存在时返回默认值。"""
+    path = os.path.join(data_dir, 'target_allocation.json')
+    if not os.path.exists(path):
+        return dict(_TARGET_ALLOC_DEFAULT)
+    with open(path, encoding='utf-8') as f:
+        data = json.load(f)
+    data.pop('_updated', None)
+    # 确保所有类别都有值，缺失的补默认
+    result = dict(_TARGET_ALLOC_DEFAULT)
+    result.update({k: v for k, v in data.items() if k in _TARGET_ALLOC_DEFAULT})
+    return result
+
+
+def save_target_allocation(data_dir: str, alloc: dict):
+    """保存目标配置比例到 iCloud 目录。"""
+    from datetime import date
+    path = os.path.join(data_dir, 'target_allocation.json')
+    payload = {k: alloc[k] for k in _TARGET_ALLOC_DEFAULT if k in alloc}
+    payload['_updated'] = date.today().isoformat()
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 def _atomic_write_csv(df, csv_path):

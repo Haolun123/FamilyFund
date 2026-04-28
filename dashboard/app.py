@@ -13,6 +13,7 @@ from nav_engine import (
     load_portfolio, validate_portfolio, compute_fund_nav,
     compute_class_nav, compute_allocation, compute_cost_basis,
     compute_xirr, compute_sharpe, compute_calmar, compute_attribution,
+    load_target_allocation, save_target_allocation,
     CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES,
     _atomic_write_csv, update_snapshot, delete_snapshot,
 )
@@ -174,6 +175,9 @@ tab_dashboard, tab_update, tab_history, tab_sap, tab_market, tab_backtest, tab_q
 # ═══════════════════════════════════════════════════════════
 
 with tab_dashboard:
+
+    # 加载目标配置比例（不缓存，用户可能刚修改过）
+    target_alloc = load_target_allocation(data_dir)
 
     # ─── Section 1: Fund Overview ───
 
@@ -696,6 +700,153 @@ with tab_dashboard:
                     })
                 attr_df = pd.DataFrame(table_rows)
                 st.dataframe(attr_df, use_container_width=True, hide_index=True)
+
+    # ─── Section 6: 再平衡建议 ───
+    st.divider()
+    st.subheader("再平衡建议")
+    st.caption("基于目标配置比例，计算各类别当前偏差，叠加市场温度计信号。仅供参考，不自动操作。")
+
+    # 编辑目标配置比例
+    with st.expander("编辑目标配置比例", expanded=False):
+        st.caption("修改后点击保存，Dashboard 立即更新。各类别合计须等于 100%。")
+        ta_cols = st.columns(4)
+        new_alloc = {}
+        for i, (cls, display) in enumerate(CLASS_DISPLAY_NAMES.items()):
+            with ta_cols[i % 4]:
+                new_alloc[cls] = st.number_input(
+                    display,
+                    min_value=0, max_value=100,
+                    value=int(round(target_alloc.get(cls, 0.0) * 100)),
+                    step=1, key=f'ta_{cls}',
+                ) / 100.0
+        ta_total = sum(new_alloc.values())
+        ta_color = 'red' if abs(ta_total - 1.0) > 0.005 else 'green'
+        st.markdown(
+            f"合计：<span style='color:{ta_color}; font-weight:bold'>{ta_total*100:.1f}%</span>",
+            unsafe_allow_html=True,
+        )
+        if st.button("💾 保存目标比例", disabled=(abs(ta_total - 1.0) > 0.005), key='save_ta'):
+            save_target_allocation(data_dir, new_alloc)
+            target_alloc = new_alloc
+            st.success("已保存")
+            st.rerun()
+
+    # 计算再平衡数据
+    latest_date_rb = raw_df['Date'].max()
+    fund_tv_rb = raw_df[raw_df['Date'] == latest_date_rb]['Total_Value'].sum()
+
+    # 温度计信号（在 Tab1 内重新计算，market_data 已全局加载）
+    _rb_market = get_market_data()
+    _rb_vix   = (_rb_market.get('vix') or {}).get('price')
+    _rb_qvix  = (_rb_market.get('qvix') or {}).get('price')
+    _rb_pe_sp  = ((_rb_market.get('pe_sp500') or {}).get('manual_override')
+                  or (_rb_market.get('pe_sp500') or {}).get('value'))
+    _rb_pe_ndx = ((_rb_market.get('pe_ndx100') or {}).get('manual_override')
+                  or (_rb_market.get('pe_ndx100') or {}).get('value'))
+    _rb_pe_csi300 = (_rb_market.get('pe_csi300') or {}).get('value')
+    _rb_gold_entry = _rb_market.get('gold')
+    _rb_gold_bias = None
+    if _rb_gold_entry and _rb_gold_entry.get('ma200'):
+        _rb_gold_bias = (_rb_gold_entry['price'] - _rb_gold_entry['ma200']) / _rb_gold_entry['ma200'] * 100
+
+    _CLASS_SIGNAL = {
+        'US_Blend_Fund':  lookup_multiplier(_rb_pe_sp,  _rb_vix, 'sp500'),
+        'US_Growth_Fund': lookup_multiplier(_rb_pe_ndx, _rb_vix, 'ndx100'),
+        'CN_Index_Fund':  lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
+        'ETF_Stock':      lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
+        'Gold':           lookup_gold_multiplier(_rb_gold_bias, _rb_vix),
+        'Fixed_Income':   '—',
+        'Company_Stock':  '—',
+        'Cash':           '—',
+    }
+
+    def _signal_color(sig):
+        if sig in ('—', None): return '#9E9E9E'
+        if sig == '暂停':       return '#9E9E9E'
+        if sig == '顶格':       return '#FF6F00'
+        val = float(sig.replace('x', '')) if sig.endswith('x') else 1.0
+        if val >= 2.0: return '#1B5E20'
+        if val >= 1.0: return '#388E3C'
+        return '#81C784'
+
+    # 构建再平衡行数据
+    rb_rows = []
+    for cls, display in CLASS_DISPLAY_NAMES.items():
+        cur_alloc_row = allocation_df[allocation_df['Asset_Class'] == cls]
+        cur_pct = float(cur_alloc_row.iloc[0]['Allocation_Percent']) if not cur_alloc_row.empty else 0.0
+        cur_tv  = float(cur_alloc_row.iloc[0]['Total_Value'])        if not cur_alloc_row.empty else 0.0
+        tgt_pct = target_alloc.get(cls, 0.0)
+        dev_pct = cur_pct - tgt_pct
+        suggest_amount = (tgt_pct - cur_pct) * fund_tv_rb  # 正=买入，负=卖出
+        signal = _CLASS_SIGNAL.get(cls, '—')
+        rb_rows.append({
+            'cls': cls,
+            'display': display,
+            'cur_tv': cur_tv,
+            'cur_pct': cur_pct * 100,
+            'tgt_pct': tgt_pct * 100,
+            'dev_pct': dev_pct * 100,
+            'suggest_amount': suggest_amount,
+            'signal': signal,
+        })
+
+    # 左列：偏差柱状图，右列：明细表格
+    rb_left, rb_right = st.columns([55, 45])
+
+    with rb_left:
+        non_cash = [r for r in rb_rows if r['cls'] != 'Cash']
+        bar_colors = ['#2e7d32' if r['dev_pct'] < 0 else '#d32f2f' for r in non_cash]
+        fig_rb = go.Figure()
+        fig_rb.add_trace(go.Bar(
+            x=[r['display'] for r in non_cash],
+            y=[r['dev_pct'] for r in non_cash],
+            marker_color=bar_colors,
+            text=[f"{r['cur_pct']:.1f}% / {r['tgt_pct']:.1f}%" for r in non_cash],
+            textposition='outside',
+            customdata=[[r['signal']] for r in non_cash],
+            hovertemplate='%{x}<br>当前: %{text}<br>偏差: %{y:+.1f}%<br>信号: %{customdata[0]}<extra></extra>',
+        ))
+        fig_rb.add_hline(y=0, line_dash='dash', line_color='#888', line_width=1)
+        fig_rb.update_layout(
+            height=400,
+            margin=dict(t=40, b=80),
+            yaxis_title='偏差（百分点）',
+            yaxis_ticksuffix='%',
+            showlegend=False,
+        )
+        # 在 x 轴下方标注温度计信号
+        for i, r in enumerate(non_cash):
+            sig = r['signal']
+            fig_rb.add_annotation(
+                x=r['display'], y=-max(abs(r['dev_pct']) for r in non_cash) * 0.15 - 1.5,
+                text=sig, showarrow=False,
+                font=dict(size=11, color=_signal_color(sig)),
+                yref='y',
+            )
+        st.plotly_chart(fig_rb, use_container_width=True)
+
+    with rb_right:
+        table_data = []
+        for r in rb_rows:
+            if r['cls'] == 'Cash':
+                op = '参考'
+            elif abs(r['suggest_amount']) < 100:
+                op = '持平'
+            elif r['suggest_amount'] > 0:
+                op = f"买入 ¥{r['suggest_amount']:,.0f}"
+            else:
+                op = f"卖出 ¥{abs(r['suggest_amount']):,.0f}"
+            table_data.append({
+                '资产类别':   r['display'],
+                '当前市值':   f"¥{r['cur_tv']:,.0f}",
+                '当前%':      f"{r['cur_pct']:.1f}%",
+                '目标%':      f"{r['tgt_pct']:.1f}%",
+                '偏差':       f"{r['dev_pct']:+.1f}%",
+                '建议操作':   op,
+                '温度计':     r['signal'],
+            })
+        rb_df = pd.DataFrame(table_data)
+        st.dataframe(rb_df, use_container_width=True, hide_index=True)
 
 # ═══════════════════════════════════════════════════════════
 # Tab 2: Weekly Update
