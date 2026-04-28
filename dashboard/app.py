@@ -177,7 +177,7 @@ tab_dashboard, tab_update, tab_history, tab_sap, tab_market, tab_backtest, tab_q
 with tab_dashboard:
 
     # 加载目标配置比例（不缓存，用户可能刚修改过）
-    target_alloc = load_target_allocation(data_dir)
+    target_alloc = load_target_allocation(os.path.dirname(csv_path))
 
     # ─── Section 1: Fund Overview ───
 
@@ -726,7 +726,7 @@ with tab_dashboard:
             unsafe_allow_html=True,
         )
         if st.button("💾 保存目标比例", disabled=(abs(ta_total - 1.0) > 0.005), key='save_ta'):
-            save_target_allocation(data_dir, new_alloc)
+            save_target_allocation(os.path.dirname(csv_path), new_alloc)
             target_alloc = new_alloc
             st.success("已保存")
             st.rerun()
