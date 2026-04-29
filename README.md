@@ -121,7 +121,7 @@ Cash flows only change **shares**, not **NAV**. This means NAV purely reflects i
 
 ## Architecture
 
-See [ARCHITECTURE_shared.md](ARCHITECTURE_shared.md) for the full design document covering algorithms, data flow, and CIO workflow.
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design document covering algorithms, data flow, and CIO workflow.
 
 ## License
 
