@@ -36,6 +36,7 @@ output/
 # Environment (machine-specific paths)
 .env
 familyfund.env
+tenth_man_config.json
 
 # IDE / tools
 .claude/

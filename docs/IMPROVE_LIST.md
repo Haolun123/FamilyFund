@@ -74,6 +74,8 @@
 
 5. **鲨鱼记账解析 + 季度现金流分析**（详见下方专项分析）— 解析鲨鱼记账导出 CSV，在季度财报 Tab 展示消费结构、自由现金流、DSCR 等指标。前置条件：鲨鱼记账建立「债务还本」分类并从 2026Q2 起持续记录。
 
+6. **第十人系统**（详见下方专项分析）— 调仓决策前的强制反对审查，三个独立 LLM Agent 从价值陷阱/宏观压力/流动性三维度审查决策。独立 Tab，需配置私人 API key（DeepSeek/MiniMax/智谱，兼容 OpenAI SDK）。
+
 #### **P3 — 高复杂度 / 需前置工作**
 
 5. **季度财报（Tab 7）** ✅ 已实现 — `src/quarterly_engine.py` + `dashboard/app.py` Tab 7；`balance_sheet.csv`（25Q4+26Q1）和 `cashflow_log.csv` 已初始化。每季末手动更新 CSV，详见 `docs/USER_MANUAL.md` 第 6 节。
@@ -353,3 +355,62 @@ FamilyFund 的数据层分三个层次，各自服务不同的分析目的：
 4. 点击「应用」→ Cash TV/NCF + 各资产 NCF 自动写入，新标的自动追加行
 5. 补全新标的的份额/价格/市值
 6. 填写日期，提交
+
+---
+
+### 🔍 专项分析：第十人系统（Anti-Fragile Allocation Red Teamer）
+
+**日期**：2026-04-29
+**状态**：待实现，设计已完成（详见 `.claude/plans/golden-finding-robin.md`）
+
+#### 功能定位
+
+调仓决策**前**的强制反对审查，对抗确认偏误。与调仓辅助器完全分离——辅助器用于录入已发生的交易，第十人系统用于决策前的压力测试。
+
+#### 三个独立 Agent
+
+| Agent | 角色 | 审查维度 |
+|-------|------|---------|
+| Agent A | 价值陷阱审问官 | Forward PE 可靠性、护城河、盈利可持续性 |
+| Agent B | 宏观末日推演机 | 滞胀/通缩/汇率极端情景压测 |
+| Agent C | 流动性与集中度审计员 | 集中度、DSCR、RSU Cliff 期流动性 |
+
+#### 技术架构
+
+- **数据预组装**（Python 侧）：持仓摘要 + yfinance 基本面缓存 + 市场温度计信号 → 结构化 context
+- **LLM 推理**（API 侧）：三次独立调用，各角色 system prompt 完全隔离，费用约 ¥0.04/次
+- **API 兼容**：DeepSeek / MiniMax / 智谱，均兼容 OpenAI SDK，通过 `tenth_man_config.json` 配置切换
+
+#### 输入
+
+```python
+{
+  "asset_name": "成都银行",
+  "code": "601838",
+  "direction": "买入",
+  "amount_cny": 20000,
+  "core_logic": "Forward PE 仅 5x，股息率 4.75%，银行业不良率下降",
+  "macro_assumption": "利率维持低位，成都经济持续增长",
+}
+```
+
+#### 输出结构（每个 Agent）
+
+- **致命假设清单**：逻辑链路中最容易断裂的环节
+- **灾难级复盘**：三年后亏损50%的第一人称场景
+- **强制安全条件**（Agent C）：满足这些条件才能放行
+
+#### 文件清单
+
+| 文件 | 说明 |
+|------|------|
+| `src/tenth_man.py` | 三个 Agent 的 prompt + API 调用逻辑 |
+| `src/tenth_man_context.py` | 数据预组装（持仓/基本面/宏观/决策） |
+| `dashboard/app.py` | 新增「第十人」Tab（第8个） |
+| `$FAMILYFUND_DATA/tenth_man_config.json` | API key 配置（不入 Git） |
+| `$FAMILYFUND_DATA/tenth_man_reports/` | PDF 报告存储目录 |
+
+#### 前置条件
+
+- [ ] 购买私人 API key（DeepSeek 推荐，成本最低）
+- [ ] `requirements.txt` 新增 `openai>=1.0.0`
