@@ -564,11 +564,12 @@ with tab_dashboard:
             if v is None: return '—'
             try:
                 n = float(v) * scale
-                if fmt == 'x':    return f'{n:.2f}x'
-                if fmt == '%':    return f'{n*100:.2f}%'
-                if fmt == '+%':   return f'{n*100:+.1f}%'
-                if fmt == 'cny':  return f'¥{n:.2f}'
-                if fmt == 'usd':  return f'${n:.2f}'
+                if fmt == 'x':          return f'{n:.2f}x'
+                if fmt == '%':          return f'{n*100:.2f}%'   # 小数→百分比（×100）
+                if fmt == '+%':         return f'{n*100:+.1f}%'  # 小数→百分比（×100）
+                if fmt == 'pct_direct': return f'{n:.2f}%'       # 已是百分比，直接显示
+                if fmt == 'cny':        return f'¥{n:.2f}'
+                if fmt == 'usd':        return f'${n:.2f}'
                 return f'{n:.2f}'
             except Exception:
                 return '—'
@@ -606,7 +607,7 @@ with tab_dashboard:
                 with r2c2:
                     st.metric('Forward EPS',  _fmt(f.get('forwardEps'),  eps_fmt))
                 with r2c3:
-                    st.metric('股息率',        _fmt(f.get('dividendYield'), '%'))
+                    st.metric('股息率',        _fmt(f.get('dividendYield'), 'pct_direct'))
                 with r2c4:
                     st.metric('营收增长 YoY',  _fmt(f.get('revenueGrowth'), '+%'))
 
