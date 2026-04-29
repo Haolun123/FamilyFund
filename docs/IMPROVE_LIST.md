@@ -70,7 +70,7 @@
 
 3. **美债收益率加入市场温度计** ✅ 已实现 — 拉取 ^TNX（yfinance），在温度计 Tab 展示为第5个 KPI 卡片（偏高/中性/偏低，不参与矩阵计算），企业微信推送同步包含。
 
-4. **AI 周度评估**（详见下方专项分析）— 基于当前持仓结构、市场温度计信号、本周 NAV 变化，由 Claude 生成 3-5 句中文周报，推送企业微信或展示在 Dashboard。
+4. **AI 周度评估**（详见下方专项分析）— 基于当前持仓结构、市场温度计信号、本周 NAV 变化和收益归因，由 DeepSeek 生成 3-5 句中文周报，展示在 Dashboard 并可推送企业微信。**架构已确定**（DeepSeek 私人 API 直连，与第十人系统共用 key），随时可实现。
 
 5. **鲨鱼记账解析 + 季度现金流分析**（详见下方专项分析）— 解析鲨鱼记账导出 CSV，在季度财报 Tab 展示消费结构、自由现金流、DSCR 等指标。前置条件：鲨鱼记账建立「债务还本」分类并从 2026Q2 起持续记录。
 
@@ -288,21 +288,32 @@ FamilyFund 的数据层分三个层次，各自服务不同的分析目的：
 
 ### 🔍 专项分析：AI 周度评估
 
-**日期**：2026-04-25  
-**状态**：待实现（需解决网络/API 连通性问题）
+**日期**：2026-04-25（更新 2026-04-29）
+**状态**：待实现，架构已确定（DeepSeek 私人 API，直连方案）
 
 #### 功能定位
 
-基于 FamilyFund **自有数据**（持仓结构、市场温度计信号、本周 NAV 变化）由 Claude 生成 3-5 句中文周报，输出到企业微信推送或 Dashboard。
+每次 Weekly Update 完成后，基于 FamilyFund **自有数据**（持仓结构、市场温度计信号、本周 NAV 变化、收益归因）由 DeepSeek 生成 3-5 句中文周报，展示在 Dashboard 并可推送企业微信。
 
 与同花顺等工具的差异：同花顺提供的是市场通用数据；本功能的价值在于结合**你这个家庭基金的具体持仓和权重**给出有操作指向的分析。
 
-#### 输入 Payload（不含原始 CSV，隐私友好）
+#### 架构决策（已确定）
 
-```json
+✅ **方案 D：私人 DeepSeek API key，家里 Mac Docker 直连**
+
+原方案 A（Anthropic API）和方案 B（公司 dev machine 中转）均已废弃。私人 DeepSeek key 直接在 Docker 容器内调用，无网络中转问题。
+
+- API key 存入 `tenth_man_config.json`（已在 .gitignore），与第十人系统共用
+- 成本：约 1k tokens/次，¥0.001/次，一年 ¥0.05
+- 实现复用第十人系统的 OpenAI SDK 调用模式
+
+#### 输入 Context
+
+```python
 {
   "nav": 1.0421,
   "weekly_return": "+0.82%",
+  "annualized_return": "+12.3%",
   "signals": {
     "SP500": "1x", "NDX100": "暂停", "CSI300": "2x",
     "A500": "2x", "Gold": "2x"
@@ -311,29 +322,51 @@ FamilyFund 的数据层分三个层次，各自服务不同的分析目的：
     "US_Blend_Fund": "18%", "US_Growth_Fund": "12%",
     "CN_Index_Fund": "15%", "Gold": "22%", "Cash": "10%"
   },
-  "top_movers": [{"name": "黄金", "return": "+3.2%"}, ...]
+  "attribution": [
+    {"name": "黄金", "contribution": "+1.01%"},
+    {"name": "美股宽基", "contribution": "+0.45%"},
+    ...
+  ],
+  "rebalance_alerts": ["黄金超配 +7.1%", "现金超配 +28.9%"]
 }
 ```
 
-#### 架构决策
+#### System Prompt
 
-| 方案 | 描述 | 问题 |
-|------|------|------|
-| 方案 A：个人 API key | 家里 Mac Docker 直接调用 Anthropic API | ❌ 中国大陆个人用户无法使用 Anthropic API |
-| 方案 B：公司 dev machine 中转 | Dashboard 发送摘要 payload → dev machine endpoint → Claude API → 返回周报 | ⚠️ 需解决家里 Mac ↔ 公司 dev machine 网络连通性（VPN / tunnel） |
-| 方案 C：规则模板（降级方案） | if/else 基于温度计信号拼出周报文字 | ✅ 无 API 依赖，但输出质量上限低 |
+```
+你是一位家庭基金的投资顾问助理。基于以下数据，用简洁的中文写一段3-5句的周报。
+要求：
+1. 点评本周表现的主要驱动因素
+2. 结合温度计信号，给出下周定投方向建议（哪个类别信号强/弱）
+3. 如有明显超配/低配，提醒关注再平衡
+4. 语气专业但不晦涩，有具体数字支撑
+5. 不要废话，不要空话，直接给结论
+```
 
-**当前结论**：方案 B 可行，但需先解决网络连通性问题（公司 VPN 或 dev machine 开放 tunnel）。方案 C 作为降级备选。
+#### 触发方式
 
-#### 方案 B 实现要点（待定）
+两种触发方式：
+- **手动**：Weekly Update 保存快照后，Dashboard 出现「✨ 生成本周 AI 点评」按钮
+- **自动**（可选）：`daily_push.py` 每日推送时同步附上 AI 点评段落
 
-1. **家里 Mac 侧**：Dashboard 加"生成本周评估"按钮，点击后向 dev machine endpoint 发 POST 请求
-2. **dev machine 侧**：极简 FastAPI，收到 payload 调 Claude，返回中文周报文字
-3. **输出**：返回文字显示在 Dashboard，同时可选推送企业微信
+#### 输出落地
 
-**前置条件**：
-- [ ] 确认公司 dev machine 是否可从家里 Mac 访问（VPN / ngrok / 内网穿透）
-- [ ] 确认公司 CC token 是否可在 dev machine 上以 API key 形式调用
+1. **Dashboard**：Tab1 基金总览 KPI 区域下方，折叠卡片展示，含生成时间戳
+2. **企业微信**：在每日/每周推送末尾追加 AI 点评段落
+
+#### 文件清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/ai_weekly.py` | 新建，context 组装 + DeepSeek API 调用 |
+| `dashboard/app.py` | Tab1 新增「生成 AI 点评」按钮和展示区域 |
+| `src/notifier.py` | 可选：推送末尾追加 AI 点评 |
+
+#### 前置条件
+
+- [x] DeepSeek API key 已购买
+- [x] `tenth_man_config.json` 已有 API key（共用）
+- [ ] 实现 `src/ai_weekly.py`
 
 ---
 
