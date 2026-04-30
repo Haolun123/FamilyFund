@@ -3241,6 +3241,7 @@ with tab_tenth:
                 if st.button("📄 导出审查报告 PDF", key='tm_pdf'):
                     try:
                         import matplotlib
+                        import textwrap
                         matplotlib.rcParams['font.sans-serif'] = [
                             'Arial Unicode MS', 'Noto Sans CJK SC', 'PingFang SC', 'SimHei',
                         ]
@@ -3251,19 +3252,24 @@ with tab_tenth:
 
                         buf = io.BytesIO()
                         page_texts = [
-                            ("决策摘要 + 审查 Context", result['context']),
-                            ("Agent A：价值陷阱审问官", result['agent_a']),
-                            ("Agent B：宏观末日推演机", result['agent_b']),
-                            ("Agent C：流动性审计员",   result['agent_c']),
+                            ("Decision Summary + Context", result['context']),
+                            ("Agent A: Value Trap Inquisitor", result['agent_a']),
+                            ("Agent B: Macro Stress Tester", result['agent_b']),
+                            ("Agent C: Liquidity Auditor",   result['agent_c']),
                         ]
                         with PdfPages(buf) as pdf:
                             for title, text in page_texts:
                                 fig, ax = plt.subplots(figsize=(11.69, 8.27))
                                 ax.axis('off')
-                                ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
-                                ax.text(0.02, 0.95, text, transform=ax.transAxes,
-                                        fontsize=9, verticalalignment='top',
-                                        wrap=True, family='monospace')
+                                ax.set_title(title, fontsize=13, fontweight='bold', pad=12)
+                                # 手动换行，每行最多 100 个字符
+                                wrapped = '\n'.join(
+                                    '\n'.join(textwrap.wrap(line, width=100)) if line.strip() else ''
+                                    for line in text.split('\n')
+                                )
+                                ax.text(0.02, 0.95, wrapped, transform=ax.transAxes,
+                                        fontsize=8, verticalalignment='top',
+                                        linespacing=1.4)
                                 pdf.savefig(fig, bbox_inches='tight')
                                 plt.close(fig)
                         buf.seek(0)
