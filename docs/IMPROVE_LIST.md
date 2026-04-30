@@ -70,11 +70,11 @@
 
 3. **美债收益率加入市场温度计** ✅ 已实现 — 拉取 ^TNX（yfinance），在温度计 Tab 展示为第5个 KPI 卡片（偏高/中性/偏低，不参与矩阵计算），企业微信推送同步包含。
 
-4. **AI 周度评估**（详见下方专项分析）— 基于持仓结构、温度计信号、NAV 变化，由 DeepSeek 生成中文周报。**架构待定**：公司设备 TLS 拦截直连，推荐方案 E（EC2 中转，与第十人系统共用 endpoint）。
+4. **AI 周度评估**（详见下方专项分析）— 基于持仓结构、温度计信号、NAV 变化，由智谱 GLM 生成中文周报。**架构已确定**：公司设备可直连智谱 GLM（`open.bigmodel.cn`），OpenAI SDK 兼容，`tenth_man_config.json` 已配置，随时可实现。
 
 5. **鲨鱼记账解析 + 季度现金流分析**（详见下方专项分析）— 解析鲨鱼记账导出 CSV，在季度财报 Tab 展示消费结构、自由现金流、DSCR 等指标。前置条件：鲨鱼记账建立「债务还本」分类并从 2026Q2 起持续记录。
 
-6. **第十人系统**（详见下方专项分析）— 调仓决策前的强制反对审查，三个独立 LLM Agent 从价值陷阱/宏观压力/流动性三维度审查。**同样依赖 EC2 endpoint**，与 AI 周度评估一起实现。
+6. **第十人系统**（详见下方专项分析）— 调仓决策前的强制反对审查，三个独立 LLM Agent 从价值陷阱/宏观压力/流动性三维度审查。**同样使用 GLM 直连**，无需 EC2 中转。
 
 #### **P3 — 高复杂度 / 需前置工作**
 
@@ -297,31 +297,16 @@ FamilyFund 的数据层分三个层次，各自服务不同的分析目的：
 
 与同花顺等工具的差异：同花顺提供的是市场通用数据；本功能的价值在于结合**你这个家庭基金的具体持仓和权重**给出有操作指向的分析。
 
-#### 架构决策（待定）
+#### 架构决策（已确定）
 
-经过测试，公司设备（Mac）有合规级别的 TLS 拦截，无法直连 `api.deepseek.com`，**方案 D（Docker 直连）已排除**。
+✅ **方案 F：智谱 GLM，公司设备直连**
 
-| 方案 | 描述 | 状态 |
-|------|------|------|
-| 方案 A：Anthropic API | 直连 | ❌ 大陆个人用户不可用 |
-| 方案 B：公司 dev machine 中转 | 需 VPN/tunnel | ❌ 合规风险 |
-| 方案 C：规则模板 | if/else 拼文字 | ⚠️ 降级备选，质量低 |
-| 方案 D：家里 Mac Docker 直连 | 直连 DeepSeek | ❌ 公司设备 TLS 拦截 |
-| **方案 E：EC2 中转** | Dashboard → EC2 → DeepSeek API | ✅ **推荐**，EC2 已有，无合规问题 |
-
-**推荐方案 E**：EC2 已在跑 `daily_push.py`，部署一个轻量 FastAPI endpoint，家里 Mac Dashboard 发送摘要 payload，EC2 调用 DeepSeek 返回周报文字。第十人系统同样走此路径。
-
-#### 方案 E 实现要点
-
-1. **EC2 侧**：部署极简 FastAPI（`/weekly_summary`、`/tenth_man`），从环境变量读 DeepSeek API key
-2. **Dashboard 侧**：Weekly Update 保存后，POST payload 到 EC2 endpoint，展示返回的周报
-3. **企业微信**：`daily_push.py` 同步调用 EC2，推送末尾附上 AI 点评
-
-**前置条件**：
-- [x] DeepSeek API key 已购买
-- [ ] EC2 上部署 FastAPI endpoint（`src/ec2_api.py` 待创建）
-- [ ] EC2 安全组开放对应端口（或用 HTTPS + token 鉴权）
-- [ ] Dashboard 配置 EC2 endpoint URL（存入 `tenth_man_config.json`）
+经测试，公司网络拦截 DeepSeek（SSL 证书错误），但 MiniMax 和智谱 GLM 均可直连。选用智谱 GLM：
+- `glm-4-flash` 免费额度充足，OpenAI SDK 兼容
+- `base_url`: `https://open.bigmodel.cn/api/paas/v4`
+- API key 已存入 `tenth_man_config.json`（iCloud 同步，.gitignore 保护）
+- 无需 EC2 中转，家里 Mac Docker 直接调用
+- 成本：glm-4-flash 免费；付费模型约 ¥0.001/次
 
 #### 输入 Context
 
