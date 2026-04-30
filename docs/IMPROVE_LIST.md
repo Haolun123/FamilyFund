@@ -409,11 +409,35 @@ FamilyFund 的数据层分三个层次，各自服务不同的分析目的：
 | Agent B | 宏观末日推演机 | 滞胀/通缩/汇率极端情景压测 |
 | Agent C | 流动性与集中度审计员 | 集中度、DSCR、RSU Cliff 期流动性 |
 
-#### 技术架构
+#### 技术架构（已确定）
 
-- **数据预组装**（Python 侧）：持仓摘要 + yfinance 基本面缓存 + 市场温度计信号 → 结构化 context
-- **LLM 推理**（API 侧）：三次独立调用，各角色 system prompt 完全隔离，费用约 ¥0.04/次
-- **API 兼容**：DeepSeek / MiniMax / 智谱，均兼容 OpenAI SDK，通过 `tenth_man_config.json` 配置切换
+- **模型**：`glm-5.1`（推理模型，硬编码），`max_tokens=3000`，公司设备直连可用
+- **数据预组装**（Python 侧）：持仓快照 + yfinance 基本面缓存 + 市场温度计信号 + 流动性指标 → 结构化 context 字符串
+- **LLM 推理**（API 侧）：三次独立调用，各角色 system prompt 完全隔离
+- **费用**：约 ¥0.10-0.15/次（glm-5.1 推理模型）
+- **复用**：`ai_weekly._load_config()`、`fundamentals.get_fundamentals()`、`market_monitor.get_market_data()`
+- **注意**：glm-5.1 是推理模型，`reasoning_content` 为内部思考过程，`content` 字段为最终输出，需 `max_tokens≥3000` 才能拿到完整输出
+
+#### Agent System Prompts
+
+**Agent A（价值陷阱审问官）**：
+```
+你是一个极度悲观的价值投资审问官。你的唯一任务是找出用户投资决策中的价值陷阱。
+不允许说任何正面评价。输出结构：
+## 致命假设 / ## 价值陷阱风险 / ## 三年后亏损50%的场景（第一人称）
+```
+
+**Agent B（宏观末日推演机）**：
+```
+你是一个宏观对冲基金的压力测试专员。构建至少两种极端宏观情景，测试该资产抗压能力。
+输出结构：## 最脆弱的宏观假设 / ## 极端情景压测 / ## 组合层面系统性风险
+```
+
+**Agent C（流动性与集中度审计员）**：
+```
+你是一个只关心资产负债表健康度的风控审计员。不评价标的好坏，只看数字。
+输出结构：## 集中度风险 / ## 流动性压力 / ## 强制安全条件
+```
 
 #### 输入
 
@@ -428,23 +452,26 @@ FamilyFund 的数据层分三个层次，各自服务不同的分析目的：
 }
 ```
 
-#### 输出结构（每个 Agent）
+#### UI 设计
 
-- **致命假设清单**：逻辑链路中最容易断裂的环节
-- **灾难级复盘**：三年后亏损50%的第一人称场景
-- **强制安全条件**（Agent C）：满足这些条件才能放行
+- 独立「第十人」Tab（第8个）
+- 决策输入区：持仓下拉快速填入 + 手动输入核心逻辑/宏观假设
+- 审查报告区：三列并排，各 Agent Markdown 输出
+- PDF 导出：保存至 `$FAMILYFUND_DATA/tenth_man_reports/YYYY-MM-DD_标的名称.pdf`
 
 #### 文件清单
 
 | 文件 | 说明 |
 |------|------|
-| `src/tenth_man.py` | 三个 Agent 的 prompt + API 调用逻辑 |
-| `src/tenth_man_context.py` | 数据预组装（持仓/基本面/宏观/决策） |
+| `src/tenth_man.py` | 数据预组装 + 三个 Agent 调用逻辑 |
 | `dashboard/app.py` | 新增「第十人」Tab（第8个） |
-| `$FAMILYFUND_DATA/tenth_man_config.json` | API key 配置（不入 Git） |
+| `$FAMILYFUND_DATA/tenth_man_config.json` | API key 配置（已配置，不入 Git） |
 | `$FAMILYFUND_DATA/tenth_man_reports/` | PDF 报告存储目录 |
 
 #### 前置条件
 
-- [ ] 购买私人 API key（DeepSeek 推荐，成本最低）
-- [ ] `requirements.txt` 新增 `openai>=1.0.0`
+- [x] ZhipuAI API key 已购买并验证
+- [x] `openai>=1.0.0` 已在 requirements.txt
+- [x] `tenth_man_config.json` 已配置（glm-4-flash，运行时硬编码切换为 glm-5.1）
+- [ ] 实现 `src/tenth_man.py`
+- [ ] Dashboard 新增 Tab
