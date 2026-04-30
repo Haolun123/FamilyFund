@@ -3242,6 +3242,7 @@ with tab_tenth:
                     try:
                         import matplotlib
                         import textwrap
+                        import re
                         matplotlib.rcParams['font.sans-serif'] = [
                             'Arial Unicode MS', 'Noto Sans CJK SC', 'PingFang SC', 'SimHei',
                         ]
@@ -3249,6 +3250,35 @@ with tab_tenth:
                         from matplotlib.backends.backend_pdf import PdfPages
                         import matplotlib.pyplot as plt
                         import io
+
+                        def _strip_markdown(text: str) -> str:
+                            """把 Markdown 转成适合 PDF 纯文本渲染的格式。"""
+                            lines = []
+                            for line in text.split('\n'):
+                                # ## 标题 → 加空行 + 全大写
+                                m = re.match(r'^(#{1,3})\s+(.*)', line)
+                                if m:
+                                    level = len(m.group(1))
+                                    heading = m.group(2).strip()
+                                    if level == 1:
+                                        lines.append('')
+                                        lines.append(f'【 {heading.upper()} 】')
+                                        lines.append('')
+                                    elif level == 2:
+                                        lines.append('')
+                                        lines.append(f'▍ {heading}')
+                                        lines.append('')
+                                    else:
+                                        lines.append(f'  • {heading}')
+                                    continue
+                                # **bold** → 去掉星号
+                                line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
+                                # *italic* → 去掉星号
+                                line = re.sub(r'\*(.+?)\*', r'\1', line)
+                                # - 列表项 → • 符号
+                                line = re.sub(r'^(\s*)-\s+', r'\1• ', line)
+                                lines.append(line)
+                            return '\n'.join(lines)
 
                         buf = io.BytesIO()
                         page_texts = [
@@ -3262,10 +3292,10 @@ with tab_tenth:
                                 fig, ax = plt.subplots(figsize=(11.69, 8.27))
                                 ax.axis('off')
                                 ax.set_title(title, fontsize=13, fontweight='bold', pad=12)
-                                # 手动换行，每行最多 100 个字符
+                                clean = _strip_markdown(text)
                                 wrapped = '\n'.join(
                                     '\n'.join(textwrap.wrap(line, width=100)) if line.strip() else ''
-                                    for line in text.split('\n')
+                                    for line in clean.split('\n')
                                 )
                                 ax.text(0.02, 0.95, wrapped, transform=ax.transAxes,
                                         fontsize=8, verticalalignment='top',
