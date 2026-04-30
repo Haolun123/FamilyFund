@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import pandas as pd
 import os
 import sys
+import json
 import contextlib
 from datetime import date, timedelta
 
@@ -305,7 +306,8 @@ with tab_dashboard:
 
             if 'ai_weekly_summary' in st.session_state:
                 st.markdown(st.session_state['ai_weekly_summary'])
-                st.caption(f"生成于 {st.session_state.get('ai_weekly_date', '')} · GLM-5.1")
+                _ai_cfg = json.load(open(os.path.join(_ai_data_dir, 'tenth_man_config.json'))) if _ai_config_exists else {}
+                st.caption(f"生成于 {st.session_state.get('ai_weekly_date', '')} · {_ai_cfg.get('model', 'GLM')}")
 
     # ─── Section 2: Asset Class Comparison ───
 
