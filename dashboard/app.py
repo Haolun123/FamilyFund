@@ -3114,22 +3114,40 @@ with tab_tenth:
 
     _tm_data_dir = os.path.dirname(csv_path)
 
-    # ── Provider 选择 ──────────────────────────────────────────
-    _PROVIDERS = {
-        'GLM-5.1 (ZhipuAI · 公司网络)':       'tenth_man_config_GLM.json',
-        'DeepSeek-Reasoner (家用网络)':         'tenth_man_config_deepseek.json',
-        'MiniMax-Text-01 (家用网络)':           'tenth_man_config_minimax.json',
-    }
-    _tm_provider_label = st.selectbox(
-        'LLM Provider',
-        options=list(_PROVIDERS.keys()),
-        key='tm_provider',
-        help='GLM: 公司网络可用。DeepSeek / MiniMax: 家用网络可用（需先在 iCloud 配置对应 json）',
-    )
-    _tm_config_file = _PROVIDERS[_tm_provider_label]
-    _tm_config_ok = os.path.exists(os.path.join(_tm_data_dir, _tm_config_file))
+    # ── Provider 选择（动态扫描 tenth_man_config_*.json）─────────
+    import glob as _glob
+    def _load_providers(data_dir: str) -> dict:
+        """扫描 data_dir 下所有 tenth_man_config_*.json，返回 {显示名: 文件名}。"""
+        result = {}
+        for path in sorted(_glob.glob(os.path.join(data_dir, 'tenth_man_config_*.json'))):
+            fname = os.path.basename(path)
+            try:
+                with open(path, encoding='utf-8') as _f:
+                    _cfg = json.load(_f)
+                provider = _cfg.get('provider', fname)
+                model    = _cfg.get('model', '?')
+                note = '（家用网络）' if provider == 'deepseek' else ''
+                label = f"{model}  ·  {provider}{note}"
+            except Exception:
+                label = fname
+            result[label] = fname
+        return result
 
-    if not _tm_config_ok:
+    _PROVIDERS = _load_providers(_tm_data_dir)
+
+    if not _PROVIDERS:
+        st.warning("No tenth_man_config_*.json found in data directory.")
+    else:
+        _tm_provider_label = st.selectbox(
+            'LLM Provider',
+            options=list(_PROVIDERS.keys()),
+            key='tm_provider',
+            help='自动读取 iCloud data 目录下的 tenth_man_config_*.json。新增 provider 只需放入对应 json 文件。',
+        )
+        _tm_config_file = _PROVIDERS[_tm_provider_label]
+        _tm_config_ok = os.path.exists(os.path.join(_tm_data_dir, _tm_config_file))
+
+    if not _PROVIDERS or not _tm_config_ok:
         st.warning(f"{_tm_config_file} not found. Please create it in your data directory.")
     else:
         # ── 决策输入区 ──
