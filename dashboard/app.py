@@ -3113,10 +3113,23 @@ with tab_tenth:
     st.caption("Pre-trade decision review. Three independent agents challenge your thesis from different angles: value trap / macro stress / liquidity.")
 
     _tm_data_dir = os.path.dirname(csv_path)
-    _tm_config_ok = os.path.exists(os.path.join(_tm_data_dir, 'tenth_man_config.json'))
+
+    # ── Provider 选择 ──────────────────────────────────────────
+    _PROVIDERS = {
+        'GLM-5.1 (ZhipuAI · 公司网络)':       'tenth_man_config_GLM.json',
+        'DeepSeek-Reasoner (家用网络)': 'tenth_man_config_deepseek.json',
+    }
+    _tm_provider_label = st.selectbox(
+        'LLM Provider',
+        options=list(_PROVIDERS.keys()),
+        key='tm_provider',
+        help='GLM: 公司网络可用。DeepSeek: 家用网络可用（需先在 iCloud 配置 tenth_man_config_deepseek.json）',
+    )
+    _tm_config_file = _PROVIDERS[_tm_provider_label]
+    _tm_config_ok = os.path.exists(os.path.join(_tm_data_dir, _tm_config_file))
 
     if not _tm_config_ok:
-        st.warning("tenth_man_config.json not found. Please configure your API key.")
+        st.warning(f"{_tm_config_file} not found. Please create it in your data directory.")
     else:
         # ── 决策输入区 ──
         st.subheader("Decision Input")
@@ -3188,7 +3201,7 @@ with tab_tenth:
             key='tm_macro', height=80,
         )
 
-        st.caption("💡 Estimated cost: ¥0.10-0.15 per review (glm-5.1 reasoning model, 3 independent calls)")
+        st.caption("💡 Estimated cost per review: GLM-5.1 ≈ ¥0.10-0.15 | DeepSeek-Reasoner ≈ ¥0.05-0.10（3 independent calls）")
 
         if st.button("🔍 Launch 10th Man Review", type="primary", key='tm_run'):
             if not tm_name or not tm_symbol:
@@ -3210,6 +3223,7 @@ with tab_tenth:
                     result = run_tenth_man(
                         decision, raw_df, fund_nav_df, allocation_df,
                         _tm_mkt, _tm_data_dir,
+                        config_file=_tm_config_file,
                     )
                 st.session_state['tm_result'] = result
                 st.session_state['tm_decision'] = decision

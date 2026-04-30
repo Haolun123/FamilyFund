@@ -1,7 +1,7 @@
 """tenth_man.py — 第十人系统：调仓决策前强制反对审查。
 
 三个独立 Agent（价值陷阱/宏观压力/流动性）从不同维度审查决策。
-Python 侧预组装所有数据，GLM-5.1 只做推理输出。
+Python 侧预组装所有数据，LLM 只做推理输出。支持 GLM / DeepSeek 切换。
 """
 
 import json
@@ -9,8 +9,7 @@ import os
 from datetime import date
 
 
-# ── 模型配置（硬编码推理模型，不受 config model 字段影响）──
-_TENTH_MAN_MODEL = 'glm-5.1'
+# ── 默认参数 ──────────────────────────────────────────────────
 _MAX_TOKENS = 5000
 _TEMPERATURE = 0.3
 
@@ -276,7 +275,7 @@ def _run_agent(system_prompt: str, context: str, cfg: dict) -> str:
         from openai import OpenAI
         client = OpenAI(api_key=cfg['api_key'], base_url=cfg['base_url'])
         resp = client.chat.completions.create(
-            model=_TENTH_MAN_MODEL,
+            model=cfg['model'],
             messages=[
                 {'role': 'system', 'content': system_prompt},
                 {'role': 'user',   'content': context},
@@ -299,6 +298,7 @@ def run_tenth_man(
     allocation_df,
     market_data: dict,
     data_dir: str,
+    config_file: str = 'tenth_man_config_GLM.json',
 ) -> dict:
     """
     运行第十人系统，三次独立 Agent 调用。
@@ -312,16 +312,20 @@ def run_tenth_man(
         core_logic: str
         macro_assumption: str
 
+    config_file: iCloud data 目录下的配置文件名，默认 GLM。
+        可选值：'tenth_man_config_GLM.json' | 'tenth_man_config_deepseek.json'
+        config 结构：{"provider": str, "api_key": str, "model": str, "base_url": str}
+
     Returns:
         agent_a, agent_b, agent_c: str (Markdown)
         context: str  # 注入的完整 context
         error: str | None
     """
     # 加载 config
-    cfg_path = os.path.join(data_dir, 'tenth_man_config.json')
+    cfg_path = os.path.join(data_dir, config_file)
     if not os.path.exists(cfg_path):
         return {'agent_a': '', 'agent_b': '', 'agent_c': '',
-                'context': '', 'error': '未找到 tenth_man_config.json'}
+                'context': '', 'error': f'未找到 {config_file}'}
     with open(cfg_path, encoding='utf-8') as f:
         cfg = json.load(f)
 
