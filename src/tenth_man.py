@@ -270,6 +270,12 @@ def _build_post_trade_section(decision: dict, allocation_df, fund_nav_df) -> str
 
 # ── 单次 Agent 调用 ───────────────────────────────────────────
 
+def _strip_think_tags(text: str) -> str:
+    """剔除推理模型输出中的 <think>...</think> 内部思考块（MiniMax M2.x 格式）。"""
+    import re
+    return re.sub(r'<think>.*?</think>\s*', '', text, flags=re.DOTALL).strip()
+
+
 def _run_agent(system_prompt: str, context: str, cfg: dict) -> str:
     try:
         from openai import OpenAI
@@ -284,7 +290,9 @@ def _run_agent(system_prompt: str, context: str, cfg: dict) -> str:
             temperature=_TEMPERATURE,
         )
         content = resp.choices[0].message.content
-        return content.strip() if content else '[模型未返回内容，请重试]'
+        if not content:
+            return '[模型未返回内容，请重试]'
+        return _strip_think_tags(content)
     except Exception as e:
         return f'[调用失败：{e}]'
 
