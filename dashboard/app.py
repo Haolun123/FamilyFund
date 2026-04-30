@@ -3117,13 +3117,14 @@ with tab_tenth:
     # ── Provider 选择 ──────────────────────────────────────────
     _PROVIDERS = {
         'GLM-5.1 (ZhipuAI · 公司网络)':       'tenth_man_config_GLM.json',
-        'DeepSeek-Reasoner (家用网络)': 'tenth_man_config_deepseek.json',
+        'DeepSeek-Reasoner (家用网络)':         'tenth_man_config_deepseek.json',
+        'MiniMax-Text-01 (家用网络)':           'tenth_man_config_minimax.json',
     }
     _tm_provider_label = st.selectbox(
         'LLM Provider',
         options=list(_PROVIDERS.keys()),
         key='tm_provider',
-        help='GLM: 公司网络可用。DeepSeek: 家用网络可用（需先在 iCloud 配置 tenth_man_config_deepseek.json）',
+        help='GLM: 公司网络可用。DeepSeek / MiniMax: 家用网络可用（需先在 iCloud 配置对应 json）',
     )
     _tm_config_file = _PROVIDERS[_tm_provider_label]
     _tm_config_ok = os.path.exists(os.path.join(_tm_data_dir, _tm_config_file))
@@ -3201,7 +3202,7 @@ with tab_tenth:
             key='tm_macro', height=80,
         )
 
-        st.caption("💡 Estimated cost per review: GLM-5.1 ≈ ¥0.10-0.15 | DeepSeek-Reasoner ≈ ¥0.05-0.10（3 independent calls）")
+        st.caption("💡 Estimated cost per review: GLM-5.1 ≈ ¥0.10-0.15 | DeepSeek-Reasoner ≈ ¥0.05-0.10 | MiniMax-Text-01 ≈ ¥0.05-0.10（3 independent calls）")
 
         if st.button("🔍 Launch 10th Man Review", type="primary", key='tm_run'):
             if not tm_name or not tm_symbol:
