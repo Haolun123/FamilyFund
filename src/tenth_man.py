@@ -63,7 +63,8 @@ SAP RSU Cliff 期内流动性是否安全？DSCR 是否下降到危险水位？
 # ── 数据预组装 ────────────────────────────────────────────────
 
 def _build_decision_section(decision: dict) -> str:
-    direction = decision.get('direction', '买入')
+    direction = decision.get('direction', 'Buy')
+    direction_cn = '买入' if direction in ('Buy', '买入') else '卖出'
     amount = decision.get('amount_cny', 0)
     name = decision.get('asset_name', '未知标的')
     code = decision.get('yf_symbol') or decision.get('code', '')
@@ -73,7 +74,7 @@ def _build_decision_section(decision: dict) -> str:
     lines = [
         "## 决策概要",
         f"- 标的：{name}（{code}）",
-        f"- 方向：{direction}　金额：¥{amount:,.0f}",
+        f"- 方向：{direction_cn}　金额：¥{amount:,.0f}",
         f"- 核心逻辑：{logic}",
         f"- 宏观假设：{macro}",
     ]
@@ -193,12 +194,12 @@ def _build_market_section(market_data: dict) -> str:
 
 def _build_post_trade_section(decision: dict, allocation_df, fund_nav_df) -> str:
     """计算交易后的仓位变化，供 Agent C 使用。"""
-    direction = decision.get('direction', '买入')
+    direction = decision.get('direction', 'Buy')
     amount = float(decision.get('amount_cny', 0))
     asset_class = decision.get('asset_class', '')
 
     total_tv = float(fund_nav_df.iloc[-1]['Total_Value'])
-    sign = 1 if direction == '买入' else -1
+    sign = 1 if direction in ('Buy', '买入') else -1
     new_total = total_tv + sign * amount
 
     lines = ["\n## 交易后仓位变化（估算）"]

@@ -3109,77 +3109,97 @@ with tab_tenth:
     from tenth_man import run_tenth_man
     from nav_engine import CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES
 
-    st.header("第十人系统")
-    st.caption("调仓决策前的强制反对审查，对抗确认偏误。三个独立 Agent 从价值陷阱/宏观压力/流动性三维度审查。")
+    st.header("10th Man System")
+    st.caption("Pre-trade decision review. Three independent agents challenge your thesis from different angles: value trap / macro stress / liquidity.")
 
     _tm_data_dir = os.path.dirname(csv_path)
     _tm_config_ok = os.path.exists(os.path.join(_tm_data_dir, 'tenth_man_config.json'))
 
     if not _tm_config_ok:
-        st.warning("未找到 tenth_man_config.json，请先配置 API key。")
+        st.warning("tenth_man_config.json not found. Please configure your API key.")
     else:
         # ── 决策输入区 ──
-        st.subheader("决策输入")
+        st.subheader("Decision Input")
+        st.caption("**Core Logic and Macro Assumption are required.** The agents will specifically attack what you write here — the more specific, the sharper the review.")
 
         # 持仓快速填入
         latest_holdings_tm = raw_df[raw_df['Date'] == raw_df['Date'].max()]
-        holding_options = ['（手动输入）'] + [
+        holding_options = ['（Manual input）'] + [
             f"{row['Name']} ({row['Code']})"
             for _, row in latest_holdings_tm.iterrows()
             if row['Asset_Class'] not in ('Cash',)
         ]
-        selected_holding = st.selectbox("从持仓选择标的（可选）", holding_options, key='tm_holding_select')
 
-        # 自动填入
-        _tm_default_name, _tm_default_code, _tm_default_class = '', '', ''
-        if selected_holding != '（手动输入）':
-            _parts = selected_holding.rsplit('(', 1)
-            _tm_default_name = _parts[0].strip()
-            _tm_default_code = _parts[1].rstrip(')') if len(_parts) > 1 else ''
-            _match = latest_holdings_tm[latest_holdings_tm['Name'] == _tm_default_name]
-            if not _match.empty:
-                _tm_default_class = _match.iloc[0]['Asset_Class']
+        # 用 session_state 驱动自动填入
+        prev_selection = st.session_state.get('tm_prev_selection', '')
+        selected_holding = st.selectbox("Quick-fill from holdings (optional)", holding_options, key='tm_holding_select')
+
+        if selected_holding != prev_selection:
+            st.session_state['tm_prev_selection'] = selected_holding
+            if selected_holding != '（Manual input）':
+                _parts = selected_holding.rsplit('(', 1)
+                _auto_name = _parts[0].strip()
+                _auto_code = _parts[1].rstrip(')') if len(_parts) > 1 else ''
+                _match = latest_holdings_tm[latest_holdings_tm['Name'] == _auto_name]
+                _auto_class = _match.iloc[0]['Asset_Class'] if not _match.empty else ''
+                st.session_state['tm_name'] = _auto_name
+                st.session_state['tm_symbol'] = _auto_code
+                st.session_state['tm_auto_class'] = _auto_class
+            else:
+                st.session_state['tm_name'] = ''
+                st.session_state['tm_symbol'] = ''
+                st.session_state['tm_auto_class'] = ''
+
+        _tm_auto_class = st.session_state.get('tm_auto_class', '')
 
         col_a, col_b, col_c = st.columns([3, 3, 2])
         with col_a:
-            tm_name = st.text_input('标的名称', value=_tm_default_name, key='tm_name')
+            tm_name = st.text_input('Asset Name', key='tm_name')
         with col_b:
             tm_symbol = st.text_input(
                 'YF Symbol',
-                value=_tm_default_code,
                 key='tm_symbol',
-                help='A股沪: 601838.SS　A股深: 000001.SZ　港股: 0700.HK　美股: NVDA',
+                help='Shanghai A: 601838.SS  Shenzhen A: 000001.SZ  HK: 0700.HK  US: NVDA',
             )
         with col_c:
-            tm_direction = st.selectbox('方向', ['买入', '卖出'], key='tm_direction')
+            tm_direction = st.selectbox('Direction', ['Buy', 'Sell'], key='tm_direction')
 
         col_d, col_e = st.columns([2, 3])
         with col_d:
-            tm_amount = st.number_input('金额 (CNY)', min_value=0, step=1000, value=20000, key='tm_amount')
+            tm_amount = st.number_input('Amount (CNY)', min_value=0, step=1000, value=20000, key='tm_amount')
         with col_e:
+            _class_options = ['（Not selected）'] + sorted(c for c in VALID_ASSET_CLASSES if c != 'Cash')
+            _class_index = _class_options.index(_tm_auto_class) if _tm_auto_class in _class_options else 0
             tm_class = st.selectbox(
-                '资产类别（用于计算交易后仓位）',
-                ['（不选）'] + sorted(c for c in VALID_ASSET_CLASSES if c != 'Cash'),
-                index=(['（不选）'] + sorted(c for c in VALID_ASSET_CLASSES if c != 'Cash')).index(_tm_default_class)
-                if _tm_default_class in VALID_ASSET_CLASSES else 0,
+                'Asset Class (for post-trade position estimate)',
+                _class_options,
+                index=_class_index,
                 key='tm_class',
             )
 
-        tm_logic = st.text_area('核心逻辑', placeholder='例：Forward PE 5x，股息率 4.75%，银行业不良率下降', key='tm_logic', height=80)
-        tm_macro = st.text_area('宏观假设', placeholder='例：利率维持低位，成都经济持续增长', key='tm_macro', height=80)
+        tm_logic = st.text_area(
+            'Core Logic (required)',
+            placeholder='e.g. Forward PE only 5x, dividend yield 4.75%, NPL ratio declining',
+            key='tm_logic', height=80,
+        )
+        tm_macro = st.text_area(
+            'Macro Assumption (optional)',
+            placeholder='e.g. Interest rates stay low, Chengdu economy continues growing',
+            key='tm_macro', height=80,
+        )
 
-        st.caption("💡 费用提示：本次调用约 ¥0.10-0.15（glm-5.1 推理模型，三次独立调用）")
+        st.caption("💡 Estimated cost: ¥0.10-0.15 per review (glm-5.1 reasoning model, 3 independent calls)")
 
-        if st.button("🔍 启动第十人审查", type="primary", key='tm_run'):
+        if st.button("🔍 Launch 10th Man Review", type="primary", key='tm_run'):
             if not tm_name or not tm_symbol:
-                st.warning("请填写标的名称和 YF Symbol")
+                st.warning("Please fill in Asset Name and YF Symbol")
             elif not tm_logic:
-                st.warning("请填写核心逻辑")
+                st.warning("Please fill in Core Logic — the agents need your thesis to attack it")
             else:
                 decision = {
-                    'asset_name':      tm_name,
-                    'yf_symbol':       tm_symbol,
-                    'asset_class':     tm_class if tm_class != '（不选）' else '',
+                    'asset_name':       tm_name,
+                    'yf_symbol':        tm_symbol,
+                    'asset_class':      tm_class if tm_class != '（Not selected）' else '',
                     'direction':       tm_direction,
                     'amount_cny':      tm_amount,
                     'core_logic':      tm_logic,
