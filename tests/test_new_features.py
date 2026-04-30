@@ -232,8 +232,8 @@ class TestTenthManContextBuilders:
         from tenth_man import _make_prompt_b
         prompt = _make_prompt_b(is_buy=False)
         assert '卖出' in prompt or '减仓' in prompt
-        # 卖出方向的 Agent B 应该提有利情景，而不是压测不利情景
-        assert '有利' in prompt or '反转' in prompt or '踏空' in prompt
+        # 卖出方向的 Agent B 应该压测持有不卖的风险，而非找宏观利好
+        assert '持有' in prompt or '继续持有' in prompt
 
     def test_prompt_c_buy_checks_concentration(self):
         from tenth_man import _make_prompt_c

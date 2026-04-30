@@ -3227,7 +3227,7 @@ with tab_tenth:
 
                 _is_buy = decision.get('direction') in ('Buy', '买入')
                 _label_a = "🔍 Agent A：价值陷阱审问官" if _is_buy else "🔍 Agent A：逆向价值辩护律师"
-                _label_b = "🌪 Agent B：宏观压测机" if _is_buy else "🌪 Agent B：宏观反转研究员"
+                _label_b = "🌪 Agent B：宏观压测机" if _is_buy else "🌪 Agent B：宏观压测机（持有风险）"
                 _label_c = "💧 Agent C：集中度/流动性审计员"
 
                 col_a, col_b, col_c = st.columns(3)
@@ -3287,7 +3287,7 @@ with tab_tenth:
 
                         buf = io.BytesIO()
                         _a_title = "Agent A: Value Trap Inquisitor" if _is_buy else "Agent A: Contrarian Defense Counsel"
-                        _b_title = "Agent B: Macro Stress Tester"   if _is_buy else "Agent B: Macro Reversal Analyst"
+                        _b_title = "Agent B: Macro Stress Tester"   if _is_buy else "Agent B: Macro Stress Tester (Hold Risk)"
                         page_texts = [
                             ("Decision Summary + Context", result['context']),
                             (_a_title, result['agent_a']),
