@@ -272,14 +272,21 @@ FamilyFund/
 │   ├── market_monitor.py              # 市场温度计：乖离率/VIX/QVIX/PE×VIX 矩阵
 │   ├── benchmark.py                   # 基准对比（CSI300/S&P500/CPI/M2）
 │   ├── notifier.py                    # 企业微信每日推送
-│   ├── backtest.py                    # DCA 回测引擎：固定策略 vs 矩阵策略历史模拟，支持5个标的，含 Shiller PE 数据拉取与缓存
+│   ├── backtest.py                    # DCA 回测引擎：固定策略 vs 矩阵策略历史模拟
+│   ├── quarterly_engine.py            # 季度财报引擎（资产负债表/净资产/瀑布图）
+│   ├── fundamentals.py                # 个股基本面拉取（yfinance，含 iCloud 日缓存）
+│   ├── ai_weekly.py                   # AI 周度评估（GLM-4-flash，context 预组装）
+│   ├── tenth_man.py                   # [待实现] 第十人系统（GLM-5.1，三 Agent 审查）
 │   ├── import_sap_xlsx.py             # XLSX → own_sap/move_sap CSV 迁移工具
 │   ├── migrate_xlsx.py                # XLSX → portfolio.csv 迁移工具
 │   ├── fund_calculator.py             # [历史已弃用] 旧版净值核算
 │   └── asset_breakdown.py             # [历史] XLSX 资产配置解析（迁移工具）
 │
 ├── dashboard/                         # ★ 可视化仪表板
-│   └── app.py                         # Streamlit + Plotly 交互式仪表板（6 tabs）
+│   └── app.py                         # Streamlit + Plotly 交互式仪表板（8 tabs）
+│                                      # Tab1 总览 | Tab2 周更 | Tab3 历史 | Tab4 SAP
+│                                      # Tab5 温度计+个股基本面 | Tab6 回测
+│                                      # Tab7 季度财报 | Tab8 第十人[待实现]
 │
 ├── scripts/                           # 运维脚本
 │   ├── daily_push.py                  # 每日推送入口（EC2 cron）
