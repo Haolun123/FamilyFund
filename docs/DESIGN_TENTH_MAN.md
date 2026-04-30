@@ -1,6 +1,6 @@
 # DESIGN: 第十人系统（Anti-Fragile Allocation Red Teamer）
 
-> **状态**：待实现
+> **状态**：已实现
 > **日期**：2026-04-29（更新 2026-04-30）
 
 ---
@@ -11,15 +11,19 @@
 
 灵感来源：《僵尸世界大战》中的"第十人原则"——当所有人都同意一件事，必须有一个人站出来反对，强制寻找被忽视的风险。
 
+**核心设计原则：Agent 永远反对用户的决策方向。**
+- 买入 → 三个 Agent 各从不同角度反对买入
+- 卖出/减仓 → 三个 Agent 各从不同角度反对卖出
+
 ---
 
 ## 三个独立 Agent
 
-| Agent | 角色 | 审查维度 |
-|-------|------|---------|
-| Agent A | 价值陷阱审问官 | Forward PE 可靠性、护城河、盈利可持续性 |
-| Agent B | 宏观末日推演机 | 滞胀/通缩/汇率极端情景压测 |
-| Agent C | 流动性与集中度审计员 | 集中度、DSCR、RSU Cliff 期流动性 |
+| Agent | 买入时角色 | 卖出时角色 | 审查维度 |
+|-------|-----------|-----------|---------|
+| Agent A | 价值陷阱审问官（极度悲观） | 逆向价值辩护律师（极度乐观） | 估值逻辑、护城河、盈利可持续性 |
+| Agent B | 宏观压测机（构建不利情景） | 宏观反转研究员（构建有利情景） | 宏观情景、用户宏观假设的盲点 |
+| Agent C | 买入后集中度/流动性审计 | 卖出后配置失衡/机会成本审计 | 集中度、DSCR、RSU Cliff 期流动性 |
 
 ---
 
@@ -35,13 +39,15 @@
 ### 数据流
 
 ```
-用户输入决策
+用户输入决策（含方向：买入/卖出）
   ↓
 Python 侧预组装（不让 LLM 做任何计算）
   ├── 持仓快照（raw_df, fund_nav_df, allocation_df）
   ├── 个股基本面（fundamentals.get_fundamentals()，按需）
   ├── 市场温度计信号（market_monitor.get_market_data()）
-  └── 流动性指标（Cash 余额 / DSCR 估算）
+  └── 交易后仓位变化估算
+  ↓
+run_tenth_man() 根据 direction 动态生成三个 Agent 的 system prompt
   ↓
 三次独立 API 调用（各 Agent system prompt 完全隔离）
   ↓
@@ -55,51 +61,58 @@ Python 侧预组装（不让 LLM 做任何计算）
 
 ---
 
-## Agent System Prompts
+## Agent System Prompts（方向感知，动态生成）
 
-### Agent A：价值陷阱审问官
+Prompts 通过 `_make_prompt_a/b/c(is_buy: bool)` 函数生成，不使用静态字符串。
 
+### Agent A
+
+**买入方向**（`is_buy=True`）：
 ```
-你是一个极度悲观的价值投资审问官。你的唯一任务是找出用户投资决策中的价值陷阱。
-你必须质疑：Forward PE 的盈利预测是否过于乐观？护城河是否真实存在且可持续？
-股息能否维持？增长逻辑是否有循环论证？你绝对不允许说任何正面评价。
-用中文输出，严格按以下结构：
-## 致命假设
-（最容易断裂的逻辑环节，列举2-3条）
-## 价值陷阱风险
-（具体论据，引用提供的数据）
-## 三年后亏损50%的场景
-（用第一人称写："现在是三年后，这笔投资亏损了50%。以下是当年我被蒙蔽的原因……"）
+你是一个极度悲观的价值投资审问官。用户想买入某标的，你的唯一任务是反对这次买入。
+论证这是价值陷阱，Forward PE 过乐观，护城河不可持续，增长逻辑循环论证。
+输出结构：
+## 致命假设 / ## 价值陷阱风险 / ## 三年后亏损50%的场景（第一人称）
 ```
 
-### Agent B：宏观末日推演机
-
+**卖出方向**（`is_buy=False`）：
 ```
-你是一个宏观对冲基金的压力测试专员。你的任务是把用户的标的放入极端宏观情景测试。
-你必须构建至少两种极端情景（从滞胀/通缩/汇率剧烈波动/利率急升中选最相关的），
-测试该资产在这些情景下的抗压能力。评估用户的宏观假设是否站得住脚。
-用中文输出，严格按以下结构：
-## 最脆弱的宏观假设
-（用户假设中最容易被打破的那个）
-## 极端情景压测
-（至少两种情景，每种说明：触发条件 → 对该标的的影响 → 估计下跌幅度）
-## 组合层面的系统性风险
-（这笔交易如何放大整体组合在极端情景下的脆弱性）
+你是一个极度乐观的逆向投资辩护律师。用户想卖出/减仓，你的唯一任务是反对这次卖出。
+论证这是底部恐慌性抛售，资产被严重低估，减仓后很可能踏空反弹。
+输出结构：
+## 卖出逻辑的致命缺陷 / ## 你正在错过的价值 / ## 三年后后悔卖出的场景（第一人称）
 ```
 
-### Agent C：流动性与集中度审计员
+### Agent B
 
+**买入方向**（`is_buy=True`）：
 ```
-你是一个只关心资产负债表健康度的风控审计员。你不评价标的好坏，只看数字。
-你必须评估：这笔交易后集中度是否过高？现金/流动资产是否充足？
-SAP RSU Cliff 期内流动性是否安全？DSCR 是否下降到危险水位？
-用中文输出，严格按以下结构：
-## 集中度风险
-（交易后各类别权重变化，哪些超过警戒线）
-## 流动性压力
-（Cash 余额 / 月度刚性支出 / 可支撑月数 / RSU Cliff 期风险）
-## 强制安全条件
-（列出必须满足才能放行的条件；不满足则明确建议放弃或缩减规模）
+你是宏观压力测试专员。用构建≥2种极端不利情景，反对现在买入时机。
+输出结构：
+## 买入时机的宏观致命伤 / ## 极端情景压测（触发条件→影响→跌幅）/ ## 买入后组合的系统性脆弱性
+```
+
+**卖出方向**（`is_buy=False`）：
+```
+你是宏观研究员。用构建≥2种有利情景，反对现在减仓的判断。
+输出结构：
+## 卖出假设的宏观盲点 / ## 宏观有利情景分析（触发条件→影响→踏空涨幅）/ ## 卖出后组合的机会成本
+```
+
+### Agent C
+
+**买入方向**（`is_buy=True`）：
+```
+评估买入后：集中度是否过高、Cash 是否还充足、RSU Cliff 期流动性是否安全。
+输出结构：
+## 买入后集中度风险 / ## 买入后流动性压力 / ## 强制安全条件
+```
+
+**卖出方向**（`is_buy=False`）：
+```
+评估卖出后：配置是否失衡、税务/手续费成本是否合理、是否有明确资金用途。
+输出结构：
+## 卖出后配置失衡风险 / ## 卖出的成本与时机 / ## 强制安全条件
 ```
 
 ---
@@ -109,8 +122,9 @@ SAP RSU Cliff 期内流动性是否安全？DSCR 是否下降到危险水位？
 ```python
 decision = {
     "asset_name": "成都银行",
-    "code": "601838",
-    "direction": "买入",         # 买入 / 卖出
+    "yf_symbol": "601838.SS",     # yfinance symbol，直接拉取，不经持仓缓存
+    "asset_class": "ETF_Stock",   # 可选，用于计算交易后仓位
+    "direction": "买入",          # 买入 / 卖出
     "amount_cny": 20000,
     "core_logic": "Forward PE 仅 5x，股息率 4.75%，银行业不良率下降",
     "macro_assumption": "利率维持低位，成都经济持续增长",
@@ -123,9 +137,9 @@ decision = {
 
 ```python
 {
-    "agent_a": str,    # Markdown，价值陷阱报告
-    "agent_b": str,    # Markdown，宏观压力报告
-    "agent_c": str,    # Markdown，流动性报告
+    "agent_a": str,    # Markdown，反对买入 or 反对卖出
+    "agent_b": str,    # Markdown，宏观不利情景 or 宏观有利情景
+    "agent_c": str,    # Markdown，集中度/流动性审计
     "context": str,    # 注入的 context（供调试/PDF 导出）
     "error": str | None,
 }
@@ -133,27 +147,26 @@ decision = {
 
 ---
 
-## Dashboard UI（第8个 Tab）
+## Dashboard UI（第8个 Tab：10th Man）
 
 ```
-st.header("第十人系统")
-st.caption("调仓决策前的强制反对审查，对抗确认偏误。")
+st.header("10th Man System")
 
 ─── 决策输入区 ───
-[从持仓选择标的（下拉）] 或手动填写：[标的名称] [Code]
-[方向: 买入/卖出] [金额 CNY]
+[从持仓选择标的（下拉）] → 自动填入 Asset Name / YF Symbol / Asset Class
+[Asset Name] [YF Symbol] [Direction: Buy/Sell] [Amount CNY]
 [核心逻辑（text_area）]
 [宏观假设（text_area）]
-[🔍 启动第十人审查] 按钮  ← 触发三次 GLM 调用
+[🔍 启动第十人审查] 按钮
 
 ─── 审查报告（三列）───
-Agent A               Agent B               Agent C
-价值陷阱审问官        宏观末日推演机        流动性审计员
-[Markdown 展示]       [Markdown 展示]       [Markdown 展示]
+买入时：                   卖出时：
+Agent A: 价值陷阱审问官    Agent A: 逆向价值辩护律师
+Agent B: 宏观压测机        Agent B: 宏观反转研究员
+Agent C: 集中度/流动性审计（方向感知标题）
 
 ─── 底部 ───
 [📄 导出 PDF] ← 保存至 $FAMILYFUND_DATA/tenth_man_reports/
-费用提示：本次约 ¥0.10-0.15
 ```
 
 ---
@@ -162,10 +175,10 @@ Agent A               Agent B               Agent C
 
 路径：`$FAMILYFUND_DATA/tenth_man_reports/YYYY-MM-DD_标的名称.pdf`
 
-4页（A4 横版，复用 `src/pdf_report.py` 的 matplotlib PdfPages 模式）：
+4页（A4，matplotlib PdfPages 模式，CJK 字体，Markdown 符号已剥离）：
 - Page 1：决策摘要 + 注入 context
-- Page 2：Agent A 报告
-- Page 3：Agent B 报告
+- Page 2：Agent A 报告（标题随方向变化）
+- Page 3：Agent B 报告（标题随方向变化）
 - Page 4：Agent C 报告
 
 ---
@@ -174,17 +187,18 @@ Agent A               Agent B               Agent C
 
 | 文件 | 说明 |
 |------|------|
-| `src/tenth_man.py` | 数据预组装 + 三个 Agent 调用逻辑 |
-| `dashboard/app.py` | 新增「第十人」Tab（第8个） |
-| `$FAMILYFUND_DATA/tenth_man_config.json` | API key（已配置，.gitignore 保护） |
+| `src/tenth_man.py` | 数据预组装 + 方向感知 prompt 生成 + 三个 Agent 调用逻辑 |
+| `dashboard/app.py` | 第8个 Tab（10th Man），含方向感知列标题和 PDF 导出 |
+| `$FAMILYFUND_DATA/tenth_man_config.json` | API key（.gitignore 保护） |
 | `$FAMILYFUND_DATA/tenth_man_reports/` | PDF 报告存储目录 |
 
 ---
 
-## 前置条件
+## 实现状态
 
-- [x] ZhipuAI API key 已购买并验证（glm-5.1 直连公司网络可用）
-- [x] `openai>=1.0.0` 已在 requirements.txt
-- [x] `tenth_man_config.json` 已配置
-- [ ] 实现 `src/tenth_man.py`
-- [ ] Dashboard 新增 Tab
+- [x] ZhipuAI API key 已验证（glm-5.1 直连公司网络可用）
+- [x] `src/tenth_man.py` 实现（方向感知 prompt，2026-04-30 修复）
+- [x] Dashboard 第8个 Tab 实现
+- [x] 持仓下拉快速填入（session_state 驱动）
+- [x] PDF 导出（Markdown 剥离，CJK 字体修复）
+- [x] 单元测试（`tests/test_new_features.py` TestTenthManContextBuilders）

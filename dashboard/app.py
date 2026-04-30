@@ -3225,15 +3225,20 @@ with tab_tenth:
                 st.divider()
                 st.subheader(f"审查报告：{decision['asset_name']} {decision['direction']} ¥{decision['amount_cny']:,.0f}")
 
+                _is_buy = decision.get('direction') in ('Buy', '买入')
+                _label_a = "🔍 Agent A：价值陷阱审问官" if _is_buy else "🔍 Agent A：逆向价值辩护律师"
+                _label_b = "🌪 Agent B：宏观压测机" if _is_buy else "🌪 Agent B：宏观反转研究员"
+                _label_c = "💧 Agent C：集中度/流动性审计员"
+
                 col_a, col_b, col_c = st.columns(3)
                 with col_a:
-                    st.markdown("### 🔍 Agent A：价值陷阱审问官")
+                    st.markdown(f"### {_label_a}")
                     st.markdown(result['agent_a'])
                 with col_b:
-                    st.markdown("### 🌪 Agent B：宏观末日推演机")
+                    st.markdown(f"### {_label_b}")
                     st.markdown(result['agent_b'])
                 with col_c:
-                    st.markdown("### 💧 Agent C：流动性审计员")
+                    st.markdown(f"### {_label_c}")
                     st.markdown(result['agent_c'])
 
                 # PDF 导出
@@ -3281,11 +3286,13 @@ with tab_tenth:
                             return '\n'.join(lines)
 
                         buf = io.BytesIO()
+                        _a_title = "Agent A: Value Trap Inquisitor" if _is_buy else "Agent A: Contrarian Defense Counsel"
+                        _b_title = "Agent B: Macro Stress Tester"   if _is_buy else "Agent B: Macro Reversal Analyst"
                         page_texts = [
                             ("Decision Summary + Context", result['context']),
-                            ("Agent A: Value Trap Inquisitor", result['agent_a']),
-                            ("Agent B: Macro Stress Tester", result['agent_b']),
-                            ("Agent C: Liquidity Auditor",   result['agent_c']),
+                            (_a_title, result['agent_a']),
+                            (_b_title, result['agent_b']),
+                            ("Agent C: Concentration / Liquidity Auditor", result['agent_c']),
                         ]
                         with PdfPages(buf) as pdf:
                             for title, text in page_texts:

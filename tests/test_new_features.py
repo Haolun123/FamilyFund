@@ -206,6 +206,46 @@ class TestTenthManContextBuilders:
         assert '组合状态' in text
         assert '总资产' in text or '¥' in text
 
+    # ─── 方向感知 prompt 测试 ───
+    def test_prompt_a_buy_opposes_buying(self):
+        from tenth_man import _make_prompt_a
+        prompt = _make_prompt_a(is_buy=True)
+        assert '反对' in prompt or '买入' in prompt
+        assert '价值陷阱' in prompt
+        # 买入方向的 prompt 不应包含"反对卖出"的措辞
+        assert '反对这次卖出' not in prompt
+
+    def test_prompt_a_sell_opposes_selling(self):
+        from tenth_man import _make_prompt_a
+        prompt = _make_prompt_a(is_buy=False)
+        assert '反对' in prompt or '卖出' in prompt
+        # 卖出方向的 prompt 不应出现"价值陷阱"角色（那是买入方向的）
+        assert '价值陷阱审问官' not in prompt
+
+    def test_prompt_b_buy_stresses_against_buying(self):
+        from tenth_man import _make_prompt_b
+        prompt = _make_prompt_b(is_buy=True)
+        assert '买入' in prompt
+        assert '压测' in prompt or '压力' in prompt or '反对' in prompt
+
+    def test_prompt_b_sell_argues_against_selling(self):
+        from tenth_man import _make_prompt_b
+        prompt = _make_prompt_b(is_buy=False)
+        assert '卖出' in prompt or '减仓' in prompt
+        # 卖出方向的 Agent B 应该提有利情景，而不是压测不利情景
+        assert '有利' in prompt or '反转' in prompt or '踏空' in prompt
+
+    def test_prompt_c_buy_checks_concentration(self):
+        from tenth_man import _make_prompt_c
+        prompt = _make_prompt_c(is_buy=True)
+        assert '集中度' in prompt
+        assert '流动性' in prompt
+
+    def test_prompt_c_sell_checks_imbalance(self):
+        from tenth_man import _make_prompt_c
+        prompt = _make_prompt_c(is_buy=False)
+        assert '配置' in prompt or '失衡' in prompt
+
 
 # ─── ai_weekly context builder ──────────────────────────────
 
