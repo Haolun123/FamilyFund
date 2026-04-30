@@ -172,8 +172,8 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_history, tab_sap, tab_market, tab_backtest, tab_quarterly = st.tabs(
-    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor", "Backtest", "Quarterly Report"]
+tab_dashboard, tab_update, tab_history, tab_sap, tab_market, tab_backtest, tab_quarterly, tab_tenth = st.tabs(
+    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor", "Backtest", "Quarterly Report", "第十人"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -3100,3 +3100,168 @@ with tab_quarterly:
                 )
             except Exception as e:
                 st.error(f"PDF 生成失败: {e}")
+
+# ═══════════════════════════════════════════════════════════
+# Tab 8: 第十人系统
+# ═══════════════════════════════════════════════════════════
+
+with tab_tenth:
+    from tenth_man import run_tenth_man
+    from nav_engine import CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES
+
+    st.header("第十人系统")
+    st.caption("调仓决策前的强制反对审查，对抗确认偏误。三个独立 Agent 从价值陷阱/宏观压力/流动性三维度审查。")
+
+    _tm_data_dir = os.path.dirname(csv_path)
+    _tm_config_ok = os.path.exists(os.path.join(_tm_data_dir, 'tenth_man_config.json'))
+
+    if not _tm_config_ok:
+        st.warning("未找到 tenth_man_config.json，请先配置 API key。")
+    else:
+        # ── 决策输入区 ──
+        st.subheader("决策输入")
+
+        # 持仓快速填入
+        latest_holdings_tm = raw_df[raw_df['Date'] == raw_df['Date'].max()]
+        holding_options = ['（手动输入）'] + [
+            f"{row['Name']} ({row['Code']})"
+            for _, row in latest_holdings_tm.iterrows()
+            if row['Asset_Class'] not in ('Cash',)
+        ]
+        selected_holding = st.selectbox("从持仓选择标的（可选）", holding_options, key='tm_holding_select')
+
+        # 自动填入
+        _tm_default_name, _tm_default_code, _tm_default_class = '', '', ''
+        if selected_holding != '（手动输入）':
+            _parts = selected_holding.rsplit('(', 1)
+            _tm_default_name = _parts[0].strip()
+            _tm_default_code = _parts[1].rstrip(')') if len(_parts) > 1 else ''
+            _match = latest_holdings_tm[latest_holdings_tm['Name'] == _tm_default_name]
+            if not _match.empty:
+                _tm_default_class = _match.iloc[0]['Asset_Class']
+
+        col_a, col_b, col_c = st.columns([3, 3, 2])
+        with col_a:
+            tm_name = st.text_input('标的名称', value=_tm_default_name, key='tm_name')
+        with col_b:
+            tm_symbol = st.text_input(
+                'YF Symbol',
+                value=_tm_default_code,
+                key='tm_symbol',
+                help='A股沪: 601838.SS　A股深: 000001.SZ　港股: 0700.HK　美股: NVDA',
+            )
+        with col_c:
+            tm_direction = st.selectbox('方向', ['买入', '卖出'], key='tm_direction')
+
+        col_d, col_e = st.columns([2, 3])
+        with col_d:
+            tm_amount = st.number_input('金额 (CNY)', min_value=0, step=1000, value=20000, key='tm_amount')
+        with col_e:
+            tm_class = st.selectbox(
+                '资产类别（用于计算交易后仓位）',
+                ['（不选）'] + sorted(c for c in VALID_ASSET_CLASSES if c != 'Cash'),
+                index=(['（不选）'] + sorted(c for c in VALID_ASSET_CLASSES if c != 'Cash')).index(_tm_default_class)
+                if _tm_default_class in VALID_ASSET_CLASSES else 0,
+                key='tm_class',
+            )
+
+        tm_logic = st.text_area('核心逻辑', placeholder='例：Forward PE 5x，股息率 4.75%，银行业不良率下降', key='tm_logic', height=80)
+        tm_macro = st.text_area('宏观假设', placeholder='例：利率维持低位，成都经济持续增长', key='tm_macro', height=80)
+
+        st.caption("💡 费用提示：本次调用约 ¥0.10-0.15（glm-5.1 推理模型，三次独立调用）")
+
+        if st.button("🔍 启动第十人审查", type="primary", key='tm_run'):
+            if not tm_name or not tm_symbol:
+                st.warning("请填写标的名称和 YF Symbol")
+            elif not tm_logic:
+                st.warning("请填写核心逻辑")
+            else:
+                decision = {
+                    'asset_name':      tm_name,
+                    'yf_symbol':       tm_symbol,
+                    'asset_class':     tm_class if tm_class != '（不选）' else '',
+                    'direction':       tm_direction,
+                    'amount_cny':      tm_amount,
+                    'core_logic':      tm_logic,
+                    'macro_assumption': tm_macro or '（未填写）',
+                }
+                with st.spinner("第十人审查中（约 30-60 秒）..."):
+                    _tm_mkt = get_market_data()
+                    result = run_tenth_man(
+                        decision, raw_df, fund_nav_df, allocation_df,
+                        _tm_mkt, _tm_data_dir,
+                    )
+                st.session_state['tm_result'] = result
+                st.session_state['tm_decision'] = decision
+
+        # ── 审查报告区 ──
+        if 'tm_result' in st.session_state:
+            result = st.session_state['tm_result']
+            decision = st.session_state['tm_decision']
+
+            if result.get('error'):
+                st.error(result['error'])
+            else:
+                st.divider()
+                st.subheader(f"审查报告：{decision['asset_name']} {decision['direction']} ¥{decision['amount_cny']:,.0f}")
+
+                col_a, col_b, col_c = st.columns(3)
+                with col_a:
+                    st.markdown("### 🔍 Agent A：价值陷阱审问官")
+                    st.markdown(result['agent_a'])
+                with col_b:
+                    st.markdown("### 🌪 Agent B：宏观末日推演机")
+                    st.markdown(result['agent_b'])
+                with col_c:
+                    st.markdown("### 💧 Agent C：流动性审计员")
+                    st.markdown(result['agent_c'])
+
+                # PDF 导出
+                st.divider()
+                if st.button("📄 导出审查报告 PDF", key='tm_pdf'):
+                    try:
+                        import matplotlib
+                        matplotlib.rcParams['font.sans-serif'] = [
+                            'Arial Unicode MS', 'Noto Sans CJK SC', 'PingFang SC', 'SimHei',
+                        ]
+                        matplotlib.rcParams['axes.unicode_minus'] = False
+                        from matplotlib.backends.backend_pdf import PdfPages
+                        import matplotlib.pyplot as plt
+                        import io
+
+                        buf = io.BytesIO()
+                        page_texts = [
+                            ("决策摘要 + 审查 Context", result['context']),
+                            ("Agent A：价值陷阱审问官", result['agent_a']),
+                            ("Agent B：宏观末日推演机", result['agent_b']),
+                            ("Agent C：流动性审计员",   result['agent_c']),
+                        ]
+                        with PdfPages(buf) as pdf:
+                            for title, text in page_texts:
+                                fig, ax = plt.subplots(figsize=(11.69, 8.27))
+                                ax.axis('off')
+                                ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+                                ax.text(0.02, 0.95, text, transform=ax.transAxes,
+                                        fontsize=9, verticalalignment='top',
+                                        wrap=True, family='monospace')
+                                pdf.savefig(fig, bbox_inches='tight')
+                                plt.close(fig)
+                        buf.seek(0)
+
+                        # 保存到 iCloud
+                        reports_dir = os.path.join(_tm_data_dir, 'tenth_man_reports')
+                        os.makedirs(reports_dir, exist_ok=True)
+                        fname = f"{date.today().isoformat()}_{decision['asset_name']}.pdf"
+                        fpath = os.path.join(reports_dir, fname)
+                        with open(fpath, 'wb') as f:
+                            f.write(buf.getvalue())
+
+                        st.download_button(
+                            label=f"下载 {fname}",
+                            data=buf.getvalue(),
+                            file_name=fname,
+                            mime='application/pdf',
+                        )
+                        st.success(f"已保存至 {fpath}")
+                    except Exception as e:
+                        st.error(f"PDF 生成失败：{e}")
