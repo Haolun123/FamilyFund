@@ -281,6 +281,32 @@ with tab_dashboard:
                                        xanchor='center', x=0.5))
     st.plotly_chart(fig_fund, use_container_width=True)
 
+    # ─── AI 周度评估 ───
+    from ai_weekly import build_weekly_context, generate_weekly_summary
+    _ai_data_dir = os.path.dirname(csv_path)
+    _ai_config_exists = os.path.exists(os.path.join(_ai_data_dir, 'tenth_man_config.json'))
+
+    with st.expander("✨ AI 周度评估", expanded=False):
+        if not _ai_config_exists:
+            st.warning("未找到 tenth_man_config.json，请先配置 API key。")
+        else:
+            if st.button("生成本周 AI 点评", key="gen_ai_weekly"):
+                with st.spinner("GLM 生成中..."):
+                    _rb_mkt = get_market_data()
+                    _ctx = build_weekly_context(
+                        fund_nav_df, raw_df, allocation_df,
+                        class_nav_dict, _rb_mkt,
+                        xirr_value, sharpe_value,
+                        data_dir=_ai_data_dir,
+                    )
+                    _summary = generate_weekly_summary(_ctx, _ai_data_dir)
+                    st.session_state['ai_weekly_summary'] = _summary
+                    st.session_state['ai_weekly_date'] = latest_date
+
+            if 'ai_weekly_summary' in st.session_state:
+                st.markdown(st.session_state['ai_weekly_summary'])
+                st.caption(f"生成于 {st.session_state.get('ai_weekly_date', '')} · GLM-5.1")
+
     # ─── Section 2: Asset Class Comparison ───
 
     st.header("资产类别对比")
