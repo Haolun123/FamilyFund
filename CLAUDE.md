@@ -38,11 +38,13 @@
 | 买入资产 | = +买入金额（正数） |
 | 卖出/赎回资产 | = -到账金额（负数） |
 | 外部入金/取出 | 记在 **Cash 行**，= +/- 金额 |
-| SAP Own SAP 归属 | Company_Stock 行 = +Cost_CNY |
-| SAP Move SAP 归属 | Company_Stock 行 = +归属市值 CNY |
+| SAP Own SAP 归属（ESPP） | Company_Stock 行 = +Cost_CNY（实际支付成本，**非**归属市值） |
+| SAP Move SAP 归属（RSU） | Company_Stock 行 = +归属市值 CNY |
 | 无操作持仓 | = 0 |
 
 买入/卖出 NCF 由调仓辅助器（⚖️ 调仓辅助器）自动写入，不需要手动填。
+
+**ESPP 成本口径说明**：ESPP 是用折扣价主动购买，属于投资决策，NCF 记实际支付金额（Cost_CNY）。折扣带来的差价收益（归属市值 - Cost_CNY）体现为持仓浮盈，计入投资回报而非外部入金。RSU 是无偿归属的薪酬，NCF 记归属时市值（FMV）作为成本基准。
 
 **旧约定（已废弃）**：内部调仓 NCF = 0，只有外部入金记 NCF。这是错的，会导致分类成本和 TWR 失真。
 
