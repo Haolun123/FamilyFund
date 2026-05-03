@@ -27,6 +27,7 @@
 | 再平衡建议（偏差柱状图 + 温度计信号）| `dashboard/app.py` Tab1 Section6 |
 | AI 周度评估（GLM-4-flash）| `src/ai_weekly.py` Tab1，见 `DESIGN_AI_WEEKLY.md` |
 | PDF 报告（6页 A4 横版） | `src/pdf_report.py` |
+| 第十人系统 — 调仓前三 Agent 强制反对审查 | `src/tenth_man.py` Tab8，见 `DESIGN_TENTH_MAN.md` |
 
 ---
 
@@ -36,8 +37,7 @@
 
 | # | 功能 | 设计文档 | 前置条件 |
 |---|------|---------|---------|
-| 1 | **第十人系统** — 调仓前三 Agent 强制反对审查 | `DESIGN_TENTH_MAN.md` | 无（GLM-5.1 已验证） |
-| 2 | **鲨鱼记账解析 + 季度现金流分析** | `DESIGN_CASHFLOW.md` | 2026Q2 数据（需先建「债务还本」分类） |
+| 1 | **鲨鱼记账解析 + 季度现金流分析** | `DESIGN_CASHFLOW.md` | 2026Q2 数据（需先建「债务还本」分类） |
 
 ### P3 — 需前置数据积累
 
