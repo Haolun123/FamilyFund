@@ -47,8 +47,9 @@
 | # | 功能 | 设计文档 | 前置条件 |
 |---|------|---------|---------|
 | 5 | **调仓决策质量复盘** | `DESIGN_ANALYTICS.md` | transaction.csv 积累 3-6 个月；天天基金接口已验证可用 |
-| 6 | **FIFO 已实现盈亏** | — | transaction.csv 积累 3-6 个月 |
-| 7 | **现金分红处理方案 C** | `DESIGN_DIVIDEND.md` | 见设计文档 |
+| 6 | **人生阶段规划** — 里程碑情景规划，动态支出曲线对接 FI 测算 | `DESIGN_LIFE_STAGES.md` | 财务独立测算先实现；`life_stages.json` 手动初始化 |
+| 7 | **FIFO 已实现盈亏** | — | transaction.csv 积累 3-6 个月 |
+| 8 | **现金分红处理方案 C** | `DESIGN_DIVIDEND.md` | 见设计文档 |
 
 ---
 
