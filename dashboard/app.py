@@ -2527,6 +2527,207 @@ with tab_market:
                 else:
                     st.warning('Code 和 Symbol 均不能为空')
 
+    # ═══════════════════════════════════════════════════════════
+    # DCA Plan 定投管理
+    # ═══════════════════════════════════════════════════════════
+
+    st.divider()
+    st.subheader("📅 定投计划管理")
+    st.caption("本周建议 = 基础金额 × 市场温度计倍数，取整到10元。执行后正常维护 Weekly Update，无额外步骤。")
+
+    from dca_manager import (
+        load_dca_config, save_dca_config, add_plan, update_plan, remove_plan,
+        compute_all_suggestions, _ASSET_CLASS_LABELS, _FREQUENCIES, _FREQ_LABELS,
+    )
+
+    _dca_config = load_dca_config(_data_dir)
+    _dca_plans  = _dca_config.get('plans', [])
+
+    # ── 展示区 ──────────────────────────────────────────────
+    _suggestions = compute_all_suggestions(_dca_plans, market_data)
+
+    if _suggestions:
+        _rows = []
+        _total_suggested = 0
+        for _plan, _sug in _suggestions:
+            _mult = _sug['multiplier_str']
+            _arrow = _sug['arrow']
+            if _sug['unit'] == 'gram':
+                _base_str = f"{_plan.get('base_amount_unit', '—')}g"
+                _sug_str  = f"{_sug['suggested_unit']:.0f}g"
+                if _sug['suggested_cny']:
+                    _sug_str += f"（≈¥{_sug['suggested_cny']:,}）"
+            else:
+                _base_str = f"¥{_plan.get('base_amount_cny', 0):,}"
+                _sug_str  = f"¥{_sug['suggested_cny']:,}"
+            _rows.append({
+                '标的':      _plan.get('name', '—'),
+                '类型':      _ASSET_CLASS_LABELS.get(_plan.get('asset_class', ''), _plan.get('asset_class', '—')),
+                '平台':      _plan.get('platform', '—'),
+                '频率':      _FREQ_LABELS.get(_plan.get('frequency', 'weekly'), _plan.get('frequency', '—')),
+                '基础金额':  _base_str,
+                '温度计信号': f"{_mult} {_arrow}",
+                '本周建议':  _sug_str,
+            })
+            if _sug['suggested_cny']:
+                _total_suggested += _sug['suggested_cny']
+        import pandas as _pd_dca
+        _dca_df = _pd_dca.DataFrame(_rows)
+        st.dataframe(_dca_df, use_container_width=True, hide_index=True)
+        st.markdown(f"**本周建议总投入：¥{_total_suggested:,}**")
+    else:
+        st.info("暂无启用的定投计划，点击下方「管理定投计划」添加。")
+
+    # ── 配置区（可折叠）────────────────────────────────────
+    with st.expander("⚙ 管理定投计划", expanded=False):
+
+        # 初始化 session_state
+        if 'dca_editing' not in st.session_state:
+            st.session_state['dca_editing'] = {}
+        if 'dca_adding' not in st.session_state:
+            st.session_state['dca_adding'] = False
+
+        # ── 现有计划 ──
+        for _plan in _dca_plans:
+            _pid = _plan['id']
+            with st.container(border=True):
+                _hc1, _hc2, _hc3 = st.columns([5, 1, 1])
+                with _hc1:
+                    _enabled = st.toggle(
+                        _plan.get('name', '未命名'),
+                        value=_plan.get('enabled', True),
+                        key=f'dca_enabled_{_pid}',
+                    )
+                    if _enabled != _plan.get('enabled', True):
+                        update_plan(_data_dir, _pid, {'enabled': _enabled})
+                        st.rerun()
+                with _hc2:
+                    if st.button('✏ 编辑', key=f'dca_edit_{_pid}'):
+                        st.session_state['dca_editing'][_pid] = True
+                with _hc3:
+                    if st.button('🗑 删除', key=f'dca_del_{_pid}', type='secondary'):
+                        remove_plan(_data_dir, _pid)
+                        st.rerun()
+
+                if st.session_state['dca_editing'].get(_pid):
+                    _ec1, _ec2, _ec3 = st.columns(3)
+                    with _ec1:
+                        _new_name = st.text_input('标的名称', value=_plan.get('name', ''), key=f'dca_name_{_pid}')
+                        _new_code = st.text_input('基金/股票代码', value=_plan.get('code', ''), key=f'dca_code_{_pid}')
+                    with _ec3:
+                        _ac_idx = list(_ASSET_CLASS_LABELS.keys()).index(_plan.get('asset_class', 'CN_Index_Fund')) \
+                                  if _plan.get('asset_class') in _ASSET_CLASS_LABELS else 0
+                        _new_ac = st.selectbox('资产类别', options=list(_ASSET_CLASS_LABELS.keys()),
+                                               format_func=lambda x: _ASSET_CLASS_LABELS[x],
+                                               index=_ac_idx, key=f'dca_ac_{_pid}')
+                        _freq_idx = _FREQUENCIES.index(_plan.get('frequency', 'weekly')) \
+                                    if _plan.get('frequency') in _FREQUENCIES else 0
+                        _new_freq = st.selectbox('频率', options=_FREQUENCIES,
+                                                 format_func=lambda x: _FREQ_LABELS[x],
+                                                 index=_freq_idx, key=f'dca_freq_{_pid}')
+                    with _ec2:
+                        _new_plat = st.text_input('执行平台', value=_plan.get('platform', ''), key=f'dca_plat_{_pid}')
+                        _is_gold_edit = (_new_ac == 'Gold')
+                        if _is_gold_edit:
+                            _new_base_unit = st.number_input(
+                                '基础买入克数（g）',
+                                value=int(_plan.get('base_amount_unit', 2)),
+                                min_value=1, step=1, key=f'dca_base_{_pid}',
+                            )
+                        else:
+                            _new_base_cny = st.number_input('基础金额（CNY）', value=int(_plan.get('base_amount_cny', 500)), min_value=0, step=100, key=f'dca_base_{_pid}')
+                    _new_note = st.text_input('备注', value=_plan.get('note', ''), key=f'dca_note_{_pid}')
+                    _sv1, _sv2 = st.columns([1, 5])
+                    with _sv1:
+                        if st.button('💾 保存', key=f'dca_save_{_pid}'):
+                            if _is_gold_edit:
+                                _save_fields = {
+                                    'name': _new_name, 'code': _new_code,
+                                    'platform': _new_plat,
+                                    'asset_class': _new_ac, 'frequency': _new_freq,
+                                    'note': _new_note,
+                                    'unit': 'gram',
+                                    'base_amount_unit': _new_base_unit,
+                                    'min_unit': 1,
+                                }
+                            else:
+                                _save_fields = {
+                                    'name': _new_name, 'code': _new_code,
+                                    'platform': _new_plat, 'base_amount_cny': _new_base_cny,
+                                    'asset_class': _new_ac, 'frequency': _new_freq,
+                                    'note': _new_note,
+                                    'unit': 'cny',
+                                }
+                            update_plan(_data_dir, _pid, _save_fields)
+                            st.session_state['dca_editing'].pop(_pid, None)
+                            st.rerun()
+                    with _sv2:
+                        if st.button('取消', key=f'dca_cancel_{_pid}'):
+                            st.session_state['dca_editing'].pop(_pid, None)
+                            st.rerun()
+
+        # ── 新增计划 ──
+        if st.button('＋ 新增定投计划', key='dca_add_btn'):
+            st.session_state['dca_adding'] = True
+
+        if st.session_state.get('dca_adding'):
+            st.markdown("**新增定投计划**")
+            _na1, _na2, _na3 = st.columns(3)
+            with _na1:
+                _add_name = st.text_input('标的名称', key='dca_add_name')
+                _add_code = st.text_input('基金/股票代码', key='dca_add_code')
+            with _na3:
+                _add_ac = st.selectbox('资产类别', options=list(_ASSET_CLASS_LABELS.keys()),
+                                       format_func=lambda x: _ASSET_CLASS_LABELS[x], key='dca_add_ac')
+                _add_freq = st.selectbox('频率', options=_FREQUENCIES,
+                                         format_func=lambda x: _FREQ_LABELS[x], key='dca_add_freq')
+            with _na2:
+                _add_plat = st.text_input('执行平台', key='dca_add_plat')
+                _is_gold_add = (_add_ac == 'Gold')
+                if _is_gold_add:
+                    _add_base_unit = st.number_input('基础买入克数（g）', value=2, min_value=1, step=1, key='dca_add_base')
+                else:
+                    _add_base_cny  = st.number_input('基础金额（CNY）', value=500, min_value=0, step=100, key='dca_add_base')
+            _add_note = st.text_input('备注（可选）', key='dca_add_note')
+            _ab1, _ab2 = st.columns([1, 5])
+            with _ab1:
+                if st.button('✅ 添加', key='dca_add_confirm'):
+                    if _add_name.strip():
+                        if _is_gold_add:
+                            _new_plan = {
+                                'name': _add_name.strip(),
+                                'code': _add_code.strip(),
+                                'platform': _add_plat.strip(),
+                                'asset_class': _add_ac,
+                                'frequency': _add_freq,
+                                'enabled': True,
+                                'note': _add_note.strip(),
+                                'unit': 'gram',
+                                'base_amount_unit': _add_base_unit,
+                                'min_unit': 1,
+                            }
+                        else:
+                            _new_plan = {
+                                'name': _add_name.strip(),
+                                'code': _add_code.strip(),
+                                'platform': _add_plat.strip(),
+                                'base_amount_cny': _add_base_cny,
+                                'asset_class': _add_ac,
+                                'frequency': _add_freq,
+                                'enabled': True,
+                                'note': _add_note.strip(),
+                                'unit': 'cny',
+                            }
+                        add_plan(_data_dir, _new_plan)
+                        st.session_state['dca_adding'] = False
+                        st.rerun()
+                    else:
+                        st.warning('标的名称不能为空')
+            with _ab2:
+                if st.button('取消', key='dca_add_cancel'):
+                    st.session_state['dca_adding'] = False
+                    st.rerun()
+
 # ═══════════════════════════════════════════════════════════
 # Tab 7: 回测
 # ═══════════════════════════════════════════════════════════

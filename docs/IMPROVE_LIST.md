@@ -28,6 +28,7 @@
 | AI 周度评估（GLM-4-flash）| `src/ai_weekly.py` Tab1，见 `DESIGN_AI_WEEKLY.md` |
 | PDF 报告（6页 A4 横版） | `src/pdf_report.py` |
 | 第十人系统 — 调仓前三 Agent 强制反对审查 | `src/tenth_man.py` Tab8，见 `DESIGN_TENTH_MAN.md` |
+| 定投管理模块（DCA Manager）| `src/dca_manager.py` + `dashboard/app.py` Tab5 底部，见 `DESIGN_DCA_MANAGER.md` |
 
 ---
 
@@ -41,7 +42,7 @@
 | 2 | **TWR vs 市场基准对比图** | `DESIGN_ANALYTICS.md` | 无，立即可做 |
 | 3 | **财务独立测算** | `DESIGN_ANALYTICS.md` | 无，纯配置输入 |
 | 4 | **储蓄率追踪** | `DESIGN_ANALYTICS.md` | 需配置税后月收入 |
-| 5 | **定投管理模块** | `DESIGN_DCA_MANAGER.md` | 无，立即可做 |
+| 5 | **定投管理模块** | `DESIGN_DCA_MANAGER.md` | ✅ 已完成 |
 
 ### P3 — 需前置数据积累
 
@@ -64,6 +65,8 @@
 
 ## 设计决策记录
 
+- **DCA Manager 以周为最小颗粒度**（2026-05-06）：市场信号（PE/VIX）是低频信号，日内拆单抢 QDII 额度属于执行层细节，系统只管"本周投多少"，不管"哪天分几次执行"。
+- **DCA 黄金克数取整：raw < min_unit 暂停**（2026-05-06）：`raw = base_amount_unit × multiplier`，未取整前已低于最小交易单位则建议暂停，不向上凑整。语义：信号强度不足以支撑最小交易单位时宁可不做。
 - **SAP 个股基本面用 ADR（`SAP`）而非法兰克福（`SAP.DE`）**（2026-05-06）：基本面字段覆盖率更完整，PE/EPS/ROE 数据质量优先。股价显示 USD/ADR 与实际持仓 EUR/法兰克福不同币种，属已知不一致，可接受。SAP Stock Tab 的盈亏计算仍用 `SAP.DE` EUR 价格，两者互不干扰。
 - **不做终值预测/复利曲线**（2026-05-02）：数字制造虚假确定性，锚定效应负面。替代方案：财务独立测算（倒推需要多少年）+ 储蓄率 + TWR vs 基准，关注可控的领先指标。
 - **收益归因不深化**（2026-04-29）：后视镜效应，对被动指数为主的组合决策价值有限。现有 TWR 归因够用，不做 Brinson 配置/选择效应拆分。

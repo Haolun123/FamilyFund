@@ -92,6 +92,10 @@
 
 > **黄金特殊处理**：招行积存金最小单位为1g，建议金额换算为整克数展示（如"本周买2g"）。
 > 实际操作完成后，Weekly Update 仍按**实际成交金额（人民币）**填写 NCF，与此处的克数建议完全独立，无任何耦合。
+>
+> **黄金克数取整规则**：`raw = base_amount_unit × multiplier`，若 `raw < min_unit` 则建议暂停（0g），否则 `round(raw / min_unit) * min_unit`。
+> 例：base=2g，0.3x → raw=0.6g < 1g → 暂停；0.5x → raw=1.0g → 1g；base=3g，0.3x → raw=0.9g < 1g → 同样暂停。
+> 语义：**信号强度不足以支撑最小交易单位时，宁可不做**。
 
 ---
 
