@@ -59,20 +59,22 @@
     },
     {
       "id": "plan_004",
-      "name": "黄金",
+      "name": "招行积存金",
       "code": "GOLD",
       "asset_class": "Gold",
       "platform": "招商银行",
-      "base_amount_cny": 300,
+      "base_amount_cny": 1500,
       "frequency": "weekly",
       "enabled": true,
-      "note": ""
+      "unit": "gram",
+      "base_amount_unit": 2,
+      "min_unit": 1,
+      "note": "最小单位1g，建议金额自动换算为整克数"
     }
   ]
 }
 ```
 
-字段说明：
 | 字段 | 说明 |
 |------|------|
 | `id` | 唯一标识，自动生成 |
@@ -80,10 +82,16 @@
 | `code` | 基金代码（用于天天基金净值查询）|
 | `asset_class` | 资产类别，8选1，用于匹配温度计倍数 |
 | `platform` | 执行平台（自由填写：支付宝/天天基金/招商银行等）|
-| `base_amount_cny` | 基础定投金额（正常市场下每周投入）|
+| `base_amount_cny` | 基础定投金额（正常市场下每周投入，人民币）|
 | `frequency` | `weekly` / `biweekly` / `monthly` |
 | `enabled` | 是否启用（临时暂停用）|
+| `unit` | 可选，`gram`表示按克计量（积存金专用），缺省则按人民币 |
+| `base_amount_unit` | 可选，基础买入克数（`unit=gram` 时使用）|
+| `min_unit` | 可选，最小交易单位（克），低于此则建议暂停 |
 | `note` | 备注（可选）|
+
+> **黄金特殊处理**：招行积存金最小单位为1g，建议金额换算为整克数展示（如"本周买2g"）。
+> 实际操作完成后，Weekly Update 仍按**实际成交金额（人民币）**填写 NCF，与此处的克数建议完全独立，无任何耦合。
 
 ---
 
