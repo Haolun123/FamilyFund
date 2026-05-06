@@ -9,6 +9,7 @@ import os
 from datetime import date
 
 FIELDS = [
+    'currentPrice', 'currency',
     'trailingPE', 'forwardPE', 'priceToBook', 'returnOnEquity',
     'dividendYield', 'trailingEps', 'forwardEps',
     'revenueGrowth', 'earningsGrowth', 'marketCap',

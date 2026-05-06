@@ -2465,11 +2465,15 @@ with tab_market:
                         st.session_state['_fund_refresh_code'] = code
                         st.rerun()
 
-                r1c1, r1c2, r1c3, r1c4 = st.columns(4)
-                with r1c1: st.metric('PE (TTM)',    _fmt(f.get('trailingPE'), 'x'))
-                with r1c2: st.metric('Forward PE',  _fmt(f.get('forwardPE'),  'x'))
-                with r1c3: st.metric('PB',          _fmt(f.get('priceToBook'),'x'))
-                with r1c4: st.metric('ROE',         _fmt(f.get('returnOnEquity'), '%'))
+                r1c1, r1c2, r1c3, r1c4, r1c5 = st.columns(5)
+                _price    = f.get('currentPrice')
+                _currency = f.get('currency', '')
+                _price_str = f'{_price:,.2f} {_currency}' if _price else '—'
+                with r1c1: st.metric('当前股价',     _price_str)
+                with r1c2: st.metric('PE (TTM)',    _fmt(f.get('trailingPE'), 'x'))
+                with r1c3: st.metric('Forward PE',  _fmt(f.get('forwardPE'),  'x'))
+                with r1c4: st.metric('PB',          _fmt(f.get('priceToBook'),'x'))
+                with r1c5: st.metric('ROE',         _fmt(f.get('returnOnEquity'), '%'))
 
                 r2c1, r2c2, r2c3, r2c4 = st.columns(4)
                 with r2c1: st.metric('EPS (TTM)',   _fmt(f.get('trailingEps'), eps_fmt))
