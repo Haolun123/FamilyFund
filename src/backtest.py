@@ -342,12 +342,16 @@ def _run_simulation(
     target: str,
     base_amount: float,
     top_mult: float,
+    cash_rate_annual: float = 0.02,
 ) -> pd.DataFrame:
     """
     按月模拟固定策略和矩阵策略，返回逐期明细 DataFrame。
 
     gold 标的：pe_series=None，MA200 从 price_series 滚动计算。
     ndx100：pe_series 为标普500 Shiller PE（代理）。
+
+    机会成本：矩阵策略每期少投的金额（固定-矩阵，可为负）存入货币基金，
+    按 cash_rate_annual 年化利率复利增长，记入 matrix_cash_value。
     """
     is_gold = (target == 'gold')
     is_a_share = target in ('csi300', 'csi_a500')
@@ -358,11 +362,18 @@ def _run_simulation(
     else:
         ma200_series = None
 
+    # 每期利率（月频 or 周频）
+    periods_per_year = 52 if len(monthly_dates) > 1 and (
+        (pd.Timestamp(monthly_dates[1]) - pd.Timestamp(monthly_dates[0])).days < 10
+    ) else 12
+    rate_per_period = (1 + cash_rate_annual) ** (1 / periods_per_year) - 1
+
     records = []
     fixed_cum_shares  = 0.0
     fixed_cum_cost    = 0.0
     matrix_cum_shares = 0.0
     matrix_cum_cost   = 0.0
+    matrix_cash_value = 0.0   # 货币基金余额（含复利）
 
     for dt in monthly_dates:
         dt = pd.Timestamp(dt)
@@ -399,21 +410,30 @@ def _run_simulation(
         matrix_cum_cost     += matrix_amount
         matrix_cum_value     = matrix_cum_shares * price
 
+        # 机会成本：差额存入货币基金，先对已有余额计息，再存入本期差额
+        matrix_cash_value = matrix_cash_value * (1 + rate_per_period)
+        cash_delta = base_amount - matrix_amount   # 正=少投存入，负=超投相当于从货币基金取出
+        matrix_cash_value += cash_delta
+        if matrix_cash_value < 0:
+            matrix_cash_value = 0.0   # 余额不能为负（超投时不从假想账户透支）
+
         records.append({
-            'date':              dt.strftime('%Y-%m-%d'),
-            'price':             round(price, 4),
-            'pe_or_bias':        round(pe_or_bias, 2) if pe_or_bias is not None else None,
-            'vol':               round(vol, 2) if vol is not None else None,
-            'raw_mult':          raw_mult,
-            'multiplier':        mult,
-            'fixed_amount':      round(base_amount, 2),
-            'fixed_cum_shares':  round(fixed_cum_shares, 4),
-            'fixed_cum_cost':    round(fixed_cum_cost, 2),
-            'fixed_cum_value':   round(fixed_cum_value, 2),
-            'matrix_amount':     round(matrix_amount, 2),
-            'matrix_cum_shares': round(matrix_cum_shares, 4),
-            'matrix_cum_cost':   round(matrix_cum_cost, 2),
-            'matrix_cum_value':  round(matrix_cum_value, 2),
+            'date':                  dt.strftime('%Y-%m-%d'),
+            'price':                 round(price, 4),
+            'pe_or_bias':            round(pe_or_bias, 2) if pe_or_bias is not None else None,
+            'vol':                   round(vol, 2) if vol is not None else None,
+            'raw_mult':              raw_mult,
+            'multiplier':            mult,
+            'fixed_amount':          round(base_amount, 2),
+            'fixed_cum_shares':      round(fixed_cum_shares, 4),
+            'fixed_cum_cost':        round(fixed_cum_cost, 2),
+            'fixed_cum_value':       round(fixed_cum_value, 2),
+            'matrix_amount':         round(matrix_amount, 2),
+            'matrix_cum_shares':     round(matrix_cum_shares, 4),
+            'matrix_cum_cost':       round(matrix_cum_cost, 2),
+            'matrix_cum_value':      round(matrix_cum_value, 2),
+            'matrix_cash_value':     round(matrix_cash_value, 2),
+            'matrix_combined_value': round(matrix_cum_value + matrix_cash_value, 2),
         })
 
     return pd.DataFrame(records)
@@ -429,16 +449,20 @@ def run_backtest(
     base_amount: float,
     freq: str = 'M',
     top_multiplier: float = 10.0,
+    end_date: str | None = None,
+    cash_rate_annual: float = 0.02,
 ) -> dict:
     """
     运行 DCA 回测，返回固定策略 vs 矩阵策略的对比结果。
 
     Args:
-        target:          'csi300' / 'csi_a500' / 'sp500' / 'ndx100' / 'gold'
-        start_date:      'YYYY-MM-DD'，回测起始日
-        base_amount:     每期基准定投金额
-        freq:            'M'（月频）
-        top_multiplier:  '顶格'对应的实际倍数
+        target:           'csi300' / 'csi_a500' / 'sp500' / 'ndx100' / 'gold'
+        start_date:       'YYYY-MM-DD'，回测起始日
+        base_amount:      每期基准定投金额
+        freq:             'M'（月频）/ 'W'（周频）
+        top_multiplier:   '顶格'对应的实际倍数
+        end_date:         'YYYY-MM-DD'，回测截止日（None = 今日）
+        cash_rate_annual: 机会成本年化利率，默认 2%（货币基金）
 
     Returns:
         {
@@ -447,6 +471,7 @@ def run_backtest(
             'history':      pd.DataFrame,   # 逐期明细
             'target':       str,
             'start_date':   str,
+            'end_date':     str,
             'base_amount':  float,
             'top_multiplier': float,
         }
@@ -465,9 +490,10 @@ def run_backtest(
     vol_series = get_vol_series(target, start_date)
 
     # 生成定投日期序列（月频=每月1日，周频=每周一）
+    range_end = pd.Timestamp(end_date) if end_date else pd.Timestamp.today().normalize()
     monthly_dates = pd.date_range(
         start=start_date,
-        end=pd.Timestamp.today().normalize(),
+        end=range_end,
         freq='MS' if freq == 'M' else 'W-MON',
     ).tolist()
 
@@ -476,16 +502,18 @@ def run_backtest(
 
     history_df = _run_simulation(
         monthly_dates, price_series, pe_series, vol_series,
-        target, base_amount, top_multiplier,
+        target, base_amount, top_multiplier, cash_rate_annual,
     )
 
     if history_df.empty:
         raise ValueError('回测期间无有效数据')
 
-    def _summarize(cum_cost_col: str, cum_value_col: str, amount_col: str) -> dict:
+    def _summarize(cum_cost_col: str, cum_value_col: str, amount_col: str,
+                   combined_col: str | None = None) -> dict:
         last = history_df.iloc[-1]
         total_cost  = float(last[cum_cost_col])
         final_value = float(last[cum_value_col])
+        combined_value = float(last[combined_col]) if combined_col else None
 
         invested = history_df[history_df[amount_col] > 0]
         dates_list   = pd.to_datetime(invested['date']).tolist()
@@ -496,21 +524,30 @@ def run_backtest(
         mdd_series = _compute_max_drawdown_series(val_list)
         max_dd = min(mdd_series) * 100 if mdd_series else None
 
-        return {
-            'total_cost':   round(total_cost, 2),
-            'final_value':  round(final_value, 2),
-            'profit_loss':  round(final_value - total_cost, 2),
-            'xirr':         round(xirr_val * 100, 2) if xirr_val is not None else None,
-            'max_drawdown': round(max_dd, 2) if max_dd is not None else None,
-            'periods':      int((history_df[amount_col] > 0).sum()),
+        result = {
+            'total_cost':     round(total_cost, 2),
+            'final_value':    round(final_value, 2),
+            'profit_loss':    round(final_value - total_cost, 2),
+            'xirr':           round(xirr_val * 100, 2) if xirr_val is not None else None,
+            'max_drawdown':   round(max_dd, 2) if max_dd is not None else None,
+            'periods':        int((history_df[amount_col] > 0).sum()),
         }
+        if combined_value is not None:
+            cash_value = combined_value - final_value
+            result['cash_value']     = round(cash_value, 2)
+            result['combined_value'] = round(combined_value, 2)
+            result['combined_profit_loss'] = round(combined_value - total_cost, 2)
+        return result
 
     return {
-        'fixed':          _summarize('fixed_cum_cost',  'fixed_cum_value',  'fixed_amount'),
-        'matrix':         _summarize('matrix_cum_cost', 'matrix_cum_value', 'matrix_amount'),
-        'history':        history_df,
-        'target':         target,
-        'start_date':     start_date,
-        'base_amount':    base_amount,
-        'top_multiplier': top_multiplier,
+        'fixed':            _summarize('fixed_cum_cost',  'fixed_cum_value',  'fixed_amount'),
+        'matrix':           _summarize('matrix_cum_cost', 'matrix_cum_value', 'matrix_amount',
+                                       combined_col='matrix_combined_value'),
+        'history':          history_df,
+        'target':           target,
+        'start_date':       start_date,
+        'end_date':         end_date or pd.Timestamp.today().strftime('%Y-%m-%d'),
+        'base_amount':      base_amount,
+        'top_multiplier':   top_multiplier,
+        'cash_rate_annual': cash_rate_annual,
     }
