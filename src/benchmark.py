@@ -27,17 +27,23 @@ CACHE_PATH = os.path.join(_DATA_DIR, 'benchmark_cache.json')
 
 # ── 基准显示名称 ──────────────────────────────────────────────
 BENCHMARK_DISPLAY_NAMES = {
-    'csi300':   'CSI 300 沪深300',
+    'csi300':    'CSI 300 沪深300',
+    'csi_a500':  '中证A500',
     'sp500_cny': 'S&P 500 (CNY)',
-    'cpi':      'CPI 累计通胀',
-    'm2':       'M2 货币供应',
+    'ndx100_cny':'纳指100 (CNY)',
+    'gold_cny':  '黄金 (CNY)',
+    'cpi':       'CPI 累计通胀',
+    'm2':        'M2 货币供应',
 }
 
 BENCHMARK_COLORS = {
-    'csi300':   '#FF6B6B',
+    'csi300':    '#FF6B6B',
+    'csi_a500':  '#EF5350',
     'sp500_cny': '#4ECDC4',
-    'cpi':      '#FFA726',
-    'm2':       '#AB47BC',
+    'ndx100_cny':'#26C6DA',
+    'gold_cny':  '#FFA726',
+    'cpi':       '#BDBDBD',
+    'm2':        '#AB47BC',
 }
 
 
@@ -115,6 +121,61 @@ def _fetch_sp500_cny(start_date: str) -> list[dict] | None:
         merged['cny'] = merged['sp'] * merged['fx']
         merged = merged[merged.index >= start_date].sort_index()
 
+        return [{'date': d, 'value': float(row['cny'])} for d, row in merged.iterrows()]
+    except Exception:
+        return None
+
+
+def _fetch_csi_a500(start_date: str) -> list[dict] | None:
+    """拉取中证A500日线数据。"""
+    try:
+        import akshare as ak
+        df = ak.stock_zh_index_daily(symbol='sh000510')
+        df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+        df = df[df['date'] >= start_date][['date', 'close']].copy()
+        df = df.sort_values('date').reset_index(drop=True)
+        return [{'date': r['date'], 'value': float(r['close'])} for _, r in df.iterrows()]
+    except Exception:
+        return None
+
+
+def _fetch_ndx100_cny(start_date: str) -> list[dict] | None:
+    """拉取纳指100日线 + USDCNY，返回 CNY 计价序列。"""
+    try:
+        import yfinance as yf
+        fetch_start = (pd.to_datetime(start_date) - timedelta(days=5)).strftime('%Y-%m-%d')
+        ndx = yf.download('^NDX', start=fetch_start, progress=False, auto_adjust=True)
+        fx  = yf.download('USDCNY=X', start=fetch_start, progress=False, auto_adjust=True)
+        if ndx.empty or fx.empty:
+            return None
+        ndx.index = pd.to_datetime(ndx.index).strftime('%Y-%m-%d')
+        fx.index  = pd.to_datetime(fx.index).strftime('%Y-%m-%d')
+        merged = pd.DataFrame({'ndx': ndx['Close'].squeeze(), 'fx': fx['Close'].squeeze()})
+        merged['fx'] = merged['fx'].ffill().bfill()
+        merged = merged.dropna(subset=['ndx'])
+        merged['cny'] = merged['ndx'] * merged['fx']
+        merged = merged[merged.index >= start_date].sort_index()
+        return [{'date': d, 'value': float(row['cny'])} for d, row in merged.iterrows()]
+    except Exception:
+        return None
+
+
+def _fetch_gold_cny(start_date: str) -> list[dict] | None:
+    """拉取黄金期货(GC=F)日线 + USDCNY，返回 CNY/oz 计价序列。"""
+    try:
+        import yfinance as yf
+        fetch_start = (pd.to_datetime(start_date) - timedelta(days=5)).strftime('%Y-%m-%d')
+        gold = yf.download('GC=F', start=fetch_start, progress=False, auto_adjust=True)
+        fx   = yf.download('USDCNY=X', start=fetch_start, progress=False, auto_adjust=True)
+        if gold.empty or fx.empty:
+            return None
+        gold.index = pd.to_datetime(gold.index).strftime('%Y-%m-%d')
+        fx.index   = pd.to_datetime(fx.index).strftime('%Y-%m-%d')
+        merged = pd.DataFrame({'gold': gold['Close'].squeeze(), 'fx': fx['Close'].squeeze()})
+        merged['fx'] = merged['fx'].ffill().bfill()
+        merged = merged.dropna(subset=['gold'])
+        merged['cny'] = merged['gold'] * merged['fx']
+        merged = merged[merged.index >= start_date].sort_index()
         return [{'date': d, 'value': float(row['cny'])} for d, row in merged.iterrows()]
     except Exception:
         return None
@@ -251,10 +312,13 @@ def get_benchmarks(start_date: str) -> dict:
     cache_dirty = False
 
     fetchers = {
-        'csi300':    lambda: _normalize(_fetch_csi300(start_date), start_date),
-        'sp500_cny': lambda: _normalize(_fetch_sp500_cny(start_date), start_date),
-        'cpi':       lambda: _fetch_cpi(start_date),   # 已在内部归一化
-        'm2':        lambda: _fetch_m2(start_date),    # 已在内部归一化
+        'csi300':     lambda: _normalize(_fetch_csi300(start_date), start_date),
+        'csi_a500':   lambda: _normalize(_fetch_csi_a500(start_date), start_date),
+        'sp500_cny':  lambda: _normalize(_fetch_sp500_cny(start_date), start_date),
+        'ndx100_cny': lambda: _normalize(_fetch_ndx100_cny(start_date), start_date),
+        'gold_cny':   lambda: _normalize(_fetch_gold_cny(start_date), start_date),
+        'cpi':        lambda: _fetch_cpi(start_date),   # 已在内部归一化
+        'm2':         lambda: _fetch_m2(start_date),    # 已在内部归一化
     }
 
     result = {}
