@@ -3055,7 +3055,7 @@ with tab_backtest:
             help="周频使用每周一作为定投日；PE 数据为月频，同月内各周使用同一 PE 值",
         )
 
-    bt_col4, bt_col5, bt_col6, bt_col7, bt_col8 = st.columns(5)
+    bt_col4, bt_col5, bt_col6, bt_col7 = st.columns(4)
     with bt_col4:
         bt_base_amount = st.number_input(
             "每期基准金额", min_value=100.0, max_value=1_000_000.0,
@@ -3076,13 +3076,6 @@ with tab_backtest:
             key='bt_top_gold',
         )
     with bt_col7:
-        bt_cash_rate = st.number_input(
-            "机会成本年化利率 (%)", min_value=0.0, max_value=10.0,
-            value=2.0, step=0.5,
-            help="矩阵策略少投的差额假设存入货币基金，此处设定其年化收益率（默认2%）",
-            key='bt_cash_rate',
-        )
-    with bt_col8:
         st.markdown("<br>", unsafe_allow_html=True)
         bt_run = st.button("▶ 运行回测", type="primary", key='bt_run', use_container_width=True)
 
@@ -3111,7 +3104,6 @@ with tab_backtest:
                     base_amount=bt_base_amount,
                     freq='W' if bt_freq == '周频' else 'M',
                     top_multiplier=top_mult,
-                    cash_rate_annual=bt_cash_rate / 100,
                 )
                 st.session_state['bt_result'] = result
             except Exception as e:
@@ -3163,38 +3155,11 @@ with tab_backtest:
         c4, c5, c6 = st.columns(3)
         c4.markdown(_card('XIRR（年化）', fixed['xirr'],         matrix['xirr'],         _fmt_pct,   True),  unsafe_allow_html=True)
         c5.markdown(_card('最大回撤',     fixed['max_drawdown'], matrix['max_drawdown'], _fmt_pct,   False), unsafe_allow_html=True)
+        c6.markdown(_card('每元成本市值', fixed['value_per_cost'], matrix['value_per_cost'],
+                          lambda v: f'{v:.4f}' if v else '—', True), unsafe_allow_html=True)
 
-        # 定投次数单独展示（无超额概念）
-        c6.markdown(
-            f"<div style='border:1px solid #e0e0e0;border-radius:8px;padding:14px;'>"
-            f"<div style='font-size:12px;color:#888;'>定投次数</div>"
-            f"<div style='font-size:13px;color:#444;margin-top:4px;'>固定: {fixed['periods']} 期</div>"
-            f"<div style='font-size:13px;color:#444;'>矩阵: {matrix['periods']} 期（暂停{fixed['periods']-matrix['periods']}期）</div>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-
-        # ─── 机会成本调整后对比 ──────────────────────────────
-        if matrix.get('combined_value') is not None:
-            st.markdown(
-                f"**机会成本调整**：矩阵策略每期少投的差额按 **{result['cash_rate_annual']*100:.1f}% 年化**存货币基金，"
-                f"终值 {_fmt_money(matrix['cash_value'])}，加入后与固定策略做公平对比（总预算相同）。"
-            )
-            ca1, ca2, ca3 = st.columns(3)
-            ca1.markdown(_card(
-                '矩阵综合价值（市值+货币基金）',
-                fixed['final_value'], matrix['combined_value'], _fmt_money, True,
-            ), unsafe_allow_html=True)
-            ca2.markdown(_card(
-                '综合绝对盈亏',
-                fixed['profit_loss'], matrix['combined_profit_loss'], _fmt_money, True,
-            ), unsafe_allow_html=True)
-            _combined_pl_rate_fixed  = fixed['profit_loss']  / fixed['total_cost']  * 100 if fixed['total_cost']  else None
-            _combined_pl_rate_matrix = matrix['combined_profit_loss'] / fixed['total_cost'] * 100 if fixed['total_cost'] else None
-            ca3.markdown(_card(
-                '综合盈亏率（同等总预算）',
-                _combined_pl_rate_fixed, _combined_pl_rate_matrix, _fmt_pct, True,
-            ), unsafe_allow_html=True)
+        # 定投次数
+        st.caption(f"定投次数：固定 {fixed['periods']} 期 / 矩阵 {matrix['periods']} 期（暂停 {fixed['periods']-matrix['periods']} 期）")
 
         st.divider()
 
@@ -3206,8 +3171,6 @@ with tab_backtest:
                                      name='固定策略 市值', line=dict(color='#4ECDC4', width=2)))
         fig_val.add_trace(go.Scatter(x=history_df['date'], y=history_df['matrix_cum_value'],
                                      name='矩阵策略 市值', line=dict(color='#FF6B6B', width=2)))
-        fig_val.add_trace(go.Scatter(x=history_df['date'], y=history_df['matrix_combined_value'],
-                                     name='矩阵策略 市值+货币基金', line=dict(color='#FF6B6B', width=2, dash='dot')))
         fig_val.add_trace(go.Scatter(x=history_df['date'], y=history_df['fixed_cum_cost'],
                                      name='固定策略 成本', line=dict(color='#4ECDC4', width=1, dash='dash'), opacity=0.5))
         fig_val.add_trace(go.Scatter(x=history_df['date'], y=history_df['matrix_cum_cost'],
