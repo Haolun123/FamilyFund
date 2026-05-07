@@ -10,11 +10,11 @@ from datetime import date
 
 
 _DEFAULT_CONFIG = {
-    "monthly_income_cny":        30000,
+    "monthly_income_cny":         30000,
     "monthly_savings_target_pct": 0.40,
-    "annual_expense_target_cny": 200000,
-    "withdrawal_rate":           0.04,
-    "expected_annual_return":    0.06,
+    "annual_expense_target_cny":  200000,
+    "withdrawal_rate":            0.04,
+    "expected_annual_return":     0.06,
 }
 
 

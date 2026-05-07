@@ -899,7 +899,11 @@ with tab_dashboard:
     with st.expander("⚙ 配置参数", expanded=False):
         _fc1, _fc2, _fc3 = st.columns(3)
         with _fc1:
-            _fi_income   = st.number_input('税后月收入（CNY）',    value=int(_fi_cfg['monthly_income_cny']),        min_value=0, step=1000, key='fi_income')
+            _fi_income   = st.number_input(
+                '税后月收入（CNY）',
+                value=int(_fi_cfg['monthly_income_cny']), min_value=0, step=1000, key='fi_income',
+                help="广义总收入年化平摊：(固定工资×12 + 年终奖 + RSU年度归属市值) ÷ 12。用于计算实际储蓄率分母。",
+            )
             _fi_expense  = st.number_input('年度生活支出目标（CNY）', value=int(_fi_cfg['annual_expense_target_cny']), min_value=0, step=10000, key='fi_expense')
         with _fc2:
             _fi_return   = st.number_input(
@@ -926,13 +930,20 @@ with tab_dashboard:
                 ),
             )
         with _fc3:
-            _fi_sav_tgt  = st.number_input('目标储蓄率（%）',       value=float(_fi_cfg['monthly_savings_target_pct']*100), min_value=0.0, max_value=100.0, step=5.0, key='fi_sav_tgt')
-            _fi_monthly_sav = st.number_input('月储蓄额（CNY，用于FI测算）', value=int(_fi_cfg.get('monthly_savings_cny', _fi_cfg['monthly_income_cny'] * _fi_cfg['monthly_savings_target_pct'])), min_value=0, step=1000, key='fi_monthly_sav')
+            _fi_sav_tgt = st.number_input(
+                '目标储蓄率（%）',
+                value=float(_fi_cfg['monthly_savings_target_pct']*100),
+                min_value=0.0, max_value=100.0, step=5.0, key='fi_sav_tgt',
+                help="每月储蓄目标占月收入的比例。用于储蓄率柱状图的目标虚线，同时自动推算 FI 测算的月供（月收入 × 目标储蓄率）。",
+            )
+            # 自动计算，展示给用户确认
+            _fi_monthly_sav_auto = int(_fi_income * _fi_sav_tgt / 100)
+            st.metric('月储蓄额（自动）', f"¥{_fi_monthly_sav_auto:,}", help="= 税后月收入 × 目标储蓄率，用于 FI 测算")
+
         if st.button('💾 保存配置', key='fi_save'):
             save_fi_config(_fi_data_dir, {
                 'monthly_income_cny':         _fi_income,
                 'monthly_savings_target_pct': _fi_sav_tgt / 100,
-                'monthly_savings_cny':        _fi_monthly_sav,
                 'annual_expense_target_cny':  _fi_expense,
                 'withdrawal_rate':            _fi_withdraw / 100,
                 'expected_annual_return':     _fi_return / 100,
@@ -941,11 +952,10 @@ with tab_dashboard:
             st.rerun()
 
     # ── 财务独立测算 ──
-    _fi_target   = compute_fi_target(_fi_cfg['annual_expense_target_cny'], _fi_cfg['withdrawal_rate'])
+    _fi_target      = compute_fi_target(_fi_cfg['annual_expense_target_cny'], _fi_cfg['withdrawal_rate'])
     _current_assets = float(fund_nav_df.iloc[-1]['Total_Value']) if not fund_nav_df.empty else 0.0
-    _fi_progress = min(_current_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
-    _monthly_sav_fi = _fi_cfg.get('monthly_savings_cny',
-                       _fi_cfg['monthly_income_cny'] * _fi_cfg['monthly_savings_target_pct'])
+    _fi_progress    = min(_current_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
+    _monthly_sav_fi = _fi_cfg['monthly_income_cny'] * _fi_cfg['monthly_savings_target_pct']
     _years = compute_years_to_fi(_current_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
 
     _kc1, _kc2, _kc3, _kc4 = st.columns(4)
