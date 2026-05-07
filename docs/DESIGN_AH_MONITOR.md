@@ -76,7 +76,7 @@
 - **价格**：yfinance `fast_info.last_price`（A股 `.SS`/`.SZ`，港股 `.HK`）
 - **汇率**：复用 `fx_service.get_rate('HKD', 'CNY')`，失败时 fallback 0.924
 
-akshare `stock_zh_ah_spot_em()` 在公司网络下超时，已放弃。
+akshare `stock_zh_ah_spot_em()` 返回 502 Bad Gateway（东方财富接口故障），`stock_zh_ah_spot()` JSON 解析失败（腾讯数据源）。两个专用 AH 接口均不可用，改用 yfinance 直接拉 A股/H股价格自算溢价率。
 
 ---
 
