@@ -881,6 +881,124 @@ with tab_dashboard:
         rb_df = pd.DataFrame(table_data)
         st.dataframe(rb_df, use_container_width=True, hide_index=True)
 
+    # ─── Section 7: 财务独立测算 + 储蓄率 ───
+    st.divider()
+    st.subheader("财务独立 & 储蓄率")
+
+    from fi_engine import (
+        load_fi_config, save_fi_config,
+        compute_fi_target, compute_years_to_fi, fi_sensitivity,
+        compute_monthly_savings, compute_savings_rate,
+    )
+    import math as _math
+
+    _fi_cfg = load_fi_config(_data_dir if '_data_dir' in dir() else os.path.dirname(csv_path))
+    _fi_data_dir = os.path.dirname(csv_path)
+
+    # ── 配置区 ──
+    with st.expander("⚙ 配置参数", expanded=False):
+        _fc1, _fc2, _fc3 = st.columns(3)
+        with _fc1:
+            _fi_income   = st.number_input('税后月收入（CNY）',    value=int(_fi_cfg['monthly_income_cny']),        min_value=0, step=1000, key='fi_income')
+            _fi_expense  = st.number_input('年度生活支出目标（CNY）', value=int(_fi_cfg['annual_expense_target_cny']), min_value=0, step=10000, key='fi_expense')
+        with _fc2:
+            _fi_return   = st.number_input('预期年化收益率（%）',   value=float(_fi_cfg['expected_annual_return']*100), min_value=0.0, max_value=20.0, step=0.5, key='fi_return')
+            _fi_withdraw = st.number_input('安全提款率（%）',       value=float(_fi_cfg['withdrawal_rate']*100),        min_value=1.0, max_value=10.0, step=0.5, key='fi_withdraw')
+        with _fc3:
+            _fi_sav_tgt  = st.number_input('目标储蓄率（%）',       value=float(_fi_cfg['monthly_savings_target_pct']*100), min_value=0.0, max_value=100.0, step=5.0, key='fi_sav_tgt')
+            _fi_monthly_sav = st.number_input('月储蓄额（CNY，用于FI测算）', value=int(_fi_cfg.get('monthly_savings_cny', _fi_cfg['monthly_income_cny'] * _fi_cfg['monthly_savings_target_pct'])), min_value=0, step=1000, key='fi_monthly_sav')
+        if st.button('💾 保存配置', key='fi_save'):
+            save_fi_config(_fi_data_dir, {
+                'monthly_income_cny':         _fi_income,
+                'monthly_savings_target_pct': _fi_sav_tgt / 100,
+                'monthly_savings_cny':        _fi_monthly_sav,
+                'annual_expense_target_cny':  _fi_expense,
+                'withdrawal_rate':            _fi_withdraw / 100,
+                'expected_annual_return':     _fi_return / 100,
+            })
+            st.success('已保存')
+            st.rerun()
+
+    # ── 财务独立测算 ──
+    _fi_target   = compute_fi_target(_fi_cfg['annual_expense_target_cny'], _fi_cfg['withdrawal_rate'])
+    _current_assets = float(fund_nav_df.iloc[-1]['Total_Value']) if not fund_nav_df.empty else 0.0
+    _fi_progress = min(_current_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
+    _monthly_sav_fi = _fi_cfg.get('monthly_savings_cny',
+                       _fi_cfg['monthly_income_cny'] * _fi_cfg['monthly_savings_target_pct'])
+    _years = compute_years_to_fi(_current_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
+
+    _kc1, _kc2, _kc3, _kc4 = st.columns(4)
+    with _kc1: st.metric('FI 目标资产', f"¥{_fi_target:,.0f}")
+    with _kc2: st.metric('当前总资产',  f"¥{_current_assets:,.0f}")
+    with _kc3: st.metric('完成进度',    f"{_fi_progress*100:.1f}%")
+    with _kc4:
+        if _years == 0:
+            st.metric('预计达标', '已达标 🎉')
+        elif _years is None:
+            st.metric('预计达标', '100年内不达标')
+        else:
+            _target_year = date.today().year + _math.ceil(_years)
+            st.metric('预计达标', f"{_target_year}年（{_years:.1f}年后）")
+
+    st.progress(_fi_progress)
+
+    # 敏感性分析
+    _sens = fi_sensitivity(_current_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
+    _sens_rows = []
+    for s in _sens:
+        _sens_rows.append({
+            '情景':     s['label'],
+            '年化收益': f"{s['annual_return']*100:.1f}%",
+            '月储蓄':   f"¥{s['monthly_savings']:,.0f}",
+            '所需年数': f"{s['years']:.1f}年" if s['years'] is not None else '100年+',
+            '达标年份': str(s['target_year']) if s['target_year'] else '—',
+        })
+    st.dataframe(pd.DataFrame(_sens_rows), use_container_width=True, hide_index=True)
+
+    # ── 储蓄率追踪 ──
+    st.divider()
+    st.subheader("储蓄率追踪")
+
+    _monthly_savings_map = compute_monthly_savings(raw_df)
+    _savings_rate_map    = compute_savings_rate(_monthly_savings_map, _fi_cfg['monthly_income_cny'])
+    _sav_target          = _fi_cfg['monthly_savings_target_pct']
+
+    if _savings_rate_map:
+        _months = sorted(_savings_rate_map.keys())[-12:]  # 最近12个月
+        _rates  = [_savings_rate_map[m] * 100 for m in _months]
+        _amounts = [_monthly_savings_map.get(m, 0) for m in _months]
+        _avg_rate = sum(_rates) / len(_rates) if _rates else 0
+
+        _sc1, _sc2, _sc3 = st.columns(3)
+        with _sc1: st.metric('滚动平均储蓄率', f"{_avg_rate:.1f}%")
+        with _sc2: st.metric('目标储蓄率',     f"{_sav_target*100:.0f}%")
+        with _sc3: st.metric('达标月数',       f"{sum(1 for r in _rates if r >= _sav_target*100)}/{len(_rates)} 个月")
+
+        # 柱状图
+        _bar_colors = ['#2e7d32' if r >= _sav_target * 100 else '#d32f2f' for r in _rates]
+        _fig_sav = go.Figure()
+        _fig_sav.add_trace(go.Bar(
+            x=_months, y=_rates,
+            marker_color=_bar_colors,
+            name='储蓄率',
+            text=[f'¥{a:,.0f}' for a in _amounts],
+            textposition='outside',
+        ))
+        _fig_sav.add_hline(
+            y=_sav_target * 100,
+            line_dash='dash', line_color='#FFA726',
+            annotation_text=f'目标 {_sav_target*100:.0f}%',
+        )
+        _fig_sav.update_layout(
+            height=320, yaxis_title='储蓄率 (%)',
+            yaxis=dict(range=[0, max(max(_rates) * 1.2, _sav_target * 120)]),
+            margin=dict(t=30, b=40),
+        )
+        st.plotly_chart(_fig_sav, use_container_width=True)
+        st.caption("储蓄率 = Cash 行正 NCF / 税后月收入。绿色 = 达标，红色 = 未达标。ESPP/RSU 不计入。")
+    else:
+        st.info("暂无 Cash 入金记录，储蓄率将在首次外部入金后自动计算。")
+
 # ═══════════════════════════════════════════════════════════
 # Tab 2: Weekly Update
 # ═══════════════════════════════════════════════════════════

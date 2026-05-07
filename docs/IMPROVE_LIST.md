@@ -28,7 +28,7 @@
 | 再平衡建议（偏差柱状图 + 温度计信号）| `dashboard/app.py` Tab1 Section6 |
 | AI 周度评估（GLM-4-flash）| `src/ai_weekly.py` Tab1，见 `DESIGN_AI_WEEKLY.md` |
 | PDF 报告（6页 A4 横版） | `src/pdf_report.py` |
-| 第十人系统 — 调仓前三 Agent 强制反对审查 | `src/tenth_man.py` Tab8，见 `DESIGN_TENTH_MAN.md` |
+| 财务独立测算 + 储蓄率追踪 | `src/fi_engine.py` + `dashboard/app.py` Tab1 Section7，见 `DESIGN_ANALYTICS.md` |
 | 定投管理模块（DCA Manager）| `src/dca_manager.py` + `dashboard/app.py` Tab5 底部，见 `DESIGN_DCA_MANAGER.md` |
 
 ---
@@ -41,8 +41,8 @@
 |---|------|---------|---------|
 | 1 | **鲨鱼记账解析 + 季度现金流分析** | `DESIGN_CASHFLOW.md` | 2026Q2 数据 |
 | 2 | **TWR vs 市场基准对比图** | `DESIGN_ANALYTICS.md` | ✅ 已完成（`src/benchmark.py` + sidebar 选择器）|
-| 3 | **财务独立测算** | `DESIGN_ANALYTICS.md` | 无，纯配置输入 |
-| 4 | **储蓄率追踪** | `DESIGN_ANALYTICS.md` | 需配置税后月收入 |
+| 3 | **财务独立测算** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
+| 4 | **储蓄率追踪** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
 | 5 | **定投管理模块** | `DESIGN_DCA_MANAGER.md` | ✅ 已完成 |
 
 ### P3 — 需前置数据积累
