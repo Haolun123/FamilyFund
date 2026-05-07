@@ -881,7 +881,118 @@ with tab_dashboard:
         rb_df = pd.DataFrame(table_data)
         st.dataframe(rb_df, use_container_width=True, hide_index=True)
 
-    # ─── Section 7: 财务独立测算 + 储蓄率 ───
+    # ─── Section 7: 人生阶段规划 ───
+    st.divider()
+    st.subheader("人生阶段规划")
+
+    from life_stages_engine import load_life_stages, compute_expense_curve, get_milestone_summary
+
+    _ls_data = load_life_stages(os.path.dirname(csv_path))
+
+    if _ls_data is None:
+        st.info("未找到 life_stages.json，请在 iCloud 数据目录手动创建。")
+    else:
+        _SCENARIO_LABELS = {'pessimistic': '悲观', 'base': '基准', 'optimistic': '乐观'}
+        _SCENARIO_COLORS = {
+            'pessimistic': '#EF5350',
+            'base':        '#42A5F5',
+            'optimistic':  '#66BB6A',
+        }
+        _MS_COLORS = {
+            'early_childhood':  '#FF8A65',
+            'k12_education':    '#FFB300',
+            'higher_education': '#AB47BC',
+            'property':         '#26A69A',
+            'retirement_self':  '#78909C',
+        }
+        _MS_NAMES = {
+            'early_childhood':  '早期养育',
+            'k12_education':    'K12教育',
+            'higher_education': '高等教育',
+            'property':         '置业',
+            'retirement_self':  '退休',
+        }
+
+        # 全局情景切换
+        _ls_scenario = st.radio(
+            '情景', options=['base', 'pessimistic', 'optimistic'],
+            format_func=lambda x: _SCENARIO_LABELS[x],
+            horizontal=True, key='ls_scenario',
+        )
+
+        # 计算三种情景的曲线
+        _curve    = compute_expense_curve(_ls_data, _ls_scenario)
+        _curve_b  = compute_expense_curve(_ls_data, 'base')
+        _curve_p  = compute_expense_curve(_ls_data, 'pessimistic')
+        _curve_o  = compute_expense_curve(_ls_data, 'optimistic')
+
+        # 堆叠柱状图（当前情景，展望40年）
+        _cur_year = date.today().year
+        _years_show = list(range(_cur_year, _cur_year + 41))
+        _ms_ids = [ms['id'] for ms in _ls_data.get('milestones', []) if ms.get('enabled', True)]
+
+        _fig_ls = go.Figure()
+        for _ms_id in _ms_ids:
+            _vals = [_curve.get(y, {}).get('components', {}).get(_ms_id, 0) / 10000 for y in _years_show]
+            _fig_ls.add_trace(go.Bar(
+                x=_years_show, y=_vals,
+                name=_MS_NAMES.get(_ms_id, _ms_id),
+                marker_color=_MS_COLORS.get(_ms_id, '#888'),
+            ))
+        _fig_ls.update_layout(
+            barmode='stack', height=380,
+            yaxis_title='年支出（万CNY）',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+            margin=dict(t=40, b=40),
+            hovermode='x unified',
+        )
+        st.plotly_chart(_fig_ls, use_container_width=True)
+
+        # 各里程碑配置一览
+        with st.expander("各里程碑配置", expanded=False):
+            for ms in _ls_data.get('milestones', []):
+                _mc1, _mc2, _mc3 = st.columns([2, 3, 2])
+                with _mc1:
+                    st.markdown(f"**{ms['name']}**")
+                with _mc2:
+                    st.caption(get_milestone_summary(_ls_data, _ls_scenario, ms['id']))
+                with _mc3:
+                    _sc_sel = ms.get('selected', 'base')
+                    st.caption(f"当前档位：{_SCENARIO_LABELS.get(_sc_sel, _sc_sel)}")
+
+        # 对 FI 的影响（三种情景对比）
+        st.markdown("**对财务独立的影响**")
+        from fi_engine import load_fi_config, compute_fi_target, compute_years_to_fi
+        import math as _math_ls
+        _fi_cfg_ls  = load_fi_config(os.path.dirname(csv_path))
+        _cur_assets = float(fund_nav_df.iloc[-1]['Total_Value']) if not fund_nav_df.empty else 0.0
+        _monthly_sav_ls = _fi_cfg_ls['monthly_income_cny'] * _fi_cfg_ls['monthly_savings_target_pct']
+
+        _fi_rows = []
+        for _sc, _sc_label in _SCENARIO_LABELS.items():
+            _sc_curve = {'pessimistic': _curve_p, 'base': _curve_b, 'optimistic': _curve_o}[_sc]
+            # 用当前年支出作为 FI 目标支出（含里程碑）
+            _this_year_exp = _sc_curve.get(_cur_year, {}).get('total', 0)
+            if _this_year_exp <= 0:
+                _this_year_exp = _fi_cfg_ls['annual_expense_target_cny']
+            _fi_tgt = compute_fi_target(_this_year_exp, _fi_cfg_ls['withdrawal_rate'])
+            _yrs    = compute_years_to_fi(_cur_assets, _fi_tgt, _monthly_sav_ls, _fi_cfg_ls['expected_annual_return'])
+            if _yrs == 0:
+                _yr_str = '已达标'
+            elif _yrs is None:
+                _yr_str = '100年内不达标'
+            else:
+                _yr_str = f"{_cur_year + _math_ls.ceil(_yrs)}年（{_yrs:.1f}年后）"
+            _fi_rows.append({
+                '情景':         _sc_label,
+                '当年总支出':   f"¥{_this_year_exp/10000:.1f}万",
+                'FI目标资产':   f"¥{_fi_tgt/10000:.0f}万",
+                '预计达标':     _yr_str,
+            })
+        st.dataframe(pd.DataFrame(_fi_rows), use_container_width=True, hide_index=True)
+        st.caption("FI目标基于当年（含里程碑）总支出计算，随情景变化。里程碑金额已含通胀调整。")
+
+    # ─── Section 8: 财务独立测算 + 储蓄率 ───
     st.divider()
     st.subheader("财务独立 & 储蓄率")
 

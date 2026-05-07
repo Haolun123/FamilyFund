@@ -28,7 +28,7 @@
 | 再平衡建议（偏差柱状图 + 温度计信号）| `dashboard/app.py` Tab1 Section6 |
 | AI 周度评估（GLM-4-flash）| `src/ai_weekly.py` Tab1，见 `DESIGN_AI_WEEKLY.md` |
 | PDF 报告（6页 A4 横版） | `src/pdf_report.py` |
-| 财务独立测算 + 储蓄率追踪 | `src/fi_engine.py` + `dashboard/app.py` Tab1 Section7，见 `DESIGN_ANALYTICS.md` |
+| 人生阶段规划（里程碑支出曲线 + FI情景对比）| `src/life_stages_engine.py` + `dashboard/app.py` Tab1 Section7，见 `DESIGN_LIFE_STAGES.md` |
 | 定投管理模块（DCA Manager）| `src/dca_manager.py` + `dashboard/app.py` Tab5 底部，见 `DESIGN_DCA_MANAGER.md` |
 
 ---
@@ -50,7 +50,7 @@
 | # | 功能 | 设计文档 | 前置条件 |
 |---|------|---------|---------|
 | 5 | **调仓决策质量复盘** | `DESIGN_ANALYTICS.md` | transaction.csv 积累 3-6 个月；天天基金接口已验证可用 |
-| 6 | **人生阶段规划** — 里程碑情景规划，动态支出曲线对接 FI 测算 | `DESIGN_LIFE_STAGES.md` | 财务独立测算先实现；`life_stages.json` 手动初始化 |
+| 6 | **人生阶段规划** | `DESIGN_LIFE_STAGES.md` | ✅ 已完成 |
 | 7 | **FIFO 已实现盈亏** | — | transaction.csv 积累 3-6 个月 |
 | 8 | **现金分红处理方案 C** | `DESIGN_DIVIDEND.md` | 见设计文档 |
 
