@@ -902,8 +902,29 @@ with tab_dashboard:
             _fi_income   = st.number_input('税后月收入（CNY）',    value=int(_fi_cfg['monthly_income_cny']),        min_value=0, step=1000, key='fi_income')
             _fi_expense  = st.number_input('年度生活支出目标（CNY）', value=int(_fi_cfg['annual_expense_target_cny']), min_value=0, step=10000, key='fi_expense')
         with _fc2:
-            _fi_return   = st.number_input('预期年化收益率（%）',   value=float(_fi_cfg['expected_annual_return']*100), min_value=0.0, max_value=20.0, step=0.5, key='fi_return')
-            _fi_withdraw = st.number_input('安全提款率（%）',       value=float(_fi_cfg['withdrawal_rate']*100),        min_value=1.0, max_value=10.0, step=0.5, key='fi_withdraw')
+            _fi_return   = st.number_input(
+                '预期年化收益率（%）',
+                value=float(_fi_cfg['expected_annual_return']*100),
+                min_value=0.0, max_value=20.0, step=0.5, key='fi_return',
+                help=(
+                    "建议填**实际收益率**（名义收益率 - 你预期的长期通胀），而非名义收益率。\n\n"
+                    "示例：若预期组合名义年化 7%，长期通胀 3%，则填 4%。\n\n"
+                    "参考：中国 M2 长期增速约 8-10%，CPI 约 2-3%，资产收益率需高于 M2 增速才能跑赢货币稀释。"
+                ),
+            )
+            _fi_withdraw = st.number_input(
+                '安全提款率（%）',
+                value=float(_fi_cfg['withdrawal_rate']*100),
+                min_value=1.0, max_value=10.0, step=0.5, key='fi_withdraw',
+                help=(
+                    "4% 法则来自 Trinity Study（1998），基于美国股债60/40组合、30年退休期。\n\n"
+                    "**对中国投资者的调整建议：**\n"
+                    "- 退休期 >30 年（如40岁退休）→ 用 3% 或 3.5%\n"
+                    "- M2 超发 / 人民币长期贬值风险 → 偏保守用 3%\n"
+                    "- 有房租、养老金等其他收入来源 → 可适当放宽\n\n"
+                    "实质含义：3% → 需33倍年支出；3.5% → 28倍；4% → 25倍。"
+                ),
+            )
         with _fc3:
             _fi_sav_tgt  = st.number_input('目标储蓄率（%）',       value=float(_fi_cfg['monthly_savings_target_pct']*100), min_value=0.0, max_value=100.0, step=5.0, key='fi_sav_tgt')
             _fi_monthly_sav = st.number_input('月储蓄额（CNY，用于FI测算）', value=int(_fi_cfg.get('monthly_savings_cny', _fi_cfg['monthly_income_cny'] * _fi_cfg['monthly_savings_target_pct'])), min_value=0, step=1000, key='fi_monthly_sav')
@@ -941,6 +962,11 @@ with tab_dashboard:
             st.metric('预计达标', f"{_target_year}年（{_years:.1f}年后）")
 
     st.progress(_fi_progress)
+    st.caption(
+        f"FI目标 = 年支出 ÷ 提款率 = ¥{_fi_cfg['annual_expense_target_cny']:,.0f} ÷ {_fi_cfg['withdrawal_rate']*100:.1f}% = ¥{_fi_target:,.0f}。"
+        f" 预期收益率 {_fi_cfg['expected_annual_return']*100:.1f}% 为**实际收益率**（已扣通胀），"
+        f"名义收益率请在此基础上加上你预期的长期通胀（参考：M2长期增速约8-10%，CPI约2-3%）。"
+    )
 
     # 敏感性分析
     _sens = fi_sensitivity(_current_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
