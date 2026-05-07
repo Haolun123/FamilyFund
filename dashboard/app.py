@@ -2411,121 +2411,200 @@ with tab_market:
     # ─── Section: 个股基本面 ───
 
     st.divider()
-    st.subheader("个股基本面")
-
     _data_dir = os.path.dirname(csv_path)
-    _yf_map   = load_yf_symbols(_data_dir)
-    _sym_map  = {k: v for k, v in _yf_map.items() if not k.startswith('_')}
+    with st.expander("📊 个股基本面", expanded=False):
 
-    _latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
-    _stock_codes = list(dict.fromkeys(
-        row['Code'] for _, row in _latest_holdings.iterrows()
-        if row['Code'] in _sym_map
-    ))
+        _yf_map   = load_yf_symbols(_data_dir)
+        _sym_map  = {k: v for k, v in _yf_map.items() if not k.startswith('_')}
 
-    _force_refresh    = st.session_state.pop('_fund_refresh_all', False)
-    _fund_refresh_code = st.session_state.pop('_fund_refresh_code', None)
+        _latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
+        _stock_codes = list(dict.fromkeys(
+            row['Code'] for _, row in _latest_holdings.iterrows()
+            if row['Code'] in _sym_map
+        ))
 
-    with st.spinner("加载基本面数据...") if _force_refresh else contextlib.nullcontext():
-        _fundamentals = {}
-        for code in _stock_codes:
-            from fundamentals import get_fundamentals
-            _fr = _force_refresh or (_fund_refresh_code == code)
-            _f = get_fundamentals(_data_dir, code, force_refresh=_fr)
-            if _f:
-                _fundamentals[code] = _f
+        _force_refresh    = st.session_state.pop('_fund_refresh_all', False)
+        _fund_refresh_code = st.session_state.pop('_fund_refresh_code', None)
 
-    def _fmt(v, fmt='x', scale=1.0):
-        if v is None: return '—'
-        try:
-            n = float(v) * scale
-            if fmt == 'x':          return f'{n:.2f}x'
-            if fmt == '%':          return f'{n*100:.2f}%'
-            if fmt == '+%':         return f'{n*100:+.1f}%'
-            if fmt == 'pct_direct': return f'{n:.2f}%'
-            if fmt == 'cny':        return f'¥{n:.2f}'
-            if fmt == 'usd':        return f'${n:.2f}'
-            return f'{n:.2f}'
-        except Exception:
-            return '—'
+        with st.spinner("加载基本面数据...") if _force_refresh else contextlib.nullcontext():
+            _fundamentals = {}
+            for code in _stock_codes:
+                from fundamentals import get_fundamentals
+                _fr = _force_refresh or (_fund_refresh_code == code)
+                _f = get_fundamentals(_data_dir, code, force_refresh=_fr)
+                if _f:
+                    _fundamentals[code] = _f
 
-    if _stock_codes:
-        for code in _stock_codes:
-            name_row = _latest_holdings[_latest_holdings['Code'] == code].iloc[0]
-            name     = name_row['Name']
-            yf_sym   = _sym_map[code]
-            f        = _fundamentals.get(code, {})
-            ccy      = name_row.get('Currency', 'CNY')
-            eps_fmt  = 'cny' if ccy == 'CNY' else 'usd'
+        def _fmt(v, fmt='x', scale=1.0):
+            if v is None: return '—'
+            try:
+                n = float(v) * scale
+                if fmt == 'x':          return f'{n:.2f}x'
+                if fmt == '%':          return f'{n*100:.2f}%'
+                if fmt == '+%':         return f'{n*100:+.1f}%'
+                if fmt == 'pct_direct': return f'{n:.2f}%'
+                if fmt == 'cny':        return f'¥{n:.2f}'
+                if fmt == 'usd':        return f'${n:.2f}'
+                return f'{n:.2f}'
+            except Exception:
+                return '—'
 
-            with st.expander(f"**{name}** ({code} · {yf_sym})", expanded=True):
-                _, btn_col = st.columns([8, 1])
-                with btn_col:
-                    if st.button('🔄', key=f'rf_{code}', help='强制刷新数据'):
-                        st.session_state['_fund_refresh_code'] = code
-                        st.rerun()
+        if _stock_codes:
+            for code in _stock_codes:
+                name_row = _latest_holdings[_latest_holdings['Code'] == code].iloc[0]
+                name     = name_row['Name']
+                yf_sym   = _sym_map[code]
+                f        = _fundamentals.get(code, {})
+                ccy      = name_row.get('Currency', 'CNY')
+                eps_fmt  = 'cny' if ccy == 'CNY' else 'usd'
 
-                r1c1, r1c2, r1c3, r1c4, r1c5 = st.columns(5)
-                _price    = f.get('currentPrice')
-                _currency = f.get('currency', '')
-                _price_str = f'{_price:,.2f} {_currency}' if _price else '—'
-                with r1c1: st.metric('当前股价',     _price_str)
-                with r1c2: st.metric('PE (TTM)',    _fmt(f.get('trailingPE'), 'x'))
-                with r1c3: st.metric('Forward PE',  _fmt(f.get('forwardPE'),  'x'))
-                with r1c4: st.metric('PB',          _fmt(f.get('priceToBook'),'x'))
-                with r1c5: st.metric('ROE',         _fmt(f.get('returnOnEquity'), '%'))
+                with st.expander(f"**{name}** ({code} · {yf_sym})", expanded=True):
+                    _, btn_col = st.columns([8, 1])
+                    with btn_col:
+                        if st.button('🔄', key=f'rf_{code}', help='强制刷新数据'):
+                            st.session_state['_fund_refresh_code'] = code
+                            st.rerun()
 
-                r2c1, r2c2, r2c3, r2c4 = st.columns(4)
-                with r2c1: st.metric('EPS (TTM)',   _fmt(f.get('trailingEps'), eps_fmt))
-                with r2c2: st.metric('Forward EPS', _fmt(f.get('forwardEps'),  eps_fmt))
-                with r2c3: st.metric('股息率',       _fmt(f.get('dividendYield'), 'pct_direct'))
-                with r2c4: st.metric('营收增长 YoY', _fmt(f.get('revenueGrowth'), '+%'))
+                    r1c1, r1c2, r1c3, r1c4, r1c5 = st.columns(5)
+                    _price    = f.get('currentPrice')
+                    _currency = f.get('currency', '')
+                    _price_str = f'{_price:,.2f} {_currency}' if _price else '—'
+                    with r1c1: st.metric('当前股价',     _price_str)
+                    with r1c2: st.metric('PE (TTM)',    _fmt(f.get('trailingPE'), 'x'))
+                    with r1c3: st.metric('Forward PE',  _fmt(f.get('forwardPE'),  'x'))
+                    with r1c4: st.metric('PB',          _fmt(f.get('priceToBook'),'x'))
+                    with r1c5: st.metric('ROE',         _fmt(f.get('returnOnEquity'), '%'))
 
-                if not f:
-                    st.caption('⚠️ 数据暂不可用，请检查 YF Symbol 或网络连接')
-    else:
-        st.info('暂无持仓个股匹配 YF Symbol 映射。请在下方添加映射后，确认持仓中有对应 Code。')
+                    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+                    with r2c1: st.metric('EPS (TTM)',   _fmt(f.get('trailingEps'), eps_fmt))
+                    with r2c2: st.metric('Forward EPS', _fmt(f.get('forwardEps'),  eps_fmt))
+                    with r2c3: st.metric('股息率',       _fmt(f.get('dividendYield'), 'pct_direct'))
+                    with r2c4: st.metric('营收增长 YoY', _fmt(f.get('revenueGrowth'), '+%'))
 
-    # YF Symbol 管理
-    st.divider()
-    with st.expander("管理个股 YF Symbol 映射", expanded=False):
-        st.caption("""**Symbol 填写规则：**
-- A股上海（6开头）：`601838` → `601838.SS`
-- A股深圳（0/3开头）：`000001` → `000001.SZ`
-- 港股（去掉前导零）：`HK0700` → `0700.HK`，`01810` → `1810.HK`
-- 美股：直接用 ticker（`NVDA`、`AAPL`）
-- 欧股 ADR（在美上市）：`SAP.DE` → `SAP`""")
-
-        if _sym_map:
-            st.markdown("**当前映射：**")
-            for code, sym in _sym_map.items():
-                mc1, mc2, mc3 = st.columns([3, 3, 1])
-                with mc1: st.code(code)
-                with mc2: st.code(sym)
-                with mc3:
-                    if st.button('🗑️', key=f'del_{code}', help=f'删除 {code}'):
-                        remove_yf_symbol(_data_dir, code)
-                        st.rerun()
+                    if not f:
+                        st.caption('⚠️ 数据暂不可用，请检查 YF Symbol 或网络连接')
         else:
-            st.info('暂无映射，请添加。')
+            st.info('暂无持仓个股匹配 YF Symbol 映射。请在下方添加映射后，确认持仓中有对应 Code。')
 
-        st.markdown("**新增映射：**")
-        add_c1, add_c2, add_c3 = st.columns([3, 3, 2])
-        with add_c1:
-            new_code = st.text_input('portfolio.csv Code', key='new_yf_code',
-                                     placeholder='如 601838')
-        with add_c2:
-            new_sym = st.text_input('YF Symbol', key='new_yf_sym',
-                                    placeholder='如 601838.SS')
-        with add_c3:
-            st.markdown('<div style="margin-top:28px"></div>', unsafe_allow_html=True)
-            if st.button('➕ 添加', key='add_yf'):
-                if new_code.strip() and new_sym.strip():
-                    add_yf_symbol(_data_dir, new_code.strip(), new_sym.strip())
-                    st.success(f'已添加 {new_code} → {new_sym}')
-                    st.rerun()
+        # YF Symbol 管理
+        st.divider()
+        with st.expander("管理个股 YF Symbol 映射", expanded=False):
+            st.caption("""**Symbol 填写规则：**
+    - A股上海（6开头）：`601838` → `601838.SS`
+    - A股深圳（0/3开头）：`000001` → `000001.SZ`
+    - 港股（去掉前导零）：`HK0700` → `0700.HK`，`01810` → `1810.HK`
+    - 美股：直接用 ticker（`NVDA`、`AAPL`）
+    - 欧股 ADR（在美上市）：`SAP.DE` → `SAP`""")
+
+            if _sym_map:
+                st.markdown("**当前映射：**")
+                for code, sym in _sym_map.items():
+                    mc1, mc2, mc3 = st.columns([3, 3, 1])
+                    with mc1: st.code(code)
+                    with mc2: st.code(sym)
+                    with mc3:
+                        if st.button('🗑️', key=f'del_{code}', help=f'删除 {code}'):
+                            remove_yf_symbol(_data_dir, code)
+                            st.rerun()
+            else:
+                st.info('暂无映射，请添加。')
+
+            st.markdown("**新增映射：**")
+            add_c1, add_c2, add_c3 = st.columns([3, 3, 2])
+            with add_c1:
+                new_code = st.text_input('portfolio.csv Code', key='new_yf_code',
+                                         placeholder='如 601838')
+            with add_c2:
+                new_sym = st.text_input('YF Symbol', key='new_yf_sym',
+                                        placeholder='如 601838.SS')
+            with add_c3:
+                st.markdown('<div style="margin-top:28px"></div>', unsafe_allow_html=True)
+                if st.button('➕ 添加', key='add_yf'):
+                    if new_code.strip() and new_sym.strip():
+                        add_yf_symbol(_data_dir, new_code.strip(), new_sym.strip())
+                        st.success(f'已添加 {new_code} → {new_sym}')
+                        st.rerun()
+                    else:
+                        st.warning('Code 和 Symbol 均不能为空')
+
+    # ═══════════════════════════════════════════════════════════
+    # AH 溢价监测
+    # ═══════════════════════════════════════════════════════════
+
+    st.divider()
+    with st.expander("🔀 AH 股溢价监测", expanded=False):
+        from ah_monitor import (
+            load_ah_config, get_ah_data,
+            add_ah_stock, remove_ah_stock,
+        )
+
+        _ah_force = st.session_state.pop('_ah_force_refresh', False)
+        with st.spinner("拉取 AH 股价格...") if _ah_force else contextlib.nullcontext():
+            _ah_results = get_ah_data(_data_dir, force_refresh=_ah_force)
+
+        if st.button('🔄 刷新', key='ah_refresh'):
+            st.session_state['_ah_force_refresh'] = True
+            st.rerun()
+
+        # ── 溢价率汇总表 ──
+        if _ah_results:
+            _ah_rows = []
+            for r in _ah_results:
+                _prem = r['premium']
+                if _prem is None:
+                    _prem_str = '—'
+                elif _prem >= 120:
+                    _prem_str = f'🟢 {_prem:.1f}'
+                elif _prem >= 90:
+                    _prem_str = f'🟡 {_prem:.1f}'
                 else:
-                    st.warning('Code 和 Symbol 均不能为空')
+                    _prem_str = f'🔴 {_prem:.1f}'
+
+                _ah_rows.append({
+                    '名称':       r['name'],
+                    'A股价格':    f"¥{r['a_price']:.2f}" if r['a_price'] else '—',
+                    'H股价格':    f"HK${r['h_price']:.2f}" if r['h_price'] else '—',
+                    'H股(CNY)':  f"¥{r['h_price_cny']:.3f}" if r['h_price_cny'] else '—',
+                    '溢价率':     _prem_str,
+                    '1年分位':    f"{r['pct_1y']:.0f}%" if r['pct_1y'] is not None else '积累中',
+                    '信号':       r['signal'],
+                })
+            import pandas as _pd_ah
+            st.dataframe(_pd_ah.DataFrame(_ah_rows), use_container_width=True, hide_index=True)
+            st.caption(
+                "溢价率 = A股价格 ÷ (H股价格 × HKD/CNY) × 100。"
+                "🟢 >120 港股便宜  🟡 90-120 接近平价  🔴 <90 港股贵。"
+                f"当前 HKD/CNY = {_ah_results[0]['hkd_cny']:.4f}"
+            )
+        else:
+            st.info("暂无关注标的，请在下方添加。")
+
+        # ── 管理 UI ──
+        with st.expander("⚙ 管理关注标的", expanded=False):
+            _ah_config = load_ah_config(_data_dir)
+            for _s in _ah_config.get('stocks', []):
+                _sc1, _sc2, _sc3, _sc4 = st.columns([2, 2, 2, 1])
+                with _sc1: st.text(_s['name'])
+                with _sc2: st.text(_s['a_code'])
+                with _sc3: st.text(_s['h_code'])
+                with _sc4:
+                    if st.button('🗑', key=f'ah_del_{_s["a_code"]}'):
+                        remove_ah_stock(_data_dir, _s['a_code'])
+                        st.rerun()
+
+            st.markdown("**新增标的：**")
+            _an1, _an2, _an3, _an4 = st.columns([2, 2, 2, 1])
+            with _an1: _add_ah_name  = st.text_input('名称',   key='ah_add_name',   placeholder='如 中海油')
+            with _an2: _add_ah_acode = st.text_input('A股代码', key='ah_add_acode', placeholder='如 600938.SS')
+            with _an3: _add_ah_hcode = st.text_input('H股代码', key='ah_add_hcode', placeholder='如 0883.HK')
+            with _an4:
+                st.markdown('<div style="margin-top:28px"></div>', unsafe_allow_html=True)
+                if st.button('➕', key='ah_add_btn'):
+                    if _add_ah_name.strip() and _add_ah_acode.strip() and _add_ah_hcode.strip():
+                        add_ah_stock(_data_dir, _add_ah_name, _add_ah_acode, _add_ah_hcode)
+                        st.rerun()
+                    else:
+                        st.warning('三个字段均不能为空')
 
     # ═══════════════════════════════════════════════════════════
     # DCA Plan 定投管理
