@@ -954,32 +954,61 @@ with tab_dashboard:
     # ── 财务独立测算 ──
     _fi_target      = compute_fi_target(_fi_cfg['annual_expense_target_cny'], _fi_cfg['withdrawal_rate'])
     _current_assets = float(fund_nav_df.iloc[-1]['Total_Value']) if not fund_nav_df.empty else 0.0
-    _fi_progress    = min(_current_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
     _monthly_sav_fi = _fi_cfg['monthly_income_cny'] * _fi_cfg['monthly_savings_target_pct']
-    _years = compute_years_to_fi(_current_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
 
-    _kc1, _kc2, _kc3, _kc4 = st.columns(4)
+    # 其他资产 toggle
+    _tog1, _tog2 = st.columns([1, 3])
+    with _tog1:
+        _show_other = st.toggle('含其他资产', value=False, key='fi_show_other',
+                                help="叠加未纳入基金的资产（房产、公积金等）查看完整 FI 进度")
+    with _tog2:
+        _other_assets = st.number_input(
+            '其他资产估值（CNY）', value=int(_fi_cfg.get('other_assets_cny', 0)),
+            min_value=0, step=100000, key='fi_other_assets',
+            label_visibility='visible',
+        ) if _show_other else 0
+
+    _total_assets   = _current_assets + (_other_assets if _show_other else 0)
+    _fi_progress    = min(_current_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
+    _fi_progress_total = min(_total_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
+    _years          = compute_years_to_fi(_current_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
+    _years_total    = compute_years_to_fi(_total_assets,   _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
+
+    def _year_str(y):
+        if y == 0:   return '已达标 🎉'
+        if y is None: return '100年内不达标'
+        return f"{date.today().year + _math.ceil(y)}年（{y:.1f}年后）"
+
+    _kc1, _kc2, _kc3 = st.columns(3)
     with _kc1: st.metric('FI 目标资产', f"¥{_fi_target:,.0f}")
-    with _kc2: st.metric('当前总资产',  f"¥{_current_assets:,.0f}")
-    with _kc3: st.metric('完成进度',    f"{_fi_progress*100:.1f}%")
-    with _kc4:
-        if _years == 0:
-            st.metric('预计达标', '已达标 🎉')
-        elif _years is None:
-            st.metric('预计达标', '100年内不达标')
+    with _kc2: st.metric('基金资产',    f"¥{_current_assets:,.0f}")
+    with _kc3:
+        if _show_other:
+            st.metric('含其他资产合计', f"¥{_total_assets:,.0f}",
+                      delta=f"+¥{_other_assets:,.0f} 其他资产")
         else:
-            _target_year = date.today().year + _math.ceil(_years)
-            st.metric('预计达标', f"{_target_year}年（{_years:.1f}年后）")
+            st.metric('完成进度', f"{_fi_progress*100:.1f}%")
 
+    # 进度条
+    st.caption("基金资产进度")
     st.progress(_fi_progress)
+    if _show_other:
+        st.caption(f"含其他资产进度（{_fi_progress_total*100:.1f}%）")
+        st.progress(_fi_progress_total)
+
+    _ya1, _ya2 = st.columns(2)
+    with _ya1: st.metric('预计达标（仅基金）',   _year_str(_years))
+    if _show_other:
+        with _ya2: st.metric('预计达标（含其他）', _year_str(_years_total))
+
     st.caption(
         f"FI目标 = 年支出 ÷ 提款率 = ¥{_fi_cfg['annual_expense_target_cny']:,.0f} ÷ {_fi_cfg['withdrawal_rate']*100:.1f}% = ¥{_fi_target:,.0f}。"
         f" 预期收益率 {_fi_cfg['expected_annual_return']*100:.1f}% 为**实际收益率**（已扣通胀），"
         f"名义收益率请在此基础上加上你预期的长期通胀（参考：M2长期增速约8-10%，CPI约2-3%）。"
     )
 
-    # 敏感性分析
-    _sens = fi_sensitivity(_current_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
+    # 敏感性分析（以当前有效资产为基准）
+    _sens = fi_sensitivity(_total_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
     _sens_rows = []
     for s in _sens:
         _sens_rows.append({
