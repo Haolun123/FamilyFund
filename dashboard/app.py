@@ -2376,6 +2376,7 @@ with tab_market:
                 f"</div>",
                 unsafe_allow_html=True,
             )
+            st.caption("⚠️ 标普长期慢牛，PE 由盈利增长驱动持续抬升，矩阵信号有系统性踏空风险。建议参考而非严格执行。")
         else:
             st.info("标普500: 数据不完整，无法计算")
 
@@ -2550,6 +2551,7 @@ with tab_market:
         "基于 MA200乖离率 × VIX 矩阵。黄金无PE，以MA200乖离率作为估值锚。"
         "黄金定位为对冲/压舱石仓位，顶格=5x，整体倍数低于权益类。"
     )
+    st.warning("⚠️ 2024年起黄金进入结构性重估（去美元化/央行购金驱动），MA200乖离率持续高位，信号可能长期偏空。回测显示此期间固定定投市值约为矩阵策略的4倍。建议结合宏观判断，不宜严格执行减仓信号。", icon=None)
 
     gold_entry = market_data.get('gold')
     gold_bias200 = None
@@ -2814,6 +2816,7 @@ with tab_market:
         for _plan, _sug in _suggestions:
             _mult = _sug['multiplier_str']
             _arrow = _sug['arrow']
+            _ac = _plan.get('asset_class', '')
             if _sug['unit'] == 'gram':
                 _base_str = f"{_plan.get('base_amount_unit', '—')}g"
                 _sug_str  = f"{_sug['suggested_unit']:.0f}g"
@@ -2822,13 +2825,19 @@ with tab_market:
             else:
                 _base_str = f"¥{_plan.get('base_amount_cny', 0):,}"
                 _sug_str  = f"¥{_sug['suggested_cny']:,}"
+            # 标普/黄金加警示标注
+            _signal_str = f"{_mult} {_arrow}"
+            if _ac == 'US_Blend_Fund':
+                _signal_str += ' ⚠️'
+            elif _ac == 'Gold':
+                _signal_str += ' ⚠️'
             _rows.append({
                 '标的':      _plan.get('name', '—'),
-                '类型':      _ASSET_CLASS_LABELS.get(_plan.get('asset_class', ''), _plan.get('asset_class', '—')),
+                '类型':      _ASSET_CLASS_LABELS.get(_ac, _ac or '—'),
                 '平台':      _plan.get('platform', '—'),
                 '频率':      _FREQ_LABELS.get(_plan.get('frequency', 'weekly'), _plan.get('frequency', '—')),
                 '基础金额':  _base_str,
-                '温度计信号': f"{_mult} {_arrow}",
+                '温度计信号': _signal_str,
                 '本周建议':  _sug_str,
             })
             if _sug['suggested_cny']:
@@ -2837,6 +2846,7 @@ with tab_market:
         _dca_df = _pd_dca.DataFrame(_rows)
         st.dataframe(_dca_df, use_container_width=True, hide_index=True)
         st.markdown(f"**本周建议总投入：¥{_total_suggested:,}**")
+        st.caption("⚠️ 标普500（US_Blend_Fund）和黄金（Gold）的矩阵信号仅供参考：标普长期慢牛易系统性踏空；黄金2024年起结构性重估，MA200信号可能持续偏空。建议结合宏观判断自行决策。")
     else:
         st.info("暂无启用的定投计划，点击下方「管理定投计划」添加。")
 
