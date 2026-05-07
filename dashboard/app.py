@@ -172,8 +172,8 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_history, tab_sap, tab_market, tab_backtest, tab_quarterly, tab_tenth = st.tabs(
-    ["Dashboard", "Weekly Update", "History", "SAP Stock", "Market Monitor", "Backtest", "Quarterly Report", "10th Man"]
+tab_dashboard, tab_update, tab_sap, tab_market, tab_backtest, tab_quarterly, tab_planning, tab_tenth = st.tabs(
+    ["Portfolio", "Ledger", "SAP", "Market", "Backtest", "Quarterly", "Planning", "10th Man"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -881,300 +881,6 @@ with tab_dashboard:
         rb_df = pd.DataFrame(table_data)
         st.dataframe(rb_df, use_container_width=True, hide_index=True)
 
-    # ─── Section 7: 人生阶段规划 ───
-    st.divider()
-    st.subheader("人生阶段规划")
-
-    from life_stages_engine import load_life_stages, compute_expense_curve, get_milestone_summary
-
-    _ls_data = load_life_stages(os.path.dirname(csv_path))
-
-    if _ls_data is None:
-        st.info("未找到 life_stages.json，请在 iCloud 数据目录手动创建。")
-    else:
-        _SCENARIO_LABELS = {'pessimistic': '悲观', 'base': '基准', 'optimistic': '乐观'}
-        _SCENARIO_COLORS = {
-            'pessimistic': '#EF5350',
-            'base':        '#42A5F5',
-            'optimistic':  '#66BB6A',
-        }
-        _MS_COLORS = {
-            'early_childhood':  '#FF8A65',
-            'k12_education':    '#FFB300',
-            'higher_education': '#AB47BC',
-            'property':         '#26A69A',
-            'retirement_self':  '#78909C',
-        }
-        _MS_NAMES = {
-            'early_childhood':  '早期养育',
-            'k12_education':    'K12教育',
-            'higher_education': '高等教育',
-            'property':         '置业',
-            'retirement_self':  '退休',
-        }
-
-        # 全局情景切换
-        _ls_scenario = st.radio(
-            '情景', options=['base', 'pessimistic', 'optimistic'],
-            format_func=lambda x: _SCENARIO_LABELS[x],
-            horizontal=True, key='ls_scenario',
-        )
-
-        # 计算三种情景的曲线
-        _curve    = compute_expense_curve(_ls_data, _ls_scenario)
-        _curve_b  = compute_expense_curve(_ls_data, 'base')
-        _curve_p  = compute_expense_curve(_ls_data, 'pessimistic')
-        _curve_o  = compute_expense_curve(_ls_data, 'optimistic')
-
-        # 堆叠柱状图（当前情景，展望40年）
-        _cur_year = date.today().year
-        _years_show = list(range(_cur_year, _cur_year + 41))
-        _ms_ids = [ms['id'] for ms in _ls_data.get('milestones', []) if ms.get('enabled', True)]
-
-        _fig_ls = go.Figure()
-        for _ms_id in _ms_ids:
-            _vals = [_curve.get(y, {}).get('components', {}).get(_ms_id, 0) / 10000 for y in _years_show]
-            _fig_ls.add_trace(go.Bar(
-                x=_years_show, y=_vals,
-                name=_MS_NAMES.get(_ms_id, _ms_id),
-                marker_color=_MS_COLORS.get(_ms_id, '#888'),
-            ))
-        _fig_ls.update_layout(
-            barmode='stack', height=380,
-            yaxis_title='年支出（万CNY）',
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-            margin=dict(t=40, b=40),
-            hovermode='x unified',
-        )
-        st.plotly_chart(_fig_ls, use_container_width=True)
-
-        # 各里程碑配置一览
-        with st.expander("各里程碑配置", expanded=False):
-            for ms in _ls_data.get('milestones', []):
-                _mc1, _mc2, _mc3 = st.columns([2, 3, 2])
-                with _mc1:
-                    st.markdown(f"**{ms['name']}**")
-                with _mc2:
-                    st.caption(get_milestone_summary(_ls_data, _ls_scenario, ms['id']))
-                with _mc3:
-                    _sc_sel = ms.get('selected', 'base')
-                    st.caption(f"当前档位：{_SCENARIO_LABELS.get(_sc_sel, _sc_sel)}")
-
-        # 对 FI 的影响（三种情景对比）
-        st.markdown("**对财务独立的影响**")
-        from fi_engine import load_fi_config, compute_fi_target, compute_years_to_fi
-        import math as _math_ls
-        _fi_cfg_ls  = load_fi_config(os.path.dirname(csv_path))
-        _cur_assets = float(fund_nav_df.iloc[-1]['Total_Value']) if not fund_nav_df.empty else 0.0
-        _monthly_sav_ls = _fi_cfg_ls['monthly_income_cny'] * _fi_cfg_ls['monthly_savings_target_pct']
-
-        _fi_rows = []
-        for _sc, _sc_label in _SCENARIO_LABELS.items():
-            _sc_curve = {'pessimistic': _curve_p, 'base': _curve_b, 'optimistic': _curve_o}[_sc]
-            # 用当前年支出作为 FI 目标支出（含里程碑）
-            _this_year_exp = _sc_curve.get(_cur_year, {}).get('total', 0)
-            if _this_year_exp <= 0:
-                _this_year_exp = _fi_cfg_ls['annual_expense_target_cny']
-            _fi_tgt = compute_fi_target(_this_year_exp, _fi_cfg_ls['withdrawal_rate'])
-            _yrs    = compute_years_to_fi(_cur_assets, _fi_tgt, _monthly_sav_ls, _fi_cfg_ls['expected_annual_return'])
-            if _yrs == 0:
-                _yr_str = '已达标'
-            elif _yrs is None:
-                _yr_str = '100年内不达标'
-            else:
-                _yr_str = f"{_cur_year + _math_ls.ceil(_yrs)}年（{_yrs:.1f}年后）"
-            _fi_rows.append({
-                '情景':         _sc_label,
-                '当年总支出':   f"¥{_this_year_exp/10000:.1f}万",
-                'FI目标资产':   f"¥{_fi_tgt/10000:.0f}万",
-                '预计达标':     _yr_str,
-            })
-        st.dataframe(pd.DataFrame(_fi_rows), use_container_width=True, hide_index=True)
-        st.caption("FI目标基于当年（含里程碑）总支出计算，随情景变化。里程碑金额已含通胀调整。")
-
-    # ─── Section 8: 财务独立测算 + 储蓄率 ───
-    st.divider()
-    st.subheader("财务独立 & 储蓄率")
-
-    from fi_engine import (
-        load_fi_config, save_fi_config,
-        compute_fi_target, compute_years_to_fi, fi_sensitivity,
-        compute_monthly_savings, compute_savings_rate,
-    )
-    import math as _math
-
-    _fi_cfg = load_fi_config(_data_dir if '_data_dir' in dir() else os.path.dirname(csv_path))
-    _fi_data_dir = os.path.dirname(csv_path)
-
-    # ── 配置区 ──
-    with st.expander("⚙ 配置参数", expanded=False):
-        _fc1, _fc2, _fc3 = st.columns(3)
-        with _fc1:
-            _fi_income   = st.number_input(
-                '税后月收入（CNY）',
-                value=int(_fi_cfg['monthly_income_cny']), min_value=0, step=1000, key='fi_income',
-                help="广义总收入年化平摊：(固定工资×12 + 年终奖 + RSU年度归属市值) ÷ 12。用于计算实际储蓄率分母。",
-            )
-            _fi_expense  = st.number_input('年度生活支出目标（CNY）', value=int(_fi_cfg['annual_expense_target_cny']), min_value=0, step=10000, key='fi_expense')
-        with _fc2:
-            _fi_return   = st.number_input(
-                '预期年化收益率（%）',
-                value=float(_fi_cfg['expected_annual_return']*100),
-                min_value=0.0, max_value=20.0, step=0.5, key='fi_return',
-                help=(
-                    "建议填**实际收益率**（名义收益率 - 你预期的长期通胀），而非名义收益率。\n\n"
-                    "示例：若预期组合名义年化 7%，长期通胀 3%，则填 4%。\n\n"
-                    "参考：中国 M2 长期增速约 8-10%，CPI 约 2-3%，资产收益率需高于 M2 增速才能跑赢货币稀释。"
-                ),
-            )
-            _fi_withdraw = st.number_input(
-                '安全提款率（%）',
-                value=float(_fi_cfg['withdrawal_rate']*100),
-                min_value=1.0, max_value=10.0, step=0.5, key='fi_withdraw',
-                help=(
-                    "4% 法则来自 Trinity Study（1998），基于美国股债60/40组合、30年退休期。\n\n"
-                    "**对中国投资者的调整建议：**\n"
-                    "- 退休期 >30 年（如40岁退休）→ 用 3% 或 3.5%\n"
-                    "- M2 超发 / 人民币长期贬值风险 → 偏保守用 3%\n"
-                    "- 有房租、养老金等其他收入来源 → 可适当放宽\n\n"
-                    "实质含义：3% → 需33倍年支出；3.5% → 28倍；4% → 25倍。"
-                ),
-            )
-        with _fc3:
-            _fi_sav_tgt = st.number_input(
-                '目标储蓄率（%）',
-                value=float(_fi_cfg['monthly_savings_target_pct']*100),
-                min_value=0.0, max_value=100.0, step=5.0, key='fi_sav_tgt',
-                help="每月储蓄目标占月收入的比例。用于储蓄率柱状图的目标虚线，同时自动推算 FI 测算的月供（月收入 × 目标储蓄率）。",
-            )
-            # 自动计算，展示给用户确认
-            _fi_monthly_sav_auto = int(_fi_income * _fi_sav_tgt / 100)
-            st.metric('月储蓄额（自动）', f"¥{_fi_monthly_sav_auto:,}", help="= 税后月收入 × 目标储蓄率，用于 FI 测算")
-
-        if st.button('💾 保存配置', key='fi_save'):
-            save_fi_config(_fi_data_dir, {
-                'monthly_income_cny':         _fi_income,
-                'monthly_savings_target_pct': _fi_sav_tgt / 100,
-                'annual_expense_target_cny':  _fi_expense,
-                'withdrawal_rate':            _fi_withdraw / 100,
-                'expected_annual_return':     _fi_return / 100,
-            })
-            st.success('已保存')
-            st.rerun()
-
-    # ── 财务独立测算 ──
-    _fi_target      = compute_fi_target(_fi_cfg['annual_expense_target_cny'], _fi_cfg['withdrawal_rate'])
-    _current_assets = float(fund_nav_df.iloc[-1]['Total_Value']) if not fund_nav_df.empty else 0.0
-    _monthly_sav_fi = _fi_cfg['monthly_income_cny'] * _fi_cfg['monthly_savings_target_pct']
-
-    # 其他资产 toggle
-    _tog1, _tog2 = st.columns([1, 3])
-    with _tog1:
-        _show_other = st.toggle('含其他资产', value=False, key='fi_show_other',
-                                help="叠加未纳入基金的资产（房产、公积金等）查看完整 FI 进度")
-    with _tog2:
-        _other_assets = st.number_input(
-            '其他资产估值（CNY）', value=int(_fi_cfg.get('other_assets_cny', 0)),
-            min_value=0, step=100000, key='fi_other_assets',
-            label_visibility='visible',
-        ) if _show_other else 0
-
-    _total_assets   = _current_assets + (_other_assets if _show_other else 0)
-    _fi_progress    = min(_current_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
-    _fi_progress_total = min(_total_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
-    _years          = compute_years_to_fi(_current_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
-    _years_total    = compute_years_to_fi(_total_assets,   _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
-
-    def _year_str(y):
-        if y == 0:   return '已达标 🎉'
-        if y is None: return '100年内不达标'
-        return f"{date.today().year + _math.ceil(y)}年（{y:.1f}年后）"
-
-    _kc1, _kc2, _kc3 = st.columns(3)
-    with _kc1: st.metric('FI 目标资产', f"¥{_fi_target:,.0f}")
-    with _kc2: st.metric('基金资产',    f"¥{_current_assets:,.0f}")
-    with _kc3:
-        if _show_other:
-            st.metric('含其他资产合计', f"¥{_total_assets:,.0f}",
-                      delta=f"+¥{_other_assets:,.0f} 其他资产")
-        else:
-            st.metric('完成进度', f"{_fi_progress*100:.1f}%")
-
-    # 进度条
-    st.caption("基金资产进度")
-    st.progress(_fi_progress)
-    if _show_other:
-        st.caption(f"含其他资产进度（{_fi_progress_total*100:.1f}%）")
-        st.progress(_fi_progress_total)
-
-    _ya1, _ya2 = st.columns(2)
-    with _ya1: st.metric('预计达标（仅基金）',   _year_str(_years))
-    if _show_other:
-        with _ya2: st.metric('预计达标（含其他）', _year_str(_years_total))
-
-    st.caption(
-        f"FI目标 = 年支出 ÷ 提款率 = ¥{_fi_cfg['annual_expense_target_cny']:,.0f} ÷ {_fi_cfg['withdrawal_rate']*100:.1f}% = ¥{_fi_target:,.0f}。"
-        f" 预期收益率 {_fi_cfg['expected_annual_return']*100:.1f}% 为**实际收益率**（已扣通胀），"
-        f"名义收益率请在此基础上加上你预期的长期通胀（参考：M2长期增速约8-10%，CPI约2-3%）。"
-    )
-
-    # 敏感性分析（以当前有效资产为基准）
-    _sens = fi_sensitivity(_total_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
-    _sens_rows = []
-    for s in _sens:
-        _sens_rows.append({
-            '情景':     s['label'],
-            '年化收益': f"{s['annual_return']*100:.1f}%",
-            '月储蓄':   f"¥{s['monthly_savings']:,.0f}",
-            '所需年数': f"{s['years']:.1f}年" if s['years'] is not None else '100年+',
-            '达标年份': str(s['target_year']) if s['target_year'] else '—',
-        })
-    st.dataframe(pd.DataFrame(_sens_rows), use_container_width=True, hide_index=True)
-
-    # ── 储蓄率追踪 ──
-    st.divider()
-    st.subheader("储蓄率追踪")
-
-    _monthly_savings_map = compute_monthly_savings(raw_df)
-    _savings_rate_map    = compute_savings_rate(_monthly_savings_map, _fi_cfg['monthly_income_cny'])
-    _sav_target          = _fi_cfg['monthly_savings_target_pct']
-
-    if _savings_rate_map:
-        _months = sorted(_savings_rate_map.keys())[-12:]  # 最近12个月
-        _rates  = [_savings_rate_map[m] * 100 for m in _months]
-        _amounts = [_monthly_savings_map.get(m, 0) for m in _months]
-        _avg_rate = sum(_rates) / len(_rates) if _rates else 0
-
-        _sc1, _sc2, _sc3 = st.columns(3)
-        with _sc1: st.metric('滚动平均储蓄率', f"{_avg_rate:.1f}%")
-        with _sc2: st.metric('目标储蓄率',     f"{_sav_target*100:.0f}%")
-        with _sc3: st.metric('达标月数',       f"{sum(1 for r in _rates if r >= _sav_target*100)}/{len(_rates)} 个月")
-
-        # 柱状图
-        _bar_colors = ['#2e7d32' if r >= _sav_target * 100 else '#d32f2f' for r in _rates]
-        _fig_sav = go.Figure()
-        _fig_sav.add_trace(go.Bar(
-            x=_months, y=_rates,
-            marker_color=_bar_colors,
-            name='储蓄率',
-            text=[f'¥{a:,.0f}' for a in _amounts],
-            textposition='outside',
-        ))
-        _fig_sav.add_hline(
-            y=_sav_target * 100,
-            line_dash='dash', line_color='#FFA726',
-            annotation_text=f'目标 {_sav_target*100:.0f}%',
-        )
-        _fig_sav.update_layout(
-            height=320, yaxis_title='储蓄率 (%)',
-            yaxis=dict(range=[0, max(max(_rates) * 1.2, _sav_target * 120)]),
-            margin=dict(t=30, b=40),
-        )
-        st.plotly_chart(_fig_sav, use_container_width=True)
-        st.caption("储蓄率 = Cash 行正 NCF / 税后月收入。绿色 = 达标，红色 = 未达标。ESPP/RSU 不计入。")
-    else:
-        st.info("暂无 Cash 入金记录，储蓄率将在首次外部入金后自动计算。")
-
 # ═══════════════════════════════════════════════════════════
 # Tab 2: Weekly Update
 # ═══════════════════════════════════════════════════════════
@@ -1789,11 +1495,9 @@ with tab_update:
             del st.session_state['update_template']
             st.rerun()
 
-# ═══════════════════════════════════════════════════════════
-# Tab 3: History Management
-# ═══════════════════════════════════════════════════════════
 
-with tab_history:
+    st.divider()
+    st.header("历史快照管理")
 
     st.header("历史快照管理")
 
@@ -1873,8 +1577,7 @@ with tab_history:
                         del st.session_state['update_template']
                     st.rerun()
 
-# ═══════════════════════════════════════════════════════════
-# Tab 4: SAP Stock
+# Tab 3: SAP
 # ═══════════════════════════════════════════════════════════
 
 with tab_sap:
@@ -2238,7 +1941,7 @@ with tab_sap:
                     st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-# Tab 5: 市场温度计
+# Tab 4: Market
 # ═══════════════════════════════════════════════════════════
 
 with tab_market:
@@ -3112,7 +2815,7 @@ with tab_market:
                     st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-# Tab 7: 回测
+# Tab 5: Backtest
 # ═══════════════════════════════════════════════════════════
 
 with tab_backtest:
@@ -3360,7 +3063,7 @@ with tab_backtest:
         )
 
 # ═══════════════════════════════════════════════════════════
-# Tab 7: Quarterly Report
+# Tab 6: Quarterly
 # ═══════════════════════════════════════════════════════════
 
 with tab_quarterly:
@@ -3699,7 +3402,310 @@ with tab_quarterly:
                 st.error(f"PDF 生成失败: {e}")
 
 # ═══════════════════════════════════════════════════════════
-# Tab 8: 第十人系统
+# Tab 7: Planning
+# ═══════════════════════════════════════════════════════════
+
+with tab_planning:
+    st.header("Planning")
+    st.caption("人生阶段支出规划 · 财务独立测算 · 储蓄率追踪")
+
+    # ─── Section 7: 人生阶段规划 ───
+    st.divider()
+    st.subheader("人生阶段规划")
+
+    from life_stages_engine import load_life_stages, compute_expense_curve, get_milestone_summary
+
+    _ls_data = load_life_stages(os.path.dirname(csv_path))
+
+    if _ls_data is None:
+        st.info("未找到 life_stages.json，请在 iCloud 数据目录手动创建。")
+    else:
+        _SCENARIO_LABELS = {'pessimistic': '悲观', 'base': '基准', 'optimistic': '乐观'}
+        _SCENARIO_COLORS = {
+            'pessimistic': '#EF5350',
+            'base':        '#42A5F5',
+            'optimistic':  '#66BB6A',
+        }
+        _MS_COLORS = {
+            'early_childhood':  '#FF8A65',
+            'k12_education':    '#FFB300',
+            'higher_education': '#AB47BC',
+            'property':         '#26A69A',
+            'retirement_self':  '#78909C',
+        }
+        _MS_NAMES = {
+            'early_childhood':  '早期养育',
+            'k12_education':    'K12教育',
+            'higher_education': '高等教育',
+            'property':         '置业',
+            'retirement_self':  '退休',
+        }
+
+        # 全局情景切换
+        _ls_scenario = st.radio(
+            '情景', options=['base', 'pessimistic', 'optimistic'],
+            format_func=lambda x: _SCENARIO_LABELS[x],
+            horizontal=True, key='ls_scenario',
+        )
+
+        # 计算三种情景的曲线
+        _curve    = compute_expense_curve(_ls_data, _ls_scenario)
+        _curve_b  = compute_expense_curve(_ls_data, 'base')
+        _curve_p  = compute_expense_curve(_ls_data, 'pessimistic')
+        _curve_o  = compute_expense_curve(_ls_data, 'optimistic')
+
+        # 堆叠柱状图（当前情景，展望40年）
+        _cur_year = date.today().year
+        _years_show = list(range(_cur_year, _cur_year + 41))
+        _ms_ids = [ms['id'] for ms in _ls_data.get('milestones', []) if ms.get('enabled', True)]
+
+        _fig_ls = go.Figure()
+        for _ms_id in _ms_ids:
+            _vals = [_curve.get(y, {}).get('components', {}).get(_ms_id, 0) / 10000 for y in _years_show]
+            _fig_ls.add_trace(go.Bar(
+                x=_years_show, y=_vals,
+                name=_MS_NAMES.get(_ms_id, _ms_id),
+                marker_color=_MS_COLORS.get(_ms_id, '#888'),
+            ))
+        _fig_ls.update_layout(
+            barmode='stack', height=380,
+            yaxis_title='年支出（万CNY）',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+            margin=dict(t=40, b=40),
+            hovermode='x unified',
+        )
+        st.plotly_chart(_fig_ls, use_container_width=True)
+
+        # 各里程碑配置一览
+        with st.expander("各里程碑配置", expanded=False):
+            for ms in _ls_data.get('milestones', []):
+                _mc1, _mc2, _mc3 = st.columns([2, 3, 2])
+                with _mc1:
+                    st.markdown(f"**{ms['name']}**")
+                with _mc2:
+                    st.caption(get_milestone_summary(_ls_data, _ls_scenario, ms['id']))
+                with _mc3:
+                    _sc_sel = ms.get('selected', 'base')
+                    st.caption(f"当前档位：{_SCENARIO_LABELS.get(_sc_sel, _sc_sel)}")
+
+        # 对 FI 的影响（三种情景对比）
+        st.markdown("**对财务独立的影响**")
+        from fi_engine import load_fi_config, compute_fi_target, compute_years_to_fi
+        import math as _math_ls
+        _fi_cfg_ls  = load_fi_config(os.path.dirname(csv_path))
+        _cur_assets = float(fund_nav_df.iloc[-1]['Total_Value']) if not fund_nav_df.empty else 0.0
+        _monthly_sav_ls = _fi_cfg_ls['monthly_income_cny'] * _fi_cfg_ls['monthly_savings_target_pct']
+
+        _fi_rows = []
+        for _sc, _sc_label in _SCENARIO_LABELS.items():
+            _sc_curve = {'pessimistic': _curve_p, 'base': _curve_b, 'optimistic': _curve_o}[_sc]
+            # 用当前年支出作为 FI 目标支出（含里程碑）
+            _this_year_exp = _sc_curve.get(_cur_year, {}).get('total', 0)
+            if _this_year_exp <= 0:
+                _this_year_exp = _fi_cfg_ls['annual_expense_target_cny']
+            _fi_tgt = compute_fi_target(_this_year_exp, _fi_cfg_ls['withdrawal_rate'])
+            _yrs    = compute_years_to_fi(_cur_assets, _fi_tgt, _monthly_sav_ls, _fi_cfg_ls['expected_annual_return'])
+            if _yrs == 0:
+                _yr_str = '已达标'
+            elif _yrs is None:
+                _yr_str = '100年内不达标'
+            else:
+                _yr_str = f"{_cur_year + _math_ls.ceil(_yrs)}年（{_yrs:.1f}年后）"
+            _fi_rows.append({
+                '情景':         _sc_label,
+                '当年总支出':   f"¥{_this_year_exp/10000:.1f}万",
+                'FI目标资产':   f"¥{_fi_tgt/10000:.0f}万",
+                '预计达标':     _yr_str,
+            })
+        st.dataframe(pd.DataFrame(_fi_rows), use_container_width=True, hide_index=True)
+        st.caption("FI目标基于当年（含里程碑）总支出计算，随情景变化。里程碑金额已含通胀调整。")
+
+    # ─── Section 8: 财务独立测算 + 储蓄率 ───
+    st.divider()
+    st.subheader("财务独立 & 储蓄率")
+
+    from fi_engine import (
+        load_fi_config, save_fi_config,
+        compute_fi_target, compute_years_to_fi, fi_sensitivity,
+        compute_monthly_savings, compute_savings_rate,
+    )
+    import math as _math
+
+    _fi_cfg = load_fi_config(_data_dir if '_data_dir' in dir() else os.path.dirname(csv_path))
+    _fi_data_dir = os.path.dirname(csv_path)
+
+    # ── 配置区 ──
+    with st.expander("⚙ 配置参数", expanded=False):
+        _fc1, _fc2, _fc3 = st.columns(3)
+        with _fc1:
+            _fi_income   = st.number_input(
+                '税后月收入（CNY）',
+                value=int(_fi_cfg['monthly_income_cny']), min_value=0, step=1000, key='fi_income',
+                help="广义总收入年化平摊：(固定工资×12 + 年终奖 + RSU年度归属市值) ÷ 12。用于计算实际储蓄率分母。",
+            )
+            _fi_expense  = st.number_input('年度生活支出目标（CNY）', value=int(_fi_cfg['annual_expense_target_cny']), min_value=0, step=10000, key='fi_expense')
+        with _fc2:
+            _fi_return   = st.number_input(
+                '预期年化收益率（%）',
+                value=float(_fi_cfg['expected_annual_return']*100),
+                min_value=0.0, max_value=20.0, step=0.5, key='fi_return',
+                help=(
+                    "建议填**实际收益率**（名义收益率 - 你预期的长期通胀），而非名义收益率。\n\n"
+                    "示例：若预期组合名义年化 7%，长期通胀 3%，则填 4%。\n\n"
+                    "参考：中国 M2 长期增速约 8-10%，CPI 约 2-3%，资产收益率需高于 M2 增速才能跑赢货币稀释。"
+                ),
+            )
+            _fi_withdraw = st.number_input(
+                '安全提款率（%）',
+                value=float(_fi_cfg['withdrawal_rate']*100),
+                min_value=1.0, max_value=10.0, step=0.5, key='fi_withdraw',
+                help=(
+                    "4% 法则来自 Trinity Study（1998），基于美国股债60/40组合、30年退休期。\n\n"
+                    "**对中国投资者的调整建议：**\n"
+                    "- 退休期 >30 年（如40岁退休）→ 用 3% 或 3.5%\n"
+                    "- M2 超发 / 人民币长期贬值风险 → 偏保守用 3%\n"
+                    "- 有房租、养老金等其他收入来源 → 可适当放宽\n\n"
+                    "实质含义：3% → 需33倍年支出；3.5% → 28倍；4% → 25倍。"
+                ),
+            )
+        with _fc3:
+            _fi_sav_tgt = st.number_input(
+                '目标储蓄率（%）',
+                value=float(_fi_cfg['monthly_savings_target_pct']*100),
+                min_value=0.0, max_value=100.0, step=5.0, key='fi_sav_tgt',
+                help="每月储蓄目标占月收入的比例。用于储蓄率柱状图的目标虚线，同时自动推算 FI 测算的月供（月收入 × 目标储蓄率）。",
+            )
+            # 自动计算，展示给用户确认
+            _fi_monthly_sav_auto = int(_fi_income * _fi_sav_tgt / 100)
+            st.metric('月储蓄额（自动）', f"¥{_fi_monthly_sav_auto:,}", help="= 税后月收入 × 目标储蓄率，用于 FI 测算")
+
+        if st.button('💾 保存配置', key='fi_save'):
+            save_fi_config(_fi_data_dir, {
+                'monthly_income_cny':         _fi_income,
+                'monthly_savings_target_pct': _fi_sav_tgt / 100,
+                'annual_expense_target_cny':  _fi_expense,
+                'withdrawal_rate':            _fi_withdraw / 100,
+                'expected_annual_return':     _fi_return / 100,
+            })
+            st.success('已保存')
+            st.rerun()
+
+    # ── 财务独立测算 ──
+    _fi_target      = compute_fi_target(_fi_cfg['annual_expense_target_cny'], _fi_cfg['withdrawal_rate'])
+    _current_assets = float(fund_nav_df.iloc[-1]['Total_Value']) if not fund_nav_df.empty else 0.0
+    _monthly_sav_fi = _fi_cfg['monthly_income_cny'] * _fi_cfg['monthly_savings_target_pct']
+
+    # 其他资产 toggle
+    _tog1, _tog2 = st.columns([1, 3])
+    with _tog1:
+        _show_other = st.toggle('含其他资产', value=False, key='fi_show_other',
+                                help="叠加未纳入基金的资产（房产、公积金等）查看完整 FI 进度")
+    with _tog2:
+        _other_assets = st.number_input(
+            '其他资产估值（CNY）', value=int(_fi_cfg.get('other_assets_cny', 0)),
+            min_value=0, step=100000, key='fi_other_assets',
+            label_visibility='visible',
+        ) if _show_other else 0
+
+    _total_assets   = _current_assets + (_other_assets if _show_other else 0)
+    _fi_progress    = min(_current_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
+    _fi_progress_total = min(_total_assets / _fi_target, 1.0) if _fi_target > 0 else 0.0
+    _years          = compute_years_to_fi(_current_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
+    _years_total    = compute_years_to_fi(_total_assets,   _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
+
+    def _year_str(y):
+        if y == 0:   return '已达标 🎉'
+        if y is None: return '100年内不达标'
+        return f"{date.today().year + _math.ceil(y)}年（{y:.1f}年后）"
+
+    _kc1, _kc2, _kc3 = st.columns(3)
+    with _kc1: st.metric('FI 目标资产', f"¥{_fi_target:,.0f}")
+    with _kc2: st.metric('基金资产',    f"¥{_current_assets:,.0f}")
+    with _kc3:
+        if _show_other:
+            st.metric('含其他资产合计', f"¥{_total_assets:,.0f}",
+                      delta=f"+¥{_other_assets:,.0f} 其他资产")
+        else:
+            st.metric('完成进度', f"{_fi_progress*100:.1f}%")
+
+    # 进度条
+    st.caption("基金资产进度")
+    st.progress(_fi_progress)
+    if _show_other:
+        st.caption(f"含其他资产进度（{_fi_progress_total*100:.1f}%）")
+        st.progress(_fi_progress_total)
+
+    _ya1, _ya2 = st.columns(2)
+    with _ya1: st.metric('预计达标（仅基金）',   _year_str(_years))
+    if _show_other:
+        with _ya2: st.metric('预计达标（含其他）', _year_str(_years_total))
+
+    st.caption(
+        f"FI目标 = 年支出 ÷ 提款率 = ¥{_fi_cfg['annual_expense_target_cny']:,.0f} ÷ {_fi_cfg['withdrawal_rate']*100:.1f}% = ¥{_fi_target:,.0f}。"
+        f" 预期收益率 {_fi_cfg['expected_annual_return']*100:.1f}% 为**实际收益率**（已扣通胀），"
+        f"名义收益率请在此基础上加上你预期的长期通胀（参考：M2长期增速约8-10%，CPI约2-3%）。"
+    )
+
+    # 敏感性分析（以当前有效资产为基准）
+    _sens = fi_sensitivity(_total_assets, _fi_target, _monthly_sav_fi, _fi_cfg['expected_annual_return'])
+    _sens_rows = []
+    for s in _sens:
+        _sens_rows.append({
+            '情景':     s['label'],
+            '年化收益': f"{s['annual_return']*100:.1f}%",
+            '月储蓄':   f"¥{s['monthly_savings']:,.0f}",
+            '所需年数': f"{s['years']:.1f}年" if s['years'] is not None else '100年+',
+            '达标年份': str(s['target_year']) if s['target_year'] else '—',
+        })
+    st.dataframe(pd.DataFrame(_sens_rows), use_container_width=True, hide_index=True)
+
+    # ── 储蓄率追踪 ──
+    st.divider()
+    st.subheader("储蓄率追踪")
+
+    _monthly_savings_map = compute_monthly_savings(raw_df)
+    _savings_rate_map    = compute_savings_rate(_monthly_savings_map, _fi_cfg['monthly_income_cny'])
+    _sav_target          = _fi_cfg['monthly_savings_target_pct']
+
+    if _savings_rate_map:
+        _months = sorted(_savings_rate_map.keys())[-12:]  # 最近12个月
+        _rates  = [_savings_rate_map[m] * 100 for m in _months]
+        _amounts = [_monthly_savings_map.get(m, 0) for m in _months]
+        _avg_rate = sum(_rates) / len(_rates) if _rates else 0
+
+        _sc1, _sc2, _sc3 = st.columns(3)
+        with _sc1: st.metric('滚动平均储蓄率', f"{_avg_rate:.1f}%")
+        with _sc2: st.metric('目标储蓄率',     f"{_sav_target*100:.0f}%")
+        with _sc3: st.metric('达标月数',       f"{sum(1 for r in _rates if r >= _sav_target*100)}/{len(_rates)} 个月")
+
+        # 柱状图
+        _bar_colors = ['#2e7d32' if r >= _sav_target * 100 else '#d32f2f' for r in _rates]
+        _fig_sav = go.Figure()
+        _fig_sav.add_trace(go.Bar(
+            x=_months, y=_rates,
+            marker_color=_bar_colors,
+            name='储蓄率',
+            text=[f'¥{a:,.0f}' for a in _amounts],
+            textposition='outside',
+        ))
+        _fig_sav.add_hline(
+            y=_sav_target * 100,
+            line_dash='dash', line_color='#FFA726',
+            annotation_text=f'目标 {_sav_target*100:.0f}%',
+        )
+        _fig_sav.update_layout(
+            height=320, yaxis_title='储蓄率 (%)',
+            yaxis=dict(range=[0, max(max(_rates) * 1.2, _sav_target * 120)]),
+            margin=dict(t=30, b=40),
+        )
+        st.plotly_chart(_fig_sav, use_container_width=True)
+        st.caption("储蓄率 = Cash 行正 NCF / 税后月收入。绿色 = 达标，红色 = 未达标。ESPP/RSU 不计入。")
+    else:
+        st.info("暂无 Cash 入金记录，储蓄率将在首次外部入金后自动计算。")
+
+
+# ═══════════════════════════════════════════════════════════
+# Tab 8: 10th Man
 # ═══════════════════════════════════════════════════════════
 
 with tab_tenth:
