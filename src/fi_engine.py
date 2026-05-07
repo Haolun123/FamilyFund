@@ -144,14 +144,14 @@ def compute_monthly_savings(raw_df) -> dict:
 
     cash_df = raw_df[
         (raw_df['Asset_Class'] == 'Cash') &
-        (raw_df['NCF'] > 0)
+        (raw_df['Net_Cash_Flow'] > 0)
     ].copy()
 
     if cash_df.empty:
         return {}
 
     cash_df['month'] = pd.to_datetime(cash_df['Date']).dt.strftime('%Y-%m')
-    monthly = cash_df.groupby('month')['NCF'].sum()
+    monthly = cash_df.groupby('month')['Net_Cash_Flow'].sum()
     return {k: round(float(v), 2) for k, v in monthly.items()}
 
 
