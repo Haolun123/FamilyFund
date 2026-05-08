@@ -2481,9 +2481,13 @@ with tab_market:
                     with r2c4: st.metric('营收增长 YoY', _fmt(f.get('revenueGrowth'), '+%'))
 
                     # PE 历史分位
-                    from fundamentals import get_pe_percentile
+                    from fundamentals import get_pe_percentile, get_pe_percentile_from_snapshot
                     _pe_val = f.get('trailingPE')
-                    _pe_pct = get_pe_percentile(code, _pe_val)
+                    # A股/港股 用 akshare 实时拉取；美股/ADR 用 EC2 快照
+                    if any(yf_sym.endswith(s) for s in ['.SS', '.SZ', '.HK']):
+                        _pe_pct = get_pe_percentile(code, _pe_val)
+                    else:
+                        _pe_pct = get_pe_percentile_from_snapshot(_data_dir, yf_sym, _pe_val)
                     if _pe_pct:
                         _pct = _pe_pct['percentile']
                         _pct_color = '#d32f2f' if _pct >= 80 else ('#2e7d32' if _pct <= 20 else '#888')

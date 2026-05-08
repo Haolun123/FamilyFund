@@ -132,7 +132,86 @@ def remove_yf_symbol(data_dir: str, code: str):
 _PE_CACHE_KEY = '_pe_history'
 
 
-def get_pe_percentile(code: str, current_pe: float | None) -> dict | None:
+def append_pe_snapshot(data_dir: str, yf_symbols: dict):
+    """拉取各 YF Symbol 的当日 PE，追加到 pe_history.json（幂等）。
+
+    只处理美股/ADR（非 .SS/.SZ/.HK 结尾），A股/港股 用 akshare 实时拉取。
+    pe_history.json 结构：{"SAP": [{"date": "2026-05-08", "pe": 23.1}, ...]}
+    """
+    import json
+    import yfinance as yf
+    from datetime import date as _date
+
+    p = os.path.join(data_dir, 'pe_history.json')
+    history = {}
+    if os.path.exists(p):
+        with open(p, encoding='utf-8') as f:
+            history = json.load(f)
+
+    today = _date.today().isoformat()
+    dirty = False
+
+    for code, symbol in yf_symbols.items():
+        if code.startswith('_'):
+            continue
+        # 只处理美股/ADR（不含 A股/港股 后缀）
+        if any(symbol.endswith(s) for s in ['.SS', '.SZ', '.HK']):
+            continue
+
+        # 幂等：今天已有数据则跳过
+        existing = history.get(symbol, [])
+        if existing and existing[-1].get('date') == today:
+            continue
+
+        try:
+            info = yf.Ticker(symbol).info
+            pe = info.get('trailingPE')
+            if pe and float(pe) > 0:
+                history.setdefault(symbol, []).append({
+                    'date': today,
+                    'pe':   round(float(pe), 2),
+                })
+                dirty = True
+        except Exception:
+            pass
+
+    if dirty:
+        tmp = p + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, p)
+
+
+def get_pe_percentile_from_snapshot(data_dir: str, yf_symbol: str, current_pe: float | None) -> dict | None:
+    """从 pe_history.json 快照计算历史分位（用于美股/ADR）。"""
+    import json
+
+    if current_pe is None:
+        return None
+
+    p = os.path.join(data_dir, 'pe_history.json')
+    if not os.path.exists(p):
+        return None
+
+    with open(p, encoding='utf-8') as f:
+        history = json.load(f)
+
+    records = history.get(yf_symbol, [])
+    if len(records) < 10:
+        return None
+
+    values = [r['pe'] for r in records if r.get('pe')]
+    if not values:
+        return None
+
+    pct = sum(1 for v in values if v <= current_pe) / len(values) * 100
+    return {
+        'percentile': round(pct, 1),
+        'pe_min':     round(min(values), 2),
+        'pe_max':     round(max(values), 2),
+        'pe_median':  round(sorted(values)[len(values) // 2], 2),
+        'days':       len(values),
+    }
     """从百度估值接口拉取个股历史 PE，计算当前分位数。
 
     支持 A股（6位数字）和港股（5位数字，如 00700）。

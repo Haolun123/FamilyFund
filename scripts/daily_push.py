@@ -22,6 +22,7 @@ logging.basicConfig(
 
 from market_monitor import get_market_data
 from notifier import send_market_summary, _is_trading_day, _send_webhook
+from fundamentals import load_yf_symbols, append_pe_snapshot
 
 import argparse
 from datetime import date
@@ -42,6 +43,17 @@ def main():
 
     logging.info("拉取市场数据 (force_refresh=True)...")
     market_data = get_market_data(force_refresh=True)
+
+    # PE 快照（美股/ADR，存 EC2 本地，积累历史分位数据）
+    _data_dir = os.environ.get('FAMILYFUND_DATA', os.path.expanduser('~/data'))
+    try:
+        yf_symbols = load_yf_symbols(_data_dir)
+        # 过滤掉 _cache 等内部 key
+        stock_symbols = {k: v for k, v in yf_symbols.items() if not k.startswith('_')}
+        append_pe_snapshot(_data_dir, stock_symbols)
+        logging.info("PE 快照已更新")
+    except Exception as e:
+        logging.warning(f"PE 快照更新失败（不影响推送）: {e}")
 
     logging.info("发送推送...")
     ok = send_market_summary(market_data)
