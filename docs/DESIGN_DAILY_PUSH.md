@@ -108,6 +108,8 @@ WXWORK_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxx
 
 市场温度计只拉公开市场数据（akshare/yfinance），与个人持仓数据完全解耦，无需设置 `FAMILYFUND_DATA`。`market_cache.json` 会自动写入项目 `data/` 目录作为日间缓存。
 
+**PE 历史快照**（2026-05-08 新增）：`daily_push.py` 同时会将美股/ADR 标的的当日 `trailingPE` 追加到 `~/data/pe_history_us.json`，用于积累历史 PE 分位数据。需要提前创建 `~/data/` 目录（`mkdir -p ~/data`）。
+
 ---
 
 ## 四、EC2 部署方案
@@ -135,10 +137,14 @@ WXWORK_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxx
 │   └── ...
 ├── familyfund-venv/     # Python 虚拟环境
 ├── familyfund.env       # Webhook URL（不在 git 中）
-├── data/                # market_cache.json 缓存目录
+├── data/                # 缓存目录
+│   ├── market_cache.json       # 市场数据日间缓存
+│   └── pe_history_us.json      # 美股/ADR 历史PE快照（每日追加）
 └── logs/
     └── push.log
 ```
+
+> **初次部署需手动创建 `~/data/` 目录**：`mkdir -p ~/data`
 
 ### 4.3 Cron 配置
 
@@ -167,8 +173,9 @@ git clone https://github.com/Haolun123/FamilyFund.git $BASE/familyfund
 python3 -m venv $BASE/familyfund-venv
 $BASE/familyfund-venv/bin/pip install --quiet akshare yfinance pandas requests
 
-# 4. 创建日志目录
+# 4. 创建日志和数据目录
 mkdir -p $BASE/logs
+mkdir -p $BASE/data
 
 # 5. 创建 .env 文件（需手动填入 Webhook URL）
 cat > $BASE/familyfund.env << 'ENVEOF'
@@ -187,6 +194,41 @@ echo "手动测试: source $BASE/familyfund.env && $BASE/familyfund-venv/bin/pyt
 ```
 
 ---
+
+## 五、PE 历史快照（美股/ADR）
+
+### 功能说明
+
+`daily_push.py` 每次运行时，会额外将 `yf_symbols.json` 中所有美股/ADR 标的（非 `.SS`/`.SZ`/`.HK`）的当日 `trailingPE` 追加到 `~/data/pe_history_us.json`（幂等，同一天不重复写入）。
+
+数据格式：
+```json
+{
+  "SAP": [
+    {"date": "2026-05-08", "pe": 23.13},
+    {"date": "2026-05-09", "pe": 22.87},
+    ...
+  ]
+}
+```
+
+### 如何使用分位数据
+
+积累足够历史（建议至少10条，理想1年以上）后：
+
+```bash
+# 从 EC2 拉取到本地 iCloud 数据目录
+scp ec2-user@<EC2_IP>:~/data/pe_history_us.json \
+    ~/Library/Mobile\ Documents/com~apple~CloudDocs/Project_shared_files/FamilyFund/data/
+```
+
+文件放入后，Dashboard 的「个股基本面」面板会自动显示 PE 历史分位数（区间、中位数、当前分位）。
+
+### 注意事项
+
+- A股（`.SS`/`.SZ`）和港股（`.HK`）的历史 PE 通过 akshare 实时拉取，不依赖此文件
+- SAP 等美股无免费历史 PE API，只能靠每日快照积累
+- EC2 需提前创建 `~/data/` 目录：`mkdir -p ~/data`
 
 ## 五、文件变更清单
 
