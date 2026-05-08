@@ -2480,6 +2480,23 @@ with tab_market:
                     with r2c3: st.metric('股息率',       _fmt(f.get('dividendYield'), 'pct_direct'))
                     with r2c4: st.metric('营收增长 YoY', _fmt(f.get('revenueGrowth'), '+%'))
 
+                    # PE 历史分位
+                    from fundamentals import get_pe_percentile
+                    _pe_val = f.get('trailingPE')
+                    _pe_pct = get_pe_percentile(code, _pe_val)
+                    if _pe_pct:
+                        _pct = _pe_pct['percentile']
+                        _pct_color = '#d32f2f' if _pct >= 80 else ('#2e7d32' if _pct <= 20 else '#888')
+                        st.markdown(
+                            f"<div style='font-size:12px; color:#888; margin-top:4px;'>"
+                            f"PE历史分位（近{_pe_pct['days']}天）："
+                            f"<span style='color:{_pct_color}; font-weight:bold;'>{_pct:.1f}%</span>"
+                            f"　区间 {_pe_pct['pe_min']:.1f}x – {_pe_pct['pe_max']:.1f}x"
+                            f"　中位 {_pe_pct['pe_median']:.1f}x"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+
                     if not f:
                         st.caption('⚠️ 数据暂不可用，请检查 YF Symbol 或网络连接')
         else:

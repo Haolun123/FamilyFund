@@ -125,3 +125,65 @@ def remove_yf_symbol(data_dir: str, code: str):
         cache.pop(yf_symbol, None)
         data['_cache'] = cache
     save_yf_symbols(data_dir, data)
+
+
+# ── PE 历史分位 ────────────────────────────────────────────
+
+_PE_CACHE_KEY = '_pe_history'
+
+
+def get_pe_percentile(code: str, current_pe: float | None) -> dict | None:
+    """从百度估值接口拉取个股历史 PE，计算当前分位数。
+
+    支持 A股（6位数字）和港股（5位数字，如 00700）。
+    SAP 等美股跳过（返回 None）。
+
+    Returns:
+        {
+            'percentile': float,   # 0-100，当前PE在历史中的分位
+            'pe_min':     float,
+            'pe_max':     float,
+            'pe_median':  float,
+            'days':       int,     # 历史天数
+        }
+        或 None（不支持/失败）
+    """
+    if current_pe is None:
+        return None
+
+    # 判断市场类型
+    code = code.strip()
+    if code.isdigit() and len(code) == 6:
+        # A股
+        symbol = code
+        fetch_fn = 'stock_zh_valuation_baidu'
+    elif code.isdigit() and len(code) == 5:
+        # 港股（如 00700）
+        symbol = code
+        fetch_fn = 'stock_zh_valuation_baidu'
+    elif code.upper().startswith('HK') and code[2:].isdigit():
+        # HK0700 格式
+        symbol = code[2:].zfill(5)
+        fetch_fn = 'stock_zh_valuation_baidu'
+    else:
+        return None  # 美股/其他，跳过
+
+    try:
+        import akshare as ak
+        fn = getattr(ak, fetch_fn)
+        df = fn(symbol=symbol, indicator='市盈率(TTM)')
+        if df is None or df.empty:
+            return None
+        values = df['value'].dropna()
+        if len(values) < 10:
+            return None
+        pct = float((values <= current_pe).sum() / len(values) * 100)
+        return {
+            'percentile': round(pct, 1),
+            'pe_min':     round(float(values.min()), 2),
+            'pe_max':     round(float(values.max()), 2),
+            'pe_median':  round(float(values.median()), 2),
+            'days':       len(values),
+        }
+    except Exception:
+        return None
