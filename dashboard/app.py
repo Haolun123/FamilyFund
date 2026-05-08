@@ -2481,11 +2481,27 @@ with tab_market:
                     with r2c4: st.metric('营收增长 YoY', _fmt(f.get('revenueGrowth'), '+%'))
 
                     # PE 历史分位
-                    from fundamentals import get_pe_percentile, get_pe_percentile_from_snapshot
+                    from fundamentals import get_pe_percentile_from_snapshot
                     _pe_val = f.get('trailingPE')
-                    # A股/港股 用 akshare 实时拉取；美股/ADR 用 EC2 快照
-                    if any(yf_sym.endswith(s) for s in ['.SS', '.SZ', '.HK']):
-                        _pe_pct = get_pe_percentile(code, _pe_val)
+                    _pe_pct = None
+                    if any(yf_sym.endswith(s) for s in ['.SS', '.SZ', '.HK']) and _pe_val:
+                        # A股/港股：akshare 实时拉取历史 PE
+                        try:
+                            import akshare as _ak
+                            _ak_code = code if code.isdigit() else code[2:].zfill(5)
+                            _pe_df = _ak.stock_zh_valuation_baidu(symbol=_ak_code, indicator='市盈率(TTM)')
+                            if _pe_df is not None and len(_pe_df) >= 10:
+                                _vals = _pe_df['value'].dropna().tolist()
+                                _pct_val = sum(1 for v in _vals if v <= _pe_val) / len(_vals) * 100
+                                _pe_pct = {
+                                    'percentile': round(_pct_val, 1),
+                                    'pe_min':     round(min(_vals), 2),
+                                    'pe_max':     round(max(_vals), 2),
+                                    'pe_median':  round(sorted(_vals)[len(_vals)//2], 2),
+                                    'days':       len(_vals),
+                                }
+                        except Exception:
+                            pass
                     else:
                         _pe_pct = get_pe_percentile_from_snapshot(_data_dir, yf_sym, _pe_val)
                     if _pe_pct:
