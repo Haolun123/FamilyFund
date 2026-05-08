@@ -129,20 +129,17 @@ def remove_yf_symbol(data_dir: str, code: str):
 
 # ── PE 历史分位 ────────────────────────────────────────────
 
-_PE_CACHE_KEY = '_pe_history'
-
-
 def append_pe_snapshot(data_dir: str, yf_symbols: dict):
-    """拉取各 YF Symbol 的当日 PE，追加到 pe_history.json（幂等）。
+    """拉取各 YF Symbol 的当日 PE，追加到 pe_history_us.json（幂等）。
 
     只处理美股/ADR（非 .SS/.SZ/.HK 结尾），A股/港股 用 akshare 实时拉取。
-    pe_history.json 结构：{"SAP": [{"date": "2026-05-08", "pe": 23.1}, ...]}
+    pe_history_us.json 结构：{"SAP": [{"date": "2026-05-08", "pe": 23.1}, ...]}
     """
     import json
     import yfinance as yf
     from datetime import date as _date
 
-    p = os.path.join(data_dir, 'pe_history.json')
+    p = os.path.join(data_dir, 'pe_history_us.json')
     history = {}
     if os.path.exists(p):
         with open(p, encoding='utf-8') as f:
@@ -183,13 +180,13 @@ def append_pe_snapshot(data_dir: str, yf_symbols: dict):
 
 
 def get_pe_percentile_from_snapshot(data_dir: str, yf_symbol: str, current_pe: float | None) -> dict | None:
-    """从 pe_history.json 快照计算历史分位（用于美股/ADR）。"""
+    """从 pe_history_us.json 快照计算历史分位（用于美股/ADR）。"""
     import json
 
     if current_pe is None:
         return None
 
-    p = os.path.join(data_dir, 'pe_history.json')
+    p = os.path.join(data_dir, 'pe_history_us.json')
     if not os.path.exists(p):
         return None
 
