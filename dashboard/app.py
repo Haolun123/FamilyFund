@@ -2858,8 +2858,9 @@ with tab_market:
 with tab_backtest:
     st.header("定投策略回测")
     st.caption(
-        "对比「固定金额定投」与「PE×VIX/QVIX 矩阵策略定投」的历史表现。"
+        "对比「固定金额定投」与「矩阵策略定投」的历史表现。"
         "相同起始日期、相同基准金额，验证市场温度计矩阵是否真正有效。"
+        "权益类使用 PE×VIX/QVIX 矩阵；黄金使用 MA200乖离率×VIX 矩阵。"
     )
 
     from datetime import date as _date
