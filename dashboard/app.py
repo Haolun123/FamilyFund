@@ -2115,7 +2115,7 @@ with tab_market:
         st.metric("QVIX A股波动率", f"{qvix_val:.1f}" if qvix_val else "—")
         st.markdown(f"{qvix_emoji} **{qvix_label}**")
         from market_monitor import get_qvix_percentile
-        _qvix_pct = get_qvix_percentile(_data_dir, qvix_val)
+        _qvix_pct = get_qvix_percentile(os.path.dirname(csv_path), qvix_val)
         if _qvix_pct:
             _qp = _qvix_pct['percentile']
             _qp_color = '#d32f2f' if _qp >= 80 else ('#2e7d32' if _qp <= 20 else '#888')
