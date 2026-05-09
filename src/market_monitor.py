@@ -280,9 +280,11 @@ def _fetch_qvix() -> float | None:
 
 
 def _fetch_vxn() -> float | None:
-    """拉取 VXN（纳指100隐含波动率），来源：CBOE 官方接口。
-    VXN 比 VIX 更精准地反映纳指期权市场的恐慌程度，用于纳指矩阵信号。
+    """拉取 VXN（纳指100隐含波动率）。
+    主数据源：CBOE 官方接口（EC2/本地可用）。
+    备用数据源：yfinance ^VXN。
     """
+    # 主：CBOE
     try:
         import requests
         url = 'https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_VXN.json'
@@ -293,6 +295,15 @@ def _fetch_vxn() -> float | None:
                 return round(float(data[-1]['close']), 2)
     except Exception:
         pass
+
+    # 备用：yfinance
+    try:
+        series = _fetch_yfinance('^VXN', period='5d')
+        if series is not None and len(series) > 0:
+            return round(float(series.iloc[-1]), 2)
+    except Exception:
+        pass
+
     return None
 
 
