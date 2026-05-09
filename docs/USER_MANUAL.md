@@ -382,3 +382,51 @@ Type 枚举：
 2026Q2,Asset_BadDebt,Loan,基础工程投资,3400000,CNY,1.0,3400000,原始出资额
 2026Q2,Asset_BadDebt,Provision,坏账准备,-1700000,CNY,1.0,-1700000,50%计提
 ```
+
+
+---
+
+## 7. EC2 数据拉取
+
+### 7.1 背景
+
+EC2（AWS ap-southeast-2）每天自动运行 `daily_push.py`，拉取并写入以下文件到 `~/data/`：
+
+| 文件 | 内容 | 用途 |
+|------|------|------|
+| `market_cache.json` | VIX/VXN/QVIX/PE/价格等当日市场数据 | Dashboard Market Tab 直接读取 |
+| `pe_history_us.json` | SAP/腾讯等美股+港股每日 PE 快照 | 基本面面板历史分位数 |
+| `vol_history.json` | QVIX 每日快照 | QVIX 动态历史分位数 |
+
+当公司网络无法访问 yfinance/akshare 时，从 EC2 拉取缓存可恢复 Dashboard 正常显示。
+
+### 7.2 一键拉取命令
+
+终端运行：
+
+```bash
+ff-pull
+```
+
+输出示例：
+```
+Pulling from EC2...
+  ✓ market_cache.json
+  ✓ pe_history_us.json
+  ✓ vol_history.json
+Done.
+```
+
+文件自动写入 iCloud 数据目录，Dashboard 无需重启即可读取最新数据。
+
+> `ff-pull` 已配置在 `~/.zshrc`，新终端窗口执行 `source ~/.zshrc` 或重开终端后生效。
+
+### 7.3 手动 scp（备用）
+
+如果 `ff-pull` 不可用，手动运行（EC2 地址和 PEM 路径见 `~/.zshrc` 中的 `ff-pull` 定义）：
+
+```bash
+scp -i ~/PEM/<your-key>.pem ec2-user@<EC2_HOST>:~/data/market_cache.json \
+    "/Users/.../FamilyFund/data/market_cache.json"
+# 同理拉取 pe_history_us.json 和 vol_history.json
+```
