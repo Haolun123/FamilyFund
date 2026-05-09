@@ -1154,16 +1154,17 @@ with tab_update:
         for idx, entry in enumerate(entries):
             c1, c2, c3, c4 = st.columns([1.0, 2.5, 1.8, 0.5])
             with c1:
+                st.markdown("　")  # label 占位，与其他列对齐
                 st.markdown(f"**{type_labels.get(entry['type'], entry['type'])}**")
             with c2:
                 if entry['type'] in ('买入', '卖出'):
-                    st.caption("资产标的")
                     current_label = entry.get('asset_label', '')
                     selected_label = st.selectbox(
-                        "资产", options=[''] + asset_options_labels,
+                        "资产标的",
+                        options=[''] + asset_options_labels,
                         index=([''] + asset_options_labels).index(current_label)
                               if current_label in ([''] + asset_options_labels) else 0,
-                        key=f"rb_asset_{idx}", label_visibility="collapsed",
+                        key=f"rb_asset_{idx}",
                         placeholder="选择资产（名称 + 代码）...",
                     )
                     entry['asset_label'] = selected_label
@@ -1180,6 +1181,7 @@ with tab_update:
                     help="本次操作的总金额（人民币），买入填支付金额，卖出填到账金额",
                 )
             with c4:
+                st.markdown("　")  # label 占位
                 if st.button("✕", key=f"rb_del_{idx}"):
                     to_remove.append(idx)
 
