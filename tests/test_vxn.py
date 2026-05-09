@@ -80,7 +80,49 @@ class TestNdxUsesVxnBands:
         assert _to_float(high_vxn) >= _to_float(low_vxn)
 
 
-class TestFetchVxn:
+class TestVolOverride:
+
+    def test_set_vix_override(self, tmp_path):
+        """set_vol_override 写入 VIX 手动值"""
+        import json
+        from unittest.mock import patch
+        from market_monitor import set_vol_override
+
+        cache_path = str(tmp_path / 'market_cache.json')
+        with patch('market_monitor.CACHE_PATH', cache_path):
+            set_vol_override('vix', 20.5)
+            with open(cache_path) as f:
+                cache = json.load(f)
+            assert cache['vix']['price'] == 20.5
+            assert cache['vix']['manual_override'] == 20.5
+
+    def test_set_vxn_override(self, tmp_path):
+        """set_vol_override 写入 VXN 手动值"""
+        import json
+        from unittest.mock import patch
+        from market_monitor import set_vol_override
+
+        cache_path = str(tmp_path / 'market_cache.json')
+        with patch('market_monitor.CACHE_PATH', cache_path):
+            set_vol_override('vxn', 25.0)
+            with open(cache_path) as f:
+                cache = json.load(f)
+            assert cache['vxn']['price'] == 25.0
+            assert cache['vxn']['manual_override'] == 25.0
+
+    def test_clear_vol_override(self, tmp_path):
+        """set_vol_override(None) 清除手动值"""
+        import json
+        from unittest.mock import patch
+        from market_monitor import set_vol_override
+
+        cache_path = str(tmp_path / 'market_cache.json')
+        with patch('market_monitor.CACHE_PATH', cache_path):
+            set_vol_override('vix', 20.5)
+            set_vol_override('vix', None)
+            with open(cache_path) as f:
+                cache = json.load(f)
+            assert 'manual_override' not in cache.get('vix', {})
     """_fetch_vxn 网络调用，需要网络访问"""
 
     def test_fetch_vxn_returns_float_or_none(self):

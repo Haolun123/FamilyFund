@@ -368,18 +368,24 @@ def get_market_data(force_refresh: bool = False) -> dict:
             cache_dirty = True
 
     # ── VIX ──
-    if _should_fetch('vix'):
+    if _should_fetch('vix') and not (cache.get('vix') or {}).get('manual_override'):
         series = _fetch_yfinance('^VIX', period='5d')
         if series is not None and len(series) > 0:
-            cache['vix'] = {'price': round(float(series.iloc[-1]), 2)}
+            entry = cache.get('vix', {})
+            entry['price'] = round(float(series.iloc[-1]), 2)
+            entry.pop('manual_override', None)
+            cache['vix'] = entry
             cache['vix_updated'] = today
             cache_dirty = True
 
     # ── VXN（纳指专属隐含波动率，来源：CBOE）──
-    if _should_fetch('vxn'):
+    if _should_fetch('vxn') and not (cache.get('vxn') or {}).get('manual_override'):
         val = _fetch_vxn()
         if val:
-            cache['vxn'] = {'price': val}
+            entry = cache.get('vxn', {})
+            entry['price'] = val
+            entry.pop('manual_override', None)
+            cache['vxn'] = entry
             cache['vxn_updated'] = today
             cache_dirty = True
 
@@ -458,6 +464,21 @@ def set_pe_override(target: str, value: float | None):
         entry['source'] = '手动输入'
         entry['value'] = value
     cache[key] = entry
+    _save_cache(cache)
+
+
+def set_vol_override(target: str, value: float | None):
+    """设置 VIX/VXN 手动覆盖值。target: 'vix' 或 'vxn'。value=None 清除覆盖。"""
+    cache = _load_cache()
+    if value is not None:
+        cache[target] = {'price': value, 'manual_override': value}
+        cache[f'{target}_updated'] = 'manual'
+    else:
+        # 清除：删除 manual_override，保留上次自动拉取的值
+        entry = cache.get(target, {})
+        entry.pop('manual_override', None)
+        cache[target] = entry
+        cache[f'{target}_updated'] = '已清除（等待下次自动获取）'
     _save_cache(cache)
 
 

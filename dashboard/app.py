@@ -28,7 +28,7 @@ from fundamentals import (
     add_yf_symbol, remove_yf_symbol,
 )
 from market_monitor import (
-    get_market_data, set_pe_override,
+    get_market_data, set_pe_override, set_vol_override,
     compute_bias, compute_vix_signal, compute_vxn_signal, compute_pe_signal, compute_qvix_signal,
     lookup_multiplier, lookup_a_share_multiplier, lookup_gold_multiplier,
     SP500_PE_BANDS, SP500_VIX_BANDS, SP500_MATRIX,
@@ -2075,6 +2075,8 @@ with tab_market:
 
     vix_val       = vix_entry.get('price')      if vix_entry      else None
     vxn_val       = vxn_entry.get('price')      if vxn_entry      else None
+    vix_manual    = bool((vix_entry or {}).get('manual_override'))
+    vxn_manual    = bool((vxn_entry or {}).get('manual_override'))
     qvix_val      = qvix_entry.get('price')     if qvix_entry     else None
     pe_sp         = (pe_sp_entry.get('manual_override') or pe_sp_entry.get('value'))   if pe_sp_entry  else None
     pe_ndx        = (pe_ndx_entry.get('manual_override') or pe_ndx_entry.get('value')) if pe_ndx_entry else None
@@ -2102,11 +2104,13 @@ with tab_market:
     with kpi1:
         st.metric("VIX 标普波动率", f"{vix_val:.1f}" if vix_val else "—")
         st.markdown(f"{vix_emoji} **{vix_label}**")
-        st.caption(f"标普500期权隐含波动率　更新: {meta.get('vix_updated', '未知')}")
+        _vix_src = '手动' if vix_manual else f"更新: {meta.get('vix_updated', '未知')}"
+        st.caption(f"标普500期权隐含波动率　{_vix_src}")
     with kpi2:
         st.metric("VXN 纳指波动率", f"{vxn_val:.1f}" if vxn_val else "—")
         st.markdown(f"{vxn_emoji} **{vxn_label}**")
-        st.caption(f"纳指100期权隐含波动率　更新: {meta.get('vxn_updated', '未知')}")
+        _vxn_src = '手动' if vxn_manual else f"更新: {meta.get('vxn_updated', '未知')}"
+        st.caption(f"纳指100期权隐含波动率　{_vxn_src}")
     with kpi3:
         st.metric("QVIX A股波动率", f"{qvix_val:.1f}" if qvix_val else "—")
         st.markdown(f"{qvix_emoji} **{qvix_label}**")
@@ -2124,34 +2128,44 @@ with tab_market:
         st.markdown(f"{treasury_emoji} **{treasury_label}**")
         st.caption(f"仅供参考，不参与矩阵计算　更新: {meta.get('treasury_10y_updated', '未知')}")
 
-    # PE 手动覆盖（折叠）
-    with st.expander("PE 手动覆盖（网络不可达时使用）", expanded=False):
-        st.caption("填入后点击应用，系统将使用手动值直到清除。留空表示清除手动值，恢复自动获取。")
-        ov_col1, ov_col2, ov_col3 = st.columns([2, 2, 1])
+    # 手动覆盖（折叠）
+    with st.expander("手动覆盖（网络不可达时使用）", expanded=False):
+        st.caption("填入后点击应用；留空或填0表示清除手动值，恢复自动获取。")
+        ov_col1, ov_col2, ov_col3, ov_col4, ov_col5 = st.columns([2, 2, 2, 2, 1])
         with ov_col1:
             sp_ov = st.number_input(
-                "标普PE (VOO)",
-                value=float(pe_sp) if pe_sp else 0.0,
-                min_value=0.0, step=0.1, format="%.1f",
-                key="pe_sp_override",
+                "标普PE (VOO)", value=float(pe_sp) if pe_sp else 0.0,
+                min_value=0.0, step=0.1, format="%.1f", key="pe_sp_override",
             )
         with ov_col2:
             ndx_ov = st.number_input(
-                "纳指PE (QQQ)",
-                value=float(pe_ndx) if pe_ndx else 0.0,
-                min_value=0.0, step=0.1, format="%.1f",
-                key="pe_ndx_override",
+                "纳指PE (QQQ)", value=float(pe_ndx) if pe_ndx else 0.0,
+                min_value=0.0, step=0.1, format="%.1f", key="pe_ndx_override",
             )
         with ov_col3:
+            vix_ov = st.number_input(
+                "VIX", value=float(vix_val) if vix_val else 0.0,
+                min_value=0.0, step=0.1, format="%.1f", key="vix_override",
+            )
+        with ov_col4:
+            vxn_ov = st.number_input(
+                "VXN", value=float(vxn_val) if vxn_val else 0.0,
+                min_value=0.0, step=0.1, format="%.1f", key="vxn_override",
+            )
+        with ov_col5:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("应用", key="pe_override_apply"):
+            if st.button("应用", key="override_apply"):
                 set_pe_override('sp500',  sp_ov  if sp_ov  > 0 else None)
                 set_pe_override('ndx100', ndx_ov if ndx_ov > 0 else None)
-                st.success("已保存 PE 手动值")
+                set_vol_override('vix',   vix_ov if vix_ov > 0 else None)
+                set_vol_override('vxn',   vxn_ov if vxn_ov > 0 else None)
+                st.success("已保存手动值")
                 st.rerun()
-            if st.button("清除手动值", key="pe_override_clear"):
+            if st.button("清除全部", key="override_clear"):
                 set_pe_override('sp500',  None)
                 set_pe_override('ndx100', None)
+                set_vol_override('vix',   None)
+                set_vol_override('vxn',   None)
                 st.success("已清除，将恢复自动获取")
                 st.rerun()
 
