@@ -133,6 +133,7 @@ def compute_suggestion(plan: dict, market_data: dict) -> dict:
 
     asset_class = plan.get('asset_class', '')
     vix   = (market_data.get('vix')  or {}).get('price')
+    vxn   = (market_data.get('vxn')  or {}).get('price')
     qvix  = (market_data.get('qvix') or {}).get('price')
 
     # ── 按 asset_class 路由 ──
@@ -144,7 +145,7 @@ def compute_suggestion(plan: dict, market_data: dict) -> dict:
     elif asset_class == 'US_Growth_Fund':
         pe = (market_data.get('pe_ndx100') or {}).get('value') or \
              (market_data.get('pe_ndx100') or {}).get('manual_override')
-        mult_str = lookup_multiplier(pe, vix, 'ndx100')
+        mult_str = lookup_multiplier(pe, vxn, 'ndx100')
 
     elif asset_class == 'CN_Index_Fund':
         pe_csi300 = (market_data.get('pe_csi300') or {}).get('value')

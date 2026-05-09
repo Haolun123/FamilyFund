@@ -82,9 +82,11 @@ SP500_MATRIX = [
     ['顶格',  '顶格',  '顶格',  '顶格'],  # < 14
 ]
 
-# ── 纳指100 PE×VIX 定投倍数矩阵 ──────────────────────────────
+# ── 纳指100 PE×VXN 定投倍数矩阵 ──────────────────────────────
+# 注：纳指矩阵使用 VXN（纳指专属隐含波动率）而非 VIX，更精准反映纳指期权市场恐慌程度
+# VXN 历史上比 VIX 高约 3-5 点，分界值相应调整
 NDX100_PE_BANDS  = [37, 35, 32, 28, 24, 20, 16]
-NDX100_VIX_BANDS = [18, 24, 31]
+NDX100_VIX_BANDS = [20, 27, 35]
 
 NDX100_MATRIX = [
     # VIX: <18      18-24    24-31    >31
@@ -277,6 +279,23 @@ def _fetch_qvix() -> float | None:
         return None
 
 
+def _fetch_vxn() -> float | None:
+    """拉取 VXN（纳指100隐含波动率），来源：CBOE 官方接口。
+    VXN 比 VIX 更精准地反映纳指期权市场的恐慌程度，用于纳指矩阵信号。
+    """
+    try:
+        import requests
+        url = 'https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_VXN.json'
+        r = requests.get(url, timeout=10)
+        if r.ok:
+            data = r.json().get('data', [])
+            if data:
+                return round(float(data[-1]['close']), 2)
+    except Exception:
+        pass
+    return None
+
+
 
 def _compute_ma(series: pd.Series, window: int) -> float | None:
     """计算序列最新 MA 值，不足窗口期返回 None。"""
@@ -348,6 +367,14 @@ def get_market_data(force_refresh: bool = False) -> dict:
             cache['vix_updated'] = today
             cache_dirty = True
 
+    # ── VXN（纳指专属隐含波动率，来源：CBOE）──
+    if _should_fetch('vxn'):
+        val = _fetch_vxn()
+        if val:
+            cache['vxn'] = {'price': val}
+            cache['vxn_updated'] = today
+            cache_dirty = True
+
     # ── QVIX（A股隐含波动率，300ETF期权）──
     if _should_fetch('qvix'):
         val = _fetch_qvix()
@@ -399,7 +426,7 @@ def get_market_data(force_refresh: bool = False) -> dict:
         _save_cache(cache)
 
     # ── 组装结果 ──
-    all_keys = list(TARGETS.keys()) + ['vix', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500', 'treasury_10y']
+    all_keys = list(TARGETS.keys()) + ['vix', 'vxn', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500', 'treasury_10y']
     result = {}
     for key in all_keys:
         result[key] = cache.get(key)
@@ -477,12 +504,34 @@ def compute_bias(entry: dict) -> dict:
 
 
 def compute_vix_signal(vix: float | None) -> tuple[str, str]:
-    """返回 VIX 的 (信号文字, emoji)。"""
+    """返回 VIX 的 (信号文字, emoji)。用于标普500矩阵。"""
     if vix is None:
         return '无数据', '—'
     for upper, lower, label, emoji in VIX_LEVELS:
         above_lower = (lower is None) or (vix > lower)
         below_upper = (upper is None) or (vix <= upper)
+        if above_lower and below_upper:
+            return label, emoji
+    return '—', '—'
+
+
+def compute_vxn_signal(vxn: float | None) -> tuple[str, str]:
+    """返回 VXN 的 (信号文字, emoji)。用于纳指100矩阵。
+    VXN 分界值比 VIX 高约 2-3 点（纳指波动天然更大）。
+    """
+    if vxn is None:
+        return '无数据', '—'
+    # VXN 分级阈值（对应 NDX100_VIX_BANDS = [20, 27, 35]）
+    VXN_LEVELS = [
+        (None, 35, '极度恐慌', '😱'),
+        (35,   27, '市场恐慌', '😨'),
+        (27,   20, '恐慌上升', '😟'),
+        (20,   15, '正常区间', '😐'),
+        (15,  None,'极度乐观', '😄'),
+    ]
+    for upper, lower, label, emoji in VXN_LEVELS:
+        above_lower = (lower is None) or (vxn > lower)
+        below_upper = (upper is None) or (vxn <= upper)
         if above_lower and below_upper:
             return label, emoji
     return '—', '—'
@@ -502,11 +551,11 @@ def compute_pe_signal(pe: float | None, target: str) -> tuple[str, str]:
 
 
 def lookup_multiplier(pe: float, vix: float, target: str) -> str:
-    """查 PE×VIX 矩阵，返回定投倍数建议字符串。
+    """查 PE×波动率矩阵，返回定投倍数建议字符串。
 
     Args:
         pe:     PE 值
-        vix:    VIX 值
+        vix:    波动率值（标普500用 VIX；纳指100用 VXN）
         target: 'sp500' 或 'ndx100'
 
     Returns:

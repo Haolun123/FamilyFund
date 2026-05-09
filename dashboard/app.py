@@ -29,7 +29,7 @@ from fundamentals import (
 )
 from market_monitor import (
     get_market_data, set_pe_override,
-    compute_bias, compute_vix_signal, compute_pe_signal, compute_qvix_signal,
+    compute_bias, compute_vix_signal, compute_vxn_signal, compute_pe_signal, compute_qvix_signal,
     lookup_multiplier, lookup_a_share_multiplier, lookup_gold_multiplier,
     SP500_PE_BANDS, SP500_VIX_BANDS, SP500_MATRIX,
     NDX100_PE_BANDS, NDX100_VIX_BANDS, NDX100_MATRIX,
@@ -784,6 +784,7 @@ with tab_dashboard:
     # 温度计信号（在 Tab1 内重新计算，market_data 已全局加载）
     _rb_market = get_market_data()
     _rb_vix   = (_rb_market.get('vix') or {}).get('price')
+    _rb_vxn   = (_rb_market.get('vxn') or {}).get('price')
     _rb_qvix  = (_rb_market.get('qvix') or {}).get('price')
     _rb_pe_sp  = ((_rb_market.get('pe_sp500') or {}).get('manual_override')
                   or (_rb_market.get('pe_sp500') or {}).get('value'))
@@ -797,7 +798,7 @@ with tab_dashboard:
 
     _CLASS_SIGNAL = {
         'US_Blend_Fund':  lookup_multiplier(_rb_pe_sp,  _rb_vix, 'sp500'),
-        'US_Growth_Fund': lookup_multiplier(_rb_pe_ndx, _rb_vix, 'ndx100'),
+        'US_Growth_Fund': lookup_multiplier(_rb_pe_ndx, _rb_vxn, 'ndx100'),
         'CN_Index_Fund':  lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
         'ETF_Stock':      lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
         'Gold':           lookup_gold_multiplier(_rb_gold_bias, _rb_vix),
@@ -2066,12 +2067,14 @@ with tab_market:
     st.subheader("恐慌与估值")
 
     vix_entry       = market_data.get('vix')
+    vxn_entry       = market_data.get('vxn')
     qvix_entry      = market_data.get('qvix')
     pe_sp_entry     = market_data.get('pe_sp500')
     pe_ndx_entry    = market_data.get('pe_ndx100')
     treasury_entry  = market_data.get('treasury_10y')
 
     vix_val       = vix_entry.get('price')      if vix_entry      else None
+    vxn_val       = vxn_entry.get('price')      if vxn_entry      else None
     qvix_val      = qvix_entry.get('price')     if qvix_entry     else None
     pe_sp         = (pe_sp_entry.get('manual_override') or pe_sp_entry.get('value'))   if pe_sp_entry  else None
     pe_ndx        = (pe_ndx_entry.get('manual_override') or pe_ndx_entry.get('value')) if pe_ndx_entry else None
@@ -2080,6 +2083,7 @@ with tab_market:
     ndx_src       = ('手动' if (pe_ndx_entry or {}).get('manual_override') else 'QQQ auto') if pe_ndx_entry else '—'
 
     vix_label,   vix_emoji   = compute_vix_signal(vix_val)
+    vxn_label,   vxn_emoji   = compute_vxn_signal(vxn_val)
     qvix_label,  qvix_emoji  = compute_qvix_signal(qvix_val)
     sp_pe_label,  sp_pe_emoji  = compute_pe_signal(pe_sp,  'sp500')
     ndx_pe_label, ndx_pe_emoji = compute_pe_signal(pe_ndx, 'ndx100')
@@ -2094,24 +2098,28 @@ with tab_market:
     else:
         treasury_label, treasury_emoji = '偏低（宽松）', '🟢'
 
-    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+    kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
     with kpi1:
         st.metric("VIX 恐慌指数", f"{vix_val:.1f}" if vix_val else "—")
         st.markdown(f"{vix_emoji} **{vix_label}**")
-        st.caption(f"美股恐慌指数　更新: {meta.get('vix_updated', '未知')}")
+        st.caption(f"标普500波动率　更新: {meta.get('vix_updated', '未知')}")
     with kpi2:
+        st.metric("VXN 纳指波动率", f"{vxn_val:.1f}" if vxn_val else "—")
+        st.markdown(f"{vxn_emoji} **{vxn_label}**")
+        st.caption(f"纳指100专属波动率　更新: {meta.get('vxn_updated', '未知')}")
+    with kpi3:
         st.metric("QVIX A股波动率", f"{qvix_val:.1f}" if qvix_val else "—")
         st.markdown(f"{qvix_emoji} **{qvix_label}**")
         st.caption(f"300ETF期权隐含波动率　更新: {meta.get('qvix_updated', '未知')}")
-    with kpi3:
+    with kpi4:
         st.metric("标普500 PE", f"{pe_sp:.1f}" if pe_sp else "—")
         st.markdown(f"{sp_pe_emoji} **{sp_pe_label}**")
         st.caption(f"来源: {sp_src}　更新: {meta.get('pe_sp500_updated', '未知')}")
-    with kpi4:
+    with kpi5:
         st.metric("纳指100 PE", f"{pe_ndx:.1f}" if pe_ndx else "—")
         st.markdown(f"{ndx_pe_emoji} **{ndx_pe_label}**")
         st.caption(f"来源: {ndx_src}　更新: {meta.get('pe_ndx100_updated', '未知')}")
-    with kpi5:
+    with kpi6:
         st.metric("美债10Y收益率", f"{treasury_val:.2f}%" if treasury_val else "—")
         st.markdown(f"{treasury_emoji} **{treasury_label}**")
         st.caption(f"仅供参考，不参与矩阵计算　更新: {meta.get('treasury_10y_updated', '未知')}")
@@ -2152,10 +2160,10 @@ with tab_market:
     # ─── Section 3: 定投倍数建议（标普 + 纳指） ───
 
     st.subheader("定投倍数建议")
-    st.caption("基于 PE × VIX 矩阵，适用于标普500和纳指100。A股请参考下方A股矩阵，黄金请参考黄金矩阵。")
+    st.caption("标普500使用 PE×VIX 矩阵；纳指100使用 PE×VXN 矩阵（VXN为纳指专属波动率，更精准）。A股请参考下方A股矩阵，黄金请参考黄金矩阵。")
 
     mult_sp  = lookup_multiplier(pe_sp,  vix_val, 'sp500')
-    mult_ndx = lookup_multiplier(pe_ndx, vix_val, 'ndx100')
+    mult_ndx = lookup_multiplier(pe_ndx, vxn_val, 'ndx100')
 
     def _mult_color(m):
         if m in ('暂停',):
@@ -2209,11 +2217,11 @@ with tab_market:
 
     with mult_col2:
         color = _mult_color(mult_ndx)
-        if pe_ndx and vix_val:
+        if pe_ndx and vxn_val:
             st.markdown(
                 f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center;'>"
                 f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>纳指100</div>"
-                f"<div style='font-size:13px; color:#999;'>PE {pe_ndx:.1f} × VIX {vix_val:.1f}</div>"
+                f"<div style='font-size:13px; color:#999;'>PE {pe_ndx:.1f} × VXN {vxn_val:.1f}</div>"
                 f"<div style='font-size:40px; font-weight:bold; color:{color}; margin:12px 0;'>{mult_ndx}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
@@ -2228,7 +2236,7 @@ with tab_market:
 
     # 美股矩阵表格（当前位置高亮）
     sp_col_labels  = ['VIX<18', 'VIX 18-25', 'VIX 25-35', 'VIX>35']
-    ndx_col_labels = ['VIX<18', 'VIX 18-24', 'VIX 24-31', 'VIX>31']
+    ndx_col_labels = ['VXN<20', 'VXN 20-27', 'VXN 27-35', 'VXN>35']
     sp_row_labels  = ['>32', '29-32', '26-29', '23-26', '20-23', '17-20', '14-17', '<14']
     ndx_row_labels = ['>37', '35-37', '32-35', '28-32', '24-28', '20-24', '16-20', '<16']
 
@@ -2265,7 +2273,7 @@ with tab_market:
     with mat_col2:
         st.caption("纳指100 完整矩阵（🟨 当前位置）")
         ndx_row = _find_row(pe_ndx, NDX100_PE_BANDS) if pe_ndx else None
-        ndx_col = _find_col(vix_val, NDX100_VIX_BANDS) if vix_val else None
+        ndx_col = _find_col(vxn_val, NDX100_VIX_BANDS) if vxn_val else None
         if ndx_row is not None and ndx_col is not None:
             st.dataframe(_render_matrix(NDX100_MATRIX, ndx_row_labels, ndx_col_labels, ndx_row, ndx_col),
                          use_container_width=True)
