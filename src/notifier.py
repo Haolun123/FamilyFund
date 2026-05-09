@@ -23,6 +23,7 @@ from market_monitor import (
     compute_pe_signal,
     compute_qvix_signal,
     compute_vix_signal,
+    compute_vxn_signal,
     lookup_a_share_multiplier,
     lookup_gold_multiplier,
     lookup_multiplier,
@@ -105,16 +106,20 @@ def _format_message(market_data: dict) -> str:
     # ── 恐慌指数 ──
     lines.append('**恐慌指数**')
     vix_entry  = market_data.get('vix')
+    vxn_entry  = market_data.get('vxn')
     qvix_entry = market_data.get('qvix')
     vix_val    = vix_entry.get('price')  if vix_entry  else None
+    vxn_val    = vxn_entry.get('price')  if vxn_entry  else None
     qvix_val   = qvix_entry.get('price') if qvix_entry else None
 
     vix_label,  vix_emoji  = compute_vix_signal(vix_val)
+    vxn_label,  vxn_emoji  = compute_vxn_signal(vxn_val)
     qvix_label, qvix_emoji = compute_qvix_signal(qvix_val)
 
     vix_str  = f'{vix_val:.1f} {vix_emoji} {vix_label}'   if vix_val  else '⚠️ 无数据'
+    vxn_str  = f'{vxn_val:.1f} {vxn_emoji} {vxn_label}'   if vxn_val  else '⚠️ 无数据'
     qvix_str = f'{qvix_val:.1f} {qvix_emoji} {qvix_label}' if qvix_val else '⚠️ 无数据'
-    lines.append(f'> VIX {vix_str}　｜　QVIX {qvix_str}')
+    lines.append(f'> VIX {vix_str}　｜　VXN {vxn_str}　｜　QVIX {qvix_str}')
 
     treasury_entry = market_data.get('treasury_10y')
     treasury_val   = treasury_entry.get('price') if treasury_entry else None
@@ -135,10 +140,10 @@ def _format_message(market_data: dict) -> str:
     pe_sp  = _get_pe(market_data, 'pe_sp500')
     pe_ndx = _get_pe(market_data, 'pe_ndx100')
     mult_sp  = lookup_multiplier(pe_sp,  vix_val, 'sp500')
-    mult_ndx = lookup_multiplier(pe_ndx, vix_val, 'ndx100')
+    mult_ndx = lookup_multiplier(pe_ndx, vxn_val, 'ndx100')
 
-    sp_str  = f'PE {pe_sp:.1f} × VIX {vix_val:.1f} → **{mult_sp}**' if pe_sp and vix_val else '⚠️ 数据不完整'
-    ndx_str = f'PE {pe_ndx:.1f} × VIX {vix_val:.1f} → **{mult_ndx}**' if pe_ndx and vix_val else '⚠️ 数据不完整'
+    sp_str  = f'PE {pe_sp:.1f} × VIX {vix_val:.1f} → **{mult_sp}**'   if pe_sp and vix_val else '⚠️ 数据不完整'
+    ndx_str = f'PE {pe_ndx:.1f} × VXN {vxn_val:.1f} → **{mult_ndx}**' if pe_ndx and vxn_val else '⚠️ 数据不完整'
     lines.append(f'> 标普500　{sp_str}')
     lines.append(f'> 纳指100　{ndx_str}')
 
