@@ -10,18 +10,27 @@ class TestComputeVxnSignal:
 
     def test_extreme_fear(self):
         from market_monitor import compute_vxn_signal
-        label, emoji = compute_vxn_signal(40.0)
-        assert '恐慌' in label or '极度' in label
+        label, emoji = compute_vxn_signal(45.0)
+        assert label == '极端恐慌'
+        assert emoji == '🔵'
 
     def test_elevated(self):
         from market_monitor import compute_vxn_signal
-        label, emoji = compute_vxn_signal(30.0)
-        assert label != '无数据'
+        label, emoji = compute_vxn_signal(35.0)
+        assert label == '恐慌'
+        assert emoji == '🟢'
 
     def test_normal(self):
         from market_monitor import compute_vxn_signal
         label, emoji = compute_vxn_signal(18.0)
-        assert label != '无数据'
+        assert label == '正常波动'
+        assert emoji == '⚪'
+
+    def test_low_greed(self):
+        from market_monitor import compute_vxn_signal
+        label, emoji = compute_vxn_signal(12.0)
+        assert label == '贪婪/低波'
+        assert emoji == '🔴'
 
     def test_none_returns_no_data(self):
         from market_monitor import compute_vxn_signal

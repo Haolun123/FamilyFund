@@ -529,13 +529,12 @@ def compute_vxn_signal(vxn: float | None) -> tuple[str, str]:
     """
     if vxn is None:
         return '无数据', '—'
-    # VXN 分级阈值（对应 NDX100_VIX_BANDS = [20, 27, 35]）
     VXN_LEVELS = [
-        (None, 35, '极度恐慌', '😱'),
-        (35,   27, '市场恐慌', '😨'),
-        (27,   20, '恐慌上升', '😟'),
-        (20,   15, '正常区间', '😐'),
-        (15,  None,'极度乐观', '😄'),
+        (15.0,  None,  '贪婪/低波', '🔴'),
+        (22.0,  15.0,  '正常波动',  '⚪'),
+        (32.0,  22.0,  '警觉',      '🟡'),
+        (42.0,  32.0,  '恐慌',      '🟢'),
+        (None,  42.0,  '极端恐慌',  '🔵'),
     ]
     for upper, lower, label, emoji in VXN_LEVELS:
         above_lower = (lower is None) or (vxn > lower)

@@ -2100,13 +2100,13 @@ with tab_market:
 
     kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
     with kpi1:
-        st.metric("VIX 恐慌指数", f"{vix_val:.1f}" if vix_val else "—")
+        st.metric("VIX 标普波动率", f"{vix_val:.1f}" if vix_val else "—")
         st.markdown(f"{vix_emoji} **{vix_label}**")
-        st.caption(f"标普500波动率　更新: {meta.get('vix_updated', '未知')}")
+        st.caption(f"标普500期权隐含波动率　更新: {meta.get('vix_updated', '未知')}")
     with kpi2:
         st.metric("VXN 纳指波动率", f"{vxn_val:.1f}" if vxn_val else "—")
         st.markdown(f"{vxn_emoji} **{vxn_label}**")
-        st.caption(f"纳指100专属波动率　更新: {meta.get('vxn_updated', '未知')}")
+        st.caption(f"纳指100期权隐含波动率　更新: {meta.get('vxn_updated', '未知')}")
     with kpi3:
         st.metric("QVIX A股波动率", f"{qvix_val:.1f}" if qvix_val else "—")
         st.markdown(f"{qvix_emoji} **{qvix_label}**")
