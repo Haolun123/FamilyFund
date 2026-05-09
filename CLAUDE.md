@@ -129,6 +129,20 @@ docker exec familyfund grep -n "关键词" /app/dashboard/app.py
 | `docs/IMPROVE_LIST.md` | 完成功能后移到"已完成"；新问题/待办添加到对应分类 |
 | `docs/ARCHITECTURE.md` | 架构变更、新增模块、设计决策变化时更新；版本号递增 |
 | `docs/USER_MANUAL.md` | 操作流程变更时更新（Weekly Update 步骤、调仓辅助器规则等） |
+| `docs/DESIGN_*.md` | 对应功能的设计文档有变化时更新（如矩阵分界值、数据源切换）|
+
+---
+
+## 测试约定
+
+**每个新增的 `src/` 模块必须有对应的测试文件**，放在 `tests/test_<module_name>.py`。
+
+- 测试文件命名：`tests/test_dca_manager.py`、`tests/test_vxn.py` 等，一个模块一个文件
+- 不要把多个模块的测试打包进同一个文件（`test_new_features.py` 仅保留无独立文件的历史测试）
+- 跑测试命令：`docker cp tests/<file>.py familyfund:/app/tests/<file>.py && docker exec familyfund python -m pytest /app/tests/<file>.py -v`
+- 网络依赖的测试用 `pytest.skip` 处理，不能让网络不可用导致整体失败
+
+**完成一个 feature 的标准**：代码 ✓ + 文档 ✓ + 测试 ✓ + git push ✓
 
 ---
 
