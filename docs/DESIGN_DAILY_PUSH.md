@@ -265,14 +265,39 @@ scp ec2-user@<EC2_IP>:~/data/pe_history_us.json \
 - SAP 等美股无免费历史 PE API，只能靠每日快照积累
 - EC2 需提前创建 `~/data/` 目录：`mkdir -p ~/data`
 
-## 六、文件变更清单
+## 六、PE 历史快照（美股/ADR）
 
-| 文件 | 类型 | 说明 |
-|------|------|------|
-| `src/notifier.py` | 新增 | 消息格式化 + 企业微信 Webhook 发送 |
-| `scripts/daily_push.py` | 新增 | 推送入口，判断交易日 |
-| `scripts/test_ec2_akshare.py` | 已有 | EC2 akshare 可达性测试（已验证通过）|
-| `deploy/ec2_setup.sh` | 新增 | EC2 一键初始化（venv + cron）|
+`daily_push.py` 每次运行时，会额外将 `yf_symbols.json` 中所有美股/ADR 标的（非 `.SS`/`.SZ`/`.HK`）的当日 `trailingPE` 追加到 `$FAMILYFUND_DATA/pe_history_us.json`（幂等，同一天不重复写入）。
+
+详见文档开头的 PE 历史快照说明。
+
+## 七、QVIX 历史快照与动态分位
+
+### 功能说明
+
+`daily_push.py` 同时将当日 QVIX 追加到 `$FAMILYFUND_DATA/vol_history.json`，用于计算 QVIX 动态历史分位数。
+
+**为什么只做 QVIX，不做 VIX/VXN：**
+VIX/VXN 的分级阈值（<15/15-20/20-30/>30）已基于几十年历史数据标定，固定分级就够用。QVIX 的阈值是硬编码的2015年以来历史均值，随市场结构变化会失真，动态分位更精准。
+
+```json
+{
+  "qvix": [
+    {"date": "2026-05-09", "value": 16.27},
+    ...
+  ]
+}
+```
+
+### Dashboard 展示
+
+积累10条以上后，QVIX 卡片下方自动显示：
+```
+近XXX天分位: 35.2%   区间 12.5–28.3
+```
+- 🔴 ≥80%：高波动区间，历史上对应恐慌底部
+- 🟢 ≤20%：低波动区间，市场过于乐观
+- 灰色 20-80%：正常区间
 | 现有文件 | **不变** | market_monitor.py / dashboard/app.py 等均不修改 |
 
 移除计划（不再需要）：

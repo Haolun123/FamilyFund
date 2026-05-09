@@ -2114,7 +2114,20 @@ with tab_market:
     with kpi3:
         st.metric("QVIX A股波动率", f"{qvix_val:.1f}" if qvix_val else "—")
         st.markdown(f"{qvix_emoji} **{qvix_label}**")
-        st.caption(f"300ETF期权隐含波动率　更新: {meta.get('qvix_updated', '未知')}")
+        from market_monitor import get_qvix_percentile
+        _qvix_pct = get_qvix_percentile(_data_dir, qvix_val)
+        if _qvix_pct:
+            _qp = _qvix_pct['percentile']
+            _qp_color = '#d32f2f' if _qp >= 80 else ('#2e7d32' if _qp <= 20 else '#888')
+            st.caption(
+                f"300ETF期权隐含波动率　更新: {meta.get('qvix_updated', '未知')}"
+                f"\n近{_qvix_pct['days']}天分位: "
+                f"<span style='color:{_qp_color};font-weight:bold'>{_qp:.1f}%</span>"
+                f"　区间 {_qvix_pct['min']:.1f}–{_qvix_pct['max']:.1f}",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption(f"300ETF期权隐含波动率　更新: {meta.get('qvix_updated', '未知')}")
     with kpi4:
         st.metric("标普500 PE", f"{pe_sp:.1f}" if pe_sp else "—")
         st.markdown(f"{sp_pe_emoji} **{sp_pe_label}**")

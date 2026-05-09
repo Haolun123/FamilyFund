@@ -482,6 +482,88 @@ def set_vol_override(target: str, value: float | None):
     _save_cache(cache)
 
 
+# ── QVIX 历史快照 ──────────────────────────────────────────
+
+_VOL_HISTORY_FILE = 'vol_history.json'
+
+
+def append_vol_snapshot(data_dir: str, market_data: dict):
+    """将当日 QVIX 追加到 vol_history.json（幂等，同一天不重复写入）。
+
+    vol_history.json 结构：
+    {
+        "qvix": [{"date": "2026-05-09", "value": 16.27}, ...]
+    }
+    """
+    import json
+    from datetime import date as _date
+
+    p = os.path.join(data_dir, _VOL_HISTORY_FILE)
+    history = {}
+    if os.path.exists(p):
+        with open(p, encoding='utf-8') as f:
+            history = json.load(f)
+
+    today = _date.today().isoformat()
+    dirty = False
+
+    qvix_val = (market_data.get('qvix') or {}).get('price')
+    if qvix_val is not None:
+        records = history.setdefault('qvix', [])
+        if not records or records[-1].get('date') != today:
+            records.append({'date': today, 'value': qvix_val})
+            dirty = True
+
+    if dirty:
+        tmp = p + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, p)
+
+
+def get_qvix_percentile(data_dir: str, current_qvix: float | None) -> dict | None:
+    """从 vol_history.json 计算 QVIX 当前历史分位数。
+
+    Returns:
+        {
+            'percentile': float,   # 0-100
+            'days':       int,
+            'min':        float,
+            'max':        float,
+            'median':     float,
+        }
+        或 None（数据不足10条）
+    """
+    import json
+
+    if current_qvix is None:
+        return None
+
+    p = os.path.join(data_dir, _VOL_HISTORY_FILE)
+    if not os.path.exists(p):
+        return None
+
+    with open(p, encoding='utf-8') as f:
+        history = json.load(f)
+
+    records = history.get('qvix', [])
+    if len(records) < 10:
+        return None
+
+    values = [r['value'] for r in records if r.get('value') is not None]
+    if not values:
+        return None
+
+    pct = sum(1 for v in values if v <= current_qvix) / len(values) * 100
+    return {
+        'percentile': round(pct, 1),
+        'days':       len(values),
+        'min':        round(min(values), 2),
+        'max':        round(max(values), 2),
+        'median':     round(sorted(values)[len(values) // 2], 2),
+    }
+
+
 def compute_bias(entry: dict) -> dict:
     """计算单个标的的乖离率和信号。
 
