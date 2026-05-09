@@ -40,7 +40,7 @@
 | # | 功能 | 设计文档 | 前置条件 |
 |---|------|---------|---------|
 | 1 | **鲨鱼记账解析 + 季度现金流分析** | `DESIGN_CASHFLOW.md` | 2026Q2 数据 |
-| 2 | **TWR vs 市场基准对比图** | `DESIGN_ANALYTICS.md` | ✅ 已完成（`src/benchmark.py` + sidebar 选择器）|
+| 2 | **Weekly Update 自动化**（净值一键刷新 + 短信解析录入）| `DESIGN_AUTO_WEEKLY.md` | 无，立即可做 |
 | 3 | **财务独立测算** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
 | 4 | **储蓄率追踪** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
 | 5 | **定投管理模块** | `DESIGN_DCA_MANAGER.md` | ✅ 已完成 |
