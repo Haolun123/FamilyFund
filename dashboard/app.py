@@ -392,6 +392,16 @@ with tab_dashboard:
     # Class performance table
     st.subheader("分类业绩一览")
     perf_rows = []
+
+    # 按类别汇总成本和市值，用于计算收益额
+    _cls_cost = {}
+    if cost_basis_df is not None and len(cost_basis_df) > 0:
+        _cb = cost_basis_df[cost_basis_df['Market_Value'] > 0].groupby('Asset_Class').agg(
+            cost=('Cost_Basis', 'sum'), mktval=('Market_Value', 'sum')
+        )
+        for _ac, _row in _cb.iterrows():
+            _cls_cost[_ac] = _row['mktval'] - _row['cost']
+
     for cls in selected_classes:
         if cls in class_nav_dict:
             nav_df = class_nav_dict[cls]
@@ -400,10 +410,13 @@ with tab_dashboard:
                 latest = filtered_cls.iloc[-1]
                 alloc_row = allocation_df[allocation_df['Asset_Class'] == cls]
                 alloc_pct = alloc_row['Allocation_Percent'].values[0] * 100 if len(alloc_row) > 0 else 0
+                pl = _cls_cost.get(cls)
+                pl_str = f"¥{pl:+,.0f}" if pl is not None else '—'
                 perf_rows.append({
                     '资产类别': display_map[cls],
                     '净值': f"{latest['NAV']:.4f}",
                     '收益率': f"{latest['Cumulative_Return(%)']:+.2f}%",
+                    '收益额': pl_str,
                     '市值': f"¥{latest['Total_Value']:,.0f}",
                     '占比': f"{alloc_pct:.1f}%",
                 })
