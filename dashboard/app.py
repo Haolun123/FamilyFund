@@ -2532,8 +2532,8 @@ with tab_market:
                     from fundamentals import get_pe_percentile_from_snapshot
                     _pe_val = f.get('trailingPE')
                     _pe_pct = None
-                    if any(yf_sym.endswith(s) for s in ['.SS', '.SZ', '.HK']) and _pe_val:
-                        # A股/港股：akshare 实时拉取历史 PE
+                    if any(yf_sym.endswith(s) for s in ['.SS', '.SZ']) and _pe_val:
+                        # A股：akshare 实时拉取历史 PE
                         try:
                             import akshare as _ak
                             _ak_code = code if code.isdigit() else code[2:].zfill(5)
@@ -2551,6 +2551,7 @@ with tab_market:
                         except Exception:
                             pass
                     else:
+                        # 港股(.HK) / 美股/ADR：从 pe_history_us.json 快照读取
                         _pe_pct = get_pe_percentile_from_snapshot(_data_dir, yf_sym, _pe_val)
                     if _pe_pct:
                         _pct = _pe_pct['percentile']

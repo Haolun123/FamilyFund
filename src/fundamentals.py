@@ -151,8 +151,8 @@ def append_pe_snapshot(data_dir: str, yf_symbols: dict):
     for code, symbol in yf_symbols.items():
         if code.startswith('_'):
             continue
-        # 只处理美股/ADR（不含 A股/港股 后缀）
-        if any(symbol.endswith(s) for s in ['.SS', '.SZ', '.HK']):
+        # A股排除（akshare 实时拉取更准确）；港股和美股/ADR 走 yfinance 快照
+        if any(symbol.endswith(s) for s in ['.SS', '.SZ']):
             continue
 
         # 幂等：今天已有数据则跳过
