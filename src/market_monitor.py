@@ -281,8 +281,8 @@ def _fetch_qvix() -> float | None:
 
 def _fetch_vxn() -> float | None:
     """拉取 VXN（纳指100隐含波动率）。
-    主数据源：CBOE 官方接口（EC2/本地可用）。
-    备用数据源：yfinance ^VXN。
+    主数据源：CBOE 官方接口。
+    备用数据源：yfinance ^VXN（复用 _fetch_yfinance 的 MultiIndex 处理）。
     """
     # 主：CBOE
     try:
@@ -296,13 +296,10 @@ def _fetch_vxn() -> float | None:
     except Exception:
         pass
 
-    # 备用：yfinance
-    try:
-        series = _fetch_yfinance('^VXN', period='5d')
-        if series is not None and len(series) > 0:
-            return round(float(series.iloc[-1]), 2)
-    except Exception:
-        pass
+    # 备用：yfinance（复用 _fetch_yfinance 正确处理 MultiIndex）
+    series = _fetch_yfinance('^VXN', period='5d')
+    if series is not None and len(series) > 0:
+        return round(float(series.iloc[-1]), 2)
 
     return None
 
