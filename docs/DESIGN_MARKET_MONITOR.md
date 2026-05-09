@@ -104,7 +104,9 @@ UI 展示时，主要参考列视觉权重更高（加粗或放大）。
 
 **原因**：VXN 比 VIX 更精准地反映纳指期权市场的恐慌程度。历史上 VXN 比 VIX 高约3-5点，分界值相应调整（`[20, 27, 35]` vs VIX的 `[18, 25, 35]`）。
 
-**数据源**：`https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_VXN.json`（CBOE官方，免费，无需API Key）
+**数据源**：
+1. 主：`https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_VXN.json`（CBOE官方，免费，无需API Key）
+2. 备用：yfinance `^VXN`，通过 `_fetch_yfinance()` 调用（正确处理 MultiIndex DataFrame）
 
 | PE \ VXN | < 20 | 20 – 27 | 27 – 35 | > 35 |
 |----------|------|---------|---------|------|
