@@ -1157,7 +1157,7 @@ with tab_update:
                 st.markdown(f"**{type_labels.get(entry['type'], entry['type'])}**")
             with c2:
                 if entry['type'] in ('买入', '卖出'):
-                    # asset_label = "Name (Code)" displayed; asset_name = Name stored internally
+                    st.caption("资产标的")
                     current_label = entry.get('asset_label', '')
                     selected_label = st.selectbox(
                         "资产", options=[''] + asset_options_labels,
