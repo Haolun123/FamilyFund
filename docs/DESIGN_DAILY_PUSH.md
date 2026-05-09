@@ -189,13 +189,48 @@ CRON_LINE="30 0 * * * source $BASE/familyfund.env && $BASE/familyfund-venv/bin/p
 
 echo ""
 echo "Setup complete."
-echo ">>> 请编辑 $BASE/familyfund.env，填入真实的 WXWORK_WEBHOOK_URL <<<"
+echo ">>> 请编辑 $BASE/familyfund.env，填入真实的 WXWORK_WEBHOOK_URL 和 FAMILYFUND_DATA <<<"
 echo "手动测试: source $BASE/familyfund.env && $BASE/familyfund-venv/bin/python $BASE/familyfund/scripts/daily_push.py --force"
 ```
 
+`familyfund.env` 需要包含：
+```bash
+export WXWORK_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY
+export FAMILYFUND_DATA=/home/ec2-user/data
+```
+
+> **重要**：`FAMILYFUND_DATA` 必须设置，否则 `market_cache.json` 会写到代码目录的 `data/` 子目录，无法被 scp 正确找到。
+
 ---
 
-## 五、PE 历史快照（美股/ADR）
+## 五、market_cache.json 作为离线备份
+
+### 功能说明
+
+`daily_push.py` 调用 `get_market_data(force_refresh=True)` 时，会将所有市场数据写入 `$FAMILYFUND_DATA/market_cache.json`。该文件格式与 Dashboard 直接读取的缓存格式**完全一致**，可无缝替换使用。
+
+### 包含的数据
+
+| 字段 | 说明 |
+|------|------|
+| `vix` | VIX 标普500波动率 |
+| `vxn` | VXN 纳指100波动率（来源：CBOE）|
+| `qvix` | A股隐含波动率 |
+| `pe_sp500` / `pe_ndx100` | 美股实时 PE |
+| `pe_csi300` / `pe_csi_a500` | A股 PE |
+| `csi300` / `csi_a500` / `sp500` / `ndx100` / `gold` | 各标的价格 + MA60/MA200 |
+| `treasury_10y` | 美债10年期收益率 |
+
+### 使用场景
+
+当公司网络屏蔽 yfinance/akshare 等数据源时，从 EC2 scp 一份最新缓存即可恢复 Dashboard 正常显示：
+
+```bash
+scp ec2-user@<EC2_IP>:~/data/market_cache.json \
+    ~/Library/Mobile\ Documents/com~apple~CloudDocs/Project_shared_files/FamilyFund/data/market_cache.json
+```
+
+文件放入后 Dashboard 直接读取，无需任何额外操作。缓存有效期为当日，次日自动失效（`_updated` 字段控制）。
 
 ### 功能说明
 
@@ -230,7 +265,7 @@ scp ec2-user@<EC2_IP>:~/data/pe_history_us.json \
 - SAP 等美股无免费历史 PE API，只能靠每日快照积累
 - EC2 需提前创建 `~/data/` 目录：`mkdir -p ~/data`
 
-## 五、文件变更清单
+## 六、文件变更清单
 
 | 文件 | 类型 | 说明 |
 |------|------|------|
@@ -246,7 +281,7 @@ scp ec2-user@<EC2_IP>:~/data/pe_history_us.json \
 
 ---
 
-## 六、主要风险与处理
+## 七、主要风险与处理
 
 | 风险 | 概率 | 处理方式 |
 |------|------|---------|
