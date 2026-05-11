@@ -1045,6 +1045,50 @@ with tab_update:
             if updated > 0:
                 st.rerun()
 
+    # ─── 刷新净值 ───
+    _rf_col1, _rf_col2 = st.columns([1, 5])
+    with _rf_col1:
+        if st.button("🔄 刷新净值", key="refresh_prices", help="自动拉取最新净值填入编辑区，固定收益需手动确认"):
+            st.session_state['_refresh_prices'] = True
+            st.rerun()
+
+    if st.session_state.pop('_refresh_prices', False):
+        from price_fetcher import fetch_latest_prices
+        with st.spinner("拉取最新净值..."):
+            _price_results = fetch_latest_prices(raw_df, os.path.dirname(csv_path))
+        # 写入 session_state 的编辑模板
+        _template = st.session_state['update_template'].copy()
+        _ok, _manual, _err = 0, 0, 0
+        for i, row in _template.iterrows():
+            code = str(row.get('Code', ''))
+            res = _price_results.get(code)
+            if res is None:
+                continue
+            if res['status'] == 'ok' and res['price'] is not None:
+                _template.at[i, 'Current_Price'] = res['price']
+                _ok += 1
+            elif res['status'] == 'manual':
+                _manual += 1
+            else:
+                _err += 1
+        st.session_state['update_template'] = _template
+        st.session_state['_refresh_summary'] = {'ok': _ok, 'manual': _manual, 'err': _err, 'results': _price_results}
+        st.rerun()
+
+    if '_refresh_summary' in st.session_state:
+        _s = st.session_state.pop('_refresh_summary')
+        _ok, _manual, _err = _s['ok'], _s['manual'], _s['err']
+        st.success(f"已刷新 {_ok} 个标的  |  {_manual} 个需手动确认  |  {_err} 个失败")
+        # 展示详情
+        with st.expander("刷新详情", expanded=False):
+            for code, res in _s['results'].items():
+                if res['status'] == 'ok':
+                    st.markdown(f"✅ `{code}` — {res['price']:.4f}（{res['msg']}，{res.get('date','')}）")
+                elif res['status'] == 'manual':
+                    st.markdown(f"⚠️ `{code}` — {res['msg']}")
+                else:
+                    st.markdown(f"❌ `{code}` — {res['msg']}")
+
     # ─── Editable table ───
     st.markdown("**编辑持仓** (可增删行，修改价格/份额/市值。买卖 NCF 通过调仓辅助器自动填写，外部入金/出金记在 Cash 行的 Net_Cash_Flow)")
 
@@ -1365,6 +1409,81 @@ with tab_update:
         if entries and st.button("清空所有条目", key="rb_clear", type="secondary"):
             st.session_state['rebalance_entries'] = []
             st.rerun()
+
+        # ── 从短信导入 ──────────────────────────────────────
+        st.divider()
+        with st.expander("📱 从短信导入", expanded=False):
+            st.caption("粘贴基金确认短信（多条用空行分隔），自动提取信息填入调仓辅助器。")
+            sms_text = st.text_area("短信内容", height=150, key="sms_input",
+                                    placeholder="【博时基金】尊敬的...确认成功，份额为...净值为...\n\n【南方基金】...")
+            if st.button("解析短信", key="sms_parse", type="primary"):
+                if sms_text.strip():
+                    from sms_parser import parse_sms
+                    _holdings = [
+                        {'code': str(row['Code']), 'name': str(row['Name'])}
+                        for _, row in edited_df[edited_df['Asset_Class'] != 'Cash'].iterrows()
+                        if pd.notna(row['Name']) and pd.notna(row['Code'])
+                    ]
+                    _parsed = parse_sms(sms_text, _holdings)
+                    st.session_state['sms_parsed'] = _parsed
+                    st.rerun()
+                else:
+                    st.warning("请先粘贴短信内容")
+
+            # 展示解析结果并允许填入调仓辅助器
+            if 'sms_parsed' in st.session_state:
+                _parsed = st.session_state['sms_parsed']
+                st.markdown("**解析结果：**")
+                _any_error = False
+                for i, r in enumerate(_parsed):
+                    if r.get('parse_error'):
+                        st.error(f"第{i+1}条短信无法解析")
+                        _any_error = True
+                        continue
+                    _match_str = f"{r['matched_code']} ({r['matched_name']})" if r['matched_code'] else "❓ 未匹配"
+                    _gold_str  = f"（{r['shares']}克）" if r['is_gold'] else ""
+                    st.markdown(
+                        f"**{i+1}.** {r['confirm_date']} · {r['action']} · "
+                        f"{r['fund_name']} → {_match_str}  "
+                        f"金额 ¥{r['amount']:,.2f}{_gold_str} · 净值 {r['nav']:.4f} · 份额 {r['shares']}"
+                    )
+                    # 未匹配时提供下拉选择
+                    if not r['matched_code']:
+                        _options = [''] + [
+                            f"{row['Name']} ({row['Code']})"
+                            for _, row in edited_df[edited_df['Asset_Class'] != 'Cash'].iterrows()
+                            if pd.notna(row['Name'])
+                        ]
+                        _sel = st.selectbox(f"手动选择持仓（第{i+1}条）", _options, key=f"sms_match_{i}")
+                        if _sel:
+                            _name, _code = _sel.rsplit(' (', 1)
+                            _code = _code.rstrip(')')
+                            _parsed[i]['matched_code'] = _code
+                            _parsed[i]['matched_name'] = _name
+                            st.session_state['sms_parsed'] = _parsed
+
+                if not _any_error:
+                    if st.button("✅ 填入调仓辅助器", key="sms_apply", type="primary"):
+                        for r in _parsed:
+                            if r.get('parse_error') or not r['matched_code']:
+                                continue
+                            st.session_state['rebalance_entries'].append({
+                                'type':       r['action'],
+                                'asset_name': r['matched_name'],
+                                'asset_label': f"{r['matched_name']} ({r['matched_code']})",
+                                'amount':     r['amount'],
+                                'price':      r['nav'],
+                                'fee':        0.0,
+                                'is_new':     False,
+                                'new_asset':  {},
+                            })
+                        del st.session_state['sms_parsed']
+                        st.success(f"已填入 {len([r for r in _parsed if not r.get('parse_error')])} 条记录")
+                        st.rerun()
+
+                if st.button("清除解析结果", key="sms_clear"):
+                    del st.session_state['sms_parsed']
+                    st.rerun()
 
     # ─── Validation ───
 
