@@ -49,7 +49,14 @@ Header: Referer: https://fund.eastmoney.com/
 
 返回最新净值（`DWJZ` 字段）和净值日期（`JZRQ`）。
 
-### Code 格式路由规则
+### 场内 ETF vs 场外基金区分
+
+**规则**：6位数字 Code 若在 `yf_symbols.json` 有 `.SS`/`.SZ` 映射 → yfinance 场内交易价；否则 → 天天基金场外净值。
+
+**原因**：场内 ETF（如红利低波 512890）的场内收盘价比天天基金 T+1 净值更实时。通过 `yf_symbols.json` 手动维护映射，灵活控制哪些走场内价格。
+
+**目前场内 ETF 映射**：
+- `512890` → `512890.SS`（红利低波ETF）
 
 ```python
 def _route_code(code: str) -> str:
