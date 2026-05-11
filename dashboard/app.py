@@ -3327,12 +3327,17 @@ with tab_backtest:
 
         with tbl_col:
             st.subheader("逐期明细")
+            _vol_label = {
+                'csi300': 'QVIX', 'csi_a500': 'QVIX',
+                'ndx100': 'VXN',
+                'sp500': 'VIX', 'gold': 'VIX',
+            }.get(result['target'], 'VIX/QVIX')
             show_df = history_df[[
                 'date', 'price', 'pe_or_bias', 'vol', 'raw_mult',
                 'matrix_amount', 'matrix_cum_cost', 'matrix_cum_value',
             ]].rename(columns={
                 'date': '日期', 'price': '价格',
-                'pe_or_bias': 'PE/乖离率', 'vol': 'VIX/QVIX',
+                'pe_or_bias': 'PE/乖离率', 'vol': _vol_label,
                 'raw_mult': '矩阵倍数',
                 'matrix_amount': '矩阵投入', 'matrix_cum_cost': '矩阵累计成本',
                 'matrix_cum_value': '矩阵累计市值',
