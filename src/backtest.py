@@ -205,19 +205,39 @@ def _fetch_vxn_history(start_date: str) -> list[dict] | None:
 
 
 def _fetch_qvix_history(start_date: str) -> list[dict] | None:
-    """akshare QVIX 全历史，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。
+    """A股隐含波动率全历史，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。
+
+    数据源优先级：
+    1. 50ETF QVIX（index_option_50etf_qvix）：2015-02-09起，与300ETF相关0.95
+    2. 300ETF QVIX（index_option_300etf_qvix）：2019-12-23起（早期NaN）
+
+    回测验证：50ETF/300ETF/500ETF对A500真实波动率的相关性均在0.65-0.69，
+    差异可忽略，优先用历史最长的50ETF。
     不截断 start_date，由调用方过滤。
     """
-    try:
-        import akshare as ak
-        df = ak.index_option_300etf_qvix()
+    import akshare as ak
+
+    def _load(fn):
+        df = fn()
         df = df[['date', 'close']].rename(columns={'close': 'value'})
         df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
         df['value'] = pd.to_numeric(df['value'], errors='coerce')
         df = df.dropna(subset=['value'])
-        return df.to_dict('records')
+        return df.to_dict('records') if len(df) > 0 else None
+
+    # 主：50ETF（2015起）
+    try:
+        records = _load(ak.index_option_50etf_qvix)
+        if records and len(records) > 500:
+            return records
     except Exception as e:
-        print(f'[backtest] QVIX fetch failed: {e}')
+        print(f'[backtest] 50ETF QVIX fetch failed: {e}')
+
+    # 备用：300ETF（2019起）
+    try:
+        return _load(ak.index_option_300etf_qvix)
+    except Exception as e:
+        print(f'[backtest] 300ETF QVIX fetch failed: {e}')
         return None
 
 
@@ -594,13 +614,14 @@ def run_backtest(
 # ── 各标的可用最早日期（取所有数据源的最晚起始日期）────────────
 # sp500/gold：价格1927+，VIX 1990-01-02 → 瓶颈是 VIX
 # ndx100：价格1985+，VXN 2009-09-14 → 瓶颈是 VXN
-# csi300/csi_a500：PE 2005/2007+，QVIX 实际有效数据从 2019-12-23（早期全 NaN）→ 瓶颈是 QVIX
+# csi300/csi_a500：PE 2005/2007+，50ETF QVIX 2015-02-09 → 瓶颈是 QVIX
+#   注：50ETF QVIX 与 300ETF QVIX 相关系数 0.95，与 A500 真实波动率相关 0.65
 _TARGET_MIN_DATES = {
     'sp500':    '1990-01-01',
     'ndx100':   '2009-10-01',
     'gold':     '1990-01-01',
-    'csi300':   '2020-01-01',   # QVIX 实际有效数据从 2019-12-23
-    'csi_a500': '2020-01-01',
+    'csi300':   '2015-03-01',   # 50ETF QVIX 从 2015-02-09 起
+    'csi_a500': '2015-03-01',
 }
 
 

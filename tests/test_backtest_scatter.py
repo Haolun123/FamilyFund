@@ -13,7 +13,7 @@ class TestRunAllTargets:
         from backtest import run_all_targets
         try:
             results = run_all_targets(
-                user_start_date='2020-01-01',
+                user_start_date='2015-03-01',
                 base_amount=1000.0,
                 freq='M',
                 end_date='2022-12-31',
@@ -39,7 +39,7 @@ class TestRunAllTargets:
             )
             for r in results:
                 if r['target'] in ('csi300', 'csi_a500'):
-                    assert r['actual_start'] >= '2020-01-01'
+                    assert r['actual_start'] >= '2015-03-01'
                     assert r['actual_start'] == _TARGET_MIN_DATES[r['target']]
         except Exception:
             pytest.skip('network not available')
@@ -65,7 +65,7 @@ class TestRunAllTargets:
         from backtest import run_all_targets
         try:
             results = run_all_targets(
-                user_start_date='2020-01-01',
+                user_start_date='2015-03-01',
                 base_amount=1000.0,
                 freq='M',
                 end_date='2022-12-31',
@@ -98,7 +98,7 @@ class TestRunAllTargets:
 
         try:
             with patch('backtest.run_backtest', side_effect=mock_run):
-                results = run_all_targets('2020-01-01', 1000.0, end_date='2022-12-31')
+                results = run_all_targets('2015-03-01', 1000.0, end_date='2022-12-31')
             gold_result = next(r for r in results if r['target'] == 'gold')
             assert gold_result['error'] is not None
             assert gold_result['xirr_excess'] is None
@@ -114,8 +114,8 @@ class TestTargetMinDates:
 
     def test_a_share_min_2015(self):
         from backtest import _TARGET_MIN_DATES
-        assert _TARGET_MIN_DATES['csi300']   == '2020-01-01'
-        assert _TARGET_MIN_DATES['csi_a500'] == '2020-01-01'
+        assert _TARGET_MIN_DATES['csi300']   == '2015-03-01'
+        assert _TARGET_MIN_DATES['csi_a500'] == '2015-03-01'
 
     def test_us_min_dates(self):
         from backtest import _TARGET_MIN_DATES
@@ -129,7 +129,7 @@ class TestTargetMinDates:
         user = '2010-01-01'
         for target in ('csi300', 'csi_a500'):
             actual = max(user, _TARGET_MIN_DATES[target])
-            assert actual == '2020-01-01'
+            assert actual == '2015-03-01'
         # sp500/gold: min=1990, user=2010 → user wins
         actual_sp = max(user, _TARGET_MIN_DATES['sp500'])
         assert actual_sp == '2010-01-01'
