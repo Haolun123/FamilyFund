@@ -5,7 +5,7 @@
 - *.SS / *.SZ → yfinance（A股个股）
 - HK* → yfinance（港股，转换为 XXXX.HK 格式）
 - GOLD / GOLD.P → yfinance GC=F + USD/CNY 换算（元/克）
-- SAP.DE → yfinance SAP（ADR，USD）
+- SAP.DE → yfinance SAP.DE（法兰克福，EUR）用于价格刷新；基本面另走 yf_symbols.json 中的 SAP ADR
 - CASH → 固定 1.0
 - 其他 → 无法自动，返回 manual 状态
 
@@ -128,9 +128,9 @@ def _route(code: str) -> dict:
         hk_sym = hk_num.zfill(4) + '.HK'
         return _fetch_yf(hk_sym, f'港股 {hk_sym}')
 
-    # SAP（法兰克福，但用 ADR 价格展示）
+    # SAP：价格用法兰克福 SAP.DE（EUR），基本面另走 yf_symbols.json 中的 SAP ADR
     if code == 'SAP.DE':
-        return _fetch_yf('SAP', 'SAP ADR (USD)')
+        return _fetch_yf('SAP.DE', 'SAP 法兰克福 (EUR)')
 
     # 无法自动拉取（固定收益等）
     return {
