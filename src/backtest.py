@@ -130,7 +130,8 @@ def _fetch_pe_shiller(start_date: str) -> list[dict] | None:
         e_col = pd.to_numeric(df['E'], errors='coerce').ffill()
         df['value'] = p_col / e_col
         df = df[df['value'] > 0].dropna(subset=['value'])
-        df = df[df['date'] >= start_date][['date', 'value']]
+        # 不截断 start_date，存全量历史到缓存，由调用方按需过滤
+        df = df[['date', 'value']]
         return df.to_dict('records')
     except Exception as e:
         print(f'[backtest] Shiller PE fetch failed: {e}')
@@ -253,7 +254,7 @@ def get_pe_series(target: str, start_date: str) -> pd.Series | None:
         cache = _load_cache()
         key = 'bt_pe_shiller'
         if not _cache_is_fresh(cache, key):
-            records = _fetch_pe_shiller(start_date)
+            records = _fetch_pe_shiller('1900-01-01')  # 全量拉取，不截断
             if records:
                 cache[key] = records
                 cache[f'{key}_updated'] = date.today().isoformat()
