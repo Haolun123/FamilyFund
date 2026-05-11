@@ -3157,16 +3157,19 @@ with tab_backtest:
             fig.add_shape(type='rect', x0=x0, x1=x1, y0=y0, y1=y1,
                           fillcolor=color, line_width=0, layer='below')
 
-        # 象限标注
-        for x, y, txt in [
-            (x_pad*0.95,  y_pad*0.85,  '多投多赚 ✓'),
-            (-x_pad*0.95, y_pad*0.85,  '少投高效'),
-            (-x_pad*0.95, -y_pad*0.85, '两者皆输 ✗'),
-            (x_pad*0.95,  -y_pad*0.85, '多投无超额'),
+        # 象限标注（用 paper 坐标系，与数据范围无关，永远在角落）
+        for px, py, txt, xanc, yanc in [
+            (0.97, 0.97, '多投多赚 ✓', 'right', 'top'),
+            (0.03, 0.97, '少投高效',   'left',  'top'),
+            (0.03, 0.03, '两者皆输 ✗', 'left',  'bottom'),
+            (0.97, 0.03, '多投无超额', 'right', 'bottom'),
         ]:
-            fig.add_annotation(x=x, y=y, text=txt, showarrow=False,
-                               font=dict(size=11, color='#888'),
-                               xanchor='right' if x < 0 else 'left')
+            fig.add_annotation(
+                x=px, y=py, text=txt, showarrow=False,
+                xref='paper', yref='paper',
+                font=dict(size=11, color='#aaa'),
+                xanchor=xanc, yanchor=yanc,
+            )
 
         # 原点十字线
         fig.add_shape(type='line', x0=-x_pad, x1=x_pad, y0=0, y1=0,
