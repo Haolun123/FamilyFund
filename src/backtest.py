@@ -263,17 +263,23 @@ def get_pe_series(target: str, start_date: str) -> pd.Series | None:
         s = _records_to_series(records)
         return s[s.index >= pd.Timestamp(start_date)]
 
-    # A股
+    # A股：每次尝试从 legulegu 拉取全量最新数据，成功则覆盖缓存；
+    # 失败（SSL/网络）则使用 iCloud 缓存的历史数据（可能滞后但不崩溃）
     symbol_map = {'csi300': '沪深300', 'csi_a500': '中证500'}
     symbol = symbol_map[target]
     cache = _load_cache()
     key = f'bt_pe_{target}'
-    if not _cache_is_fresh(cache, key):
-        records = _fetch_pe_akshare(symbol, start_date)
-        if records:
-            cache[key] = records
-            cache[f'{key}_updated'] = date.today().isoformat()
-            _save_cache(cache)
+
+    fresh = _fetch_pe_akshare(symbol, '2005-01-01')  # 拉全量，不限 start_date
+    if fresh:
+        cache[key] = fresh
+        cache[f'{key}_updated'] = date.today().isoformat()
+        _save_cache(cache)
+    else:
+        if not cache.get(key):
+            print(f'[backtest] A股PE({symbol}) 无缓存且拉取失败，回测将跳过PE信号')
+        # 有缓存则静默使用旧数据
+
     records = cache.get(key)
     if not records:
         return None
@@ -572,13 +578,14 @@ def run_backtest(
 # ── 各标的可用最早日期（取所有数据源的最晚起始日期）────────────
 # sp500/gold：价格1927+，VIX 1990-01-02 → 瓶颈是 VIX
 # ndx100：价格1985+，VXN 2009-09-14 → 瓶颈是 VXN
-# csi300/csi_a500：QVIX 2015+，A股PE 2020-01-02 → 瓶颈是 PE
+# csi300：legulegu PE 2005-04-08，QVIX 2015+ → 瓶颈是 QVIX
+# csi_a500：legulegu PE（中证500代理）2007-01-15，QVIX 2015+ → 瓶颈是 QVIX
 _TARGET_MIN_DATES = {
-    'sp500':    '1990-01-01',   # VIX 从 1990-01-02 开始
-    'ndx100':   '2009-10-01',   # VXN 从 2009-09-14 开始（取整到月初）
-    'gold':     '1990-01-01',   # VIX 从 1990-01-02 开始
-    'csi300':   '2020-01-01',   # A股PE 从 2020-01-02 开始
-    'csi_a500': '2020-01-01',
+    'sp500':    '1990-01-01',
+    'ndx100':   '2009-10-01',
+    'gold':     '1990-01-01',
+    'csi300':   '2015-01-01',   # QVIX 限制（PE 从 2005 起已够）
+    'csi_a500': '2015-01-01',   # QVIX 限制（PE 从 2007 起已够）
 }
 
 
