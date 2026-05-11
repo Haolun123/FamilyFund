@@ -27,6 +27,7 @@ from market_monitor import (
     lookup_multiplier,
     lookup_a_share_multiplier,
     lookup_gold_multiplier,
+    lookup_gold_hedge_multiplier,
 )
 from nav_engine import _compute_max_drawdown_series
 
