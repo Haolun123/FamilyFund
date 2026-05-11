@@ -1,7 +1,19 @@
 """fundamentals.py — 个股基本面数据拉取与缓存。
 
-Code → YF_Symbol 映射和基本面缓存均存储在 $FAMILYFUND_DATA/yf_symbols.json。
-缓存当日有效（同 market_cache.json 策略）。
+yf_symbols.json 数据结构（v2）：
+{
+    "601838": {
+        "yf_symbol":        "601838.SS",
+        "show_fundamentals": true       # 是否在基本面面板展示
+    },
+    "HK0700": {"yf_symbol": "0700.HK",  "show_fundamentals": true},
+    "SAP.DE":  {"yf_symbol": "SAP",      "show_fundamentals": true},
+    "512890":  {"yf_symbol": "512890.SS","show_fundamentals": false},
+    "_cache":  {...}   # 内部缓存，key 以 _ 开头
+}
+
+show_fundamentals=true  → 在 Market Tab 个股基本面面板展示
+show_fundamentals=false → 仅用于价格刷新路由，不展示基本面
 """
 
 import json
@@ -16,9 +28,9 @@ FIELDS = [
 ]
 
 _DEFAULT_SYMBOLS = {
-    '601838':  '601838.SS',
-    'HK0700':  '0700.HK',
-    'SAP.DE':  'SAP',
+    '601838': {'yf_symbol': '601838.SS', 'show_fundamentals': True},
+    'HK0700': {'yf_symbol': '0700.HK',  'show_fundamentals': True},
+    'SAP.DE': {'yf_symbol': 'SAP',       'show_fundamentals': True},
 }
 
 
@@ -26,19 +38,57 @@ def _path(data_dir: str) -> str:
     return os.path.join(data_dir, 'yf_symbols.json')
 
 
+def _migrate_if_needed(data: dict) -> dict:
+    """自动迁移旧格式（值为字符串）到新格式（值为 dict）。"""
+    migrated = False
+    for key, val in list(data.items()):
+        if key.startswith('_'):
+            continue
+        if isinstance(val, str):
+            # 旧格式：字符串 → 新格式：dict，默认 show_fundamentals=True
+            data[key] = {'yf_symbol': val, 'show_fundamentals': True}
+            migrated = True
+    return data, migrated
+
+
 def load_yf_symbols(data_dir: str) -> dict:
-    """加载 yf_symbols.json。文件不存在时返回预设默认映射。"""
+    """加载 yf_symbols.json，自动迁移旧格式。"""
     p = _path(data_dir)
     if not os.path.exists(p):
         return dict(_DEFAULT_SYMBOLS)
     with open(p, encoding='utf-8') as f:
-        return json.load(f)
+        data = json.load(f)
+    data, migrated = _migrate_if_needed(data)
+    if migrated:
+        save_yf_symbols(data_dir, data)
+    return data
 
 
 def save_yf_symbols(data_dir: str, data: dict):
-    """写入 yf_symbols.json。"""
-    with open(_path(data_dir), 'w', encoding='utf-8') as f:
+    """写入 yf_symbols.json（原子写入）。"""
+    p = _path(data_dir)
+    tmp = p + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, p)
+
+
+def get_yf_symbol(data: dict, code: str) -> str | None:
+    """从已加载的 data 中取 yf_symbol，兼容新旧格式。"""
+    entry = data.get(code)
+    if entry is None or str(code).startswith('_'):
+        return None
+    if isinstance(entry, dict):
+        return entry.get('yf_symbol')
+    return str(entry)  # 兜底兼容
+
+
+def get_show_fundamentals(data: dict, code: str) -> bool:
+    """返回该 code 是否在基本面面板展示。默认 True（向后兼容）。"""
+    entry = data.get(code)
+    if isinstance(entry, dict):
+        return entry.get('show_fundamentals', True)
+    return True
 
 
 def fetch_fundamentals(yf_symbol: str) -> dict | None:
@@ -66,8 +116,8 @@ def get_fundamentals(data_dir: str, code: str, force_refresh: bool = False) -> d
         dict of fundamentals，或 None（无映射 / 拉取失败）
     """
     data = load_yf_symbols(data_dir)
-    yf_symbol = data.get(code)
-    if not yf_symbol or yf_symbol.startswith('_'):
+    yf_symbol = get_yf_symbol(data, code)
+    if not yf_symbol:
         return None
 
     today = date.today().isoformat()
@@ -78,7 +128,6 @@ def get_fundamentals(data_dir: str, code: str, force_refresh: bool = False) -> d
         result = {k: v for k, v in cached.items() if k != 'updated'}
         return result if result else None
 
-    # 拉取新数据
     fresh = fetch_fundamentals(yf_symbol)
     if fresh:
         fresh['updated'] = today
@@ -88,7 +137,6 @@ def get_fundamentals(data_dir: str, code: str, force_refresh: bool = False) -> d
         save_yf_symbols(data_dir, data)
         return {k: v for k, v in fresh.items() if k != 'updated'}
 
-    # 拉取失败，返回旧缓存（若有）
     if cached:
         return {k: v for k, v in cached.items() if k != 'updated'}
     return None
@@ -104,11 +152,12 @@ def get_all_fundamentals(data_dir: str, codes: list, force_refresh: bool = False
     return result
 
 
-def add_yf_symbol(data_dir: str, code: str, yf_symbol: str):
-    """新增/更新 Code → YF_Symbol 映射，清除该 symbol 的旧缓存。"""
+def add_yf_symbol(data_dir: str, code: str, yf_symbol: str, show_fundamentals: bool = True):
+    """新增/更新 Code 映射，清除该 symbol 的旧缓存。"""
     data = load_yf_symbols(data_dir)
-    data[code.strip()] = yf_symbol.strip()
-    # 清除旧缓存，下次访问时重新拉取
+    code = code.strip()
+    yf_symbol = yf_symbol.strip()
+    data[code] = {'yf_symbol': yf_symbol, 'show_fundamentals': show_fundamentals}
     cache = data.get('_cache', {})
     if yf_symbol in cache:
         del cache[yf_symbol]
@@ -116,11 +165,20 @@ def add_yf_symbol(data_dir: str, code: str, yf_symbol: str):
     save_yf_symbols(data_dir, data)
 
 
-def remove_yf_symbol(data_dir: str, code: str):
-    """删除 Code → YF_Symbol 映射及其缓存。"""
+def update_show_fundamentals(data_dir: str, code: str, show: bool):
+    """更新 show_fundamentals 标志。"""
     data = load_yf_symbols(data_dir)
-    yf_symbol = data.pop(code, None)
-    if yf_symbol:
+    if code in data and isinstance(data[code], dict):
+        data[code]['show_fundamentals'] = show
+        save_yf_symbols(data_dir, data)
+
+
+def remove_yf_symbol(data_dir: str, code: str):
+    """删除 Code 映射及其缓存。"""
+    data = load_yf_symbols(data_dir)
+    entry = data.pop(code, None)
+    if entry:
+        yf_symbol = entry.get('yf_symbol') if isinstance(entry, dict) else entry
         cache = data.get('_cache', {})
         cache.pop(yf_symbol, None)
         data['_cache'] = cache
@@ -132,10 +190,8 @@ def remove_yf_symbol(data_dir: str, code: str):
 def append_pe_snapshot(data_dir: str, yf_symbols: dict):
     """拉取各 YF Symbol 的当日 PE，追加到 pe_history_us.json（幂等）。
 
-    只处理美股/ADR（非 .SS/.SZ/.HK 结尾），A股/港股 用 akshare 实时拉取。
-    pe_history_us.json 结构：{"SAP": [{"date": "2026-05-08", "pe": 23.1}, ...]}
+    只处理美股/ADR 和港股（非 .SS/.SZ），A股 用 akshare 实时拉取。
     """
-    import json
     import yfinance as yf
     from datetime import date as _date
 
@@ -148,14 +204,16 @@ def append_pe_snapshot(data_dir: str, yf_symbols: dict):
     today = _date.today().isoformat()
     dirty = False
 
-    for code, symbol in yf_symbols.items():
+    for code, entry in yf_symbols.items():
         if code.startswith('_'):
             continue
-        # A股排除（akshare 实时拉取更准确）；港股和美股/ADR 走 yfinance 快照
+        symbol = entry.get('yf_symbol') if isinstance(entry, dict) else str(entry)
+        if not symbol:
+            continue
+        # A股排除
         if any(symbol.endswith(s) for s in ['.SS', '.SZ']):
             continue
 
-        # 幂等：今天已有数据则跳过
         existing = history.get(symbol, [])
         if existing and existing[-1].get('date') == today:
             continue
@@ -180,9 +238,7 @@ def append_pe_snapshot(data_dir: str, yf_symbols: dict):
 
 
 def get_pe_percentile_from_snapshot(data_dir: str, yf_symbol: str, current_pe: float | None) -> dict | None:
-    """从 pe_history_us.json 快照计算历史分位（用于美股/ADR）。"""
-    import json
-
+    """从 pe_history_us.json 快照计算历史分位（用于美股/ADR/港股）。"""
     if current_pe is None:
         return None
 
@@ -209,57 +265,3 @@ def get_pe_percentile_from_snapshot(data_dir: str, yf_symbol: str, current_pe: f
         'pe_median':  round(sorted(values)[len(values) // 2], 2),
         'days':       len(values),
     }
-    """从百度估值接口拉取个股历史 PE，计算当前分位数。
-
-    支持 A股（6位数字）和港股（5位数字，如 00700）。
-    SAP 等美股跳过（返回 None）。
-
-    Returns:
-        {
-            'percentile': float,   # 0-100，当前PE在历史中的分位
-            'pe_min':     float,
-            'pe_max':     float,
-            'pe_median':  float,
-            'days':       int,     # 历史天数
-        }
-        或 None（不支持/失败）
-    """
-    if current_pe is None:
-        return None
-
-    # 判断市场类型
-    code = code.strip()
-    if code.isdigit() and len(code) == 6:
-        # A股
-        symbol = code
-        fetch_fn = 'stock_zh_valuation_baidu'
-    elif code.isdigit() and len(code) == 5:
-        # 港股（如 00700）
-        symbol = code
-        fetch_fn = 'stock_zh_valuation_baidu'
-    elif code.upper().startswith('HK') and code[2:].isdigit():
-        # HK0700 格式
-        symbol = code[2:].zfill(5)
-        fetch_fn = 'stock_zh_valuation_baidu'
-    else:
-        return None  # 美股/其他，跳过
-
-    try:
-        import akshare as ak
-        fn = getattr(ak, fetch_fn)
-        df = fn(symbol=symbol, indicator='市盈率(TTM)')
-        if df is None or df.empty:
-            return None
-        values = df['value'].dropna()
-        if len(values) < 10:
-            return None
-        pct = float((values <= current_pe).sum() / len(values) * 100)
-        return {
-            'percentile': round(pct, 1),
-            'pe_min':     round(float(values.min()), 2),
-            'pe_max':     round(float(values.max()), 2),
-            'pe_median':  round(float(values.median()), 2),
-            'days':       len(values),
-        }
-    except Exception:
-        return None

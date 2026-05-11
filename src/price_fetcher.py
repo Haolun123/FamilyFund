@@ -158,9 +158,14 @@ def fetch_latest_prices(raw_df, data_dir: str = None) -> dict:
     yf_map = {}
     if data_dir:
         try:
-            from fundamentals import load_yf_symbols
+            from fundamentals import load_yf_symbols, get_yf_symbol
             raw = load_yf_symbols(data_dir)
-            yf_map = {k: v for k, v in raw.items() if not k.startswith('_')}
+            # 提取 code → yf_symbol 映射（排除内部 key）
+            yf_map = {
+                k: get_yf_symbol(raw, k)
+                for k in raw
+                if not k.startswith('_') and get_yf_symbol(raw, k)
+            }
         except Exception:
             pass
 

@@ -25,7 +25,7 @@ from pdf_report import generate_report as generate_pdf_report
 from benchmark import get_benchmarks, BENCHMARK_DISPLAY_NAMES, BENCHMARK_COLORS
 from fundamentals import (
     load_yf_symbols, save_yf_symbols, get_all_fundamentals,
-    add_yf_symbol, remove_yf_symbol,
+    add_yf_symbol, remove_yf_symbol, get_yf_symbol, get_show_fundamentals, update_show_fundamentals,
 )
 from market_monitor import (
     get_market_data, set_pe_override, set_vol_override,
@@ -1046,11 +1046,48 @@ with tab_update:
                 st.rerun()
 
     # ─── 刷新净值 ───
-    _rf_col1, _rf_col2 = st.columns([1, 5])
+    _rf_col1, _rf_col2, _rf_col3 = st.columns([1, 1, 4])
     with _rf_col1:
         if st.button("🔄 刷新净值", key="refresh_prices", help="自动拉取最新净值填入编辑区，固定收益需手动确认"):
             st.session_state['_refresh_prices'] = True
             st.rerun()
+    with _rf_col2:
+        if st.button("⚙ 价格来源", key="price_source_btn", help="配置哪些标的走 yfinance 而非天天基金"):
+            st.session_state['_show_price_source'] = not st.session_state.get('_show_price_source', False)
+
+    if st.session_state.get('_show_price_source'):
+        with st.container(border=True):
+            st.caption("**价格来源配置**：添加映射后，对应标的刷新净值时走 yfinance；未添加的6位数字基金走天天基金。「展示基本面」勾选后在 Market Tab 个股基本面面板展示。")
+            from fundamentals import load_yf_symbols, add_yf_symbol, remove_yf_symbol, get_yf_symbol, get_show_fundamentals, update_show_fundamentals
+            _ps_map = load_yf_symbols(os.path.dirname(csv_path))
+            _ps_entries = {k: v for k, v in _ps_map.items() if not k.startswith('_')}
+            if _ps_entries:
+                for _ps_code, _ps_entry in _ps_entries.items():
+                    _ps_sym  = get_yf_symbol(_ps_map, _ps_code)
+                    _ps_show = get_show_fundamentals(_ps_map, _ps_code)
+                    _pc1, _pc2, _pc3, _pc4 = st.columns([2, 2, 2, 1])
+                    with _pc1: st.code(_ps_code)
+                    with _pc2: st.code(_ps_sym)
+                    with _pc3:
+                        _ns = st.checkbox('展示基本面', value=_ps_show, key=f'ps_show_{_ps_code}')
+                        if _ns != _ps_show:
+                            update_show_fundamentals(os.path.dirname(csv_path), _ps_code, _ns)
+                            st.rerun()
+                    with _pc4:
+                        if st.button('🗑️', key=f'ps_del_{_ps_code}'):
+                            remove_yf_symbol(os.path.dirname(csv_path), _ps_code)
+                            st.rerun()
+            _pa1, _pa2, _pa3, _pa4 = st.columns([2, 2, 2, 1])
+            with _pa1: _ps_new_code = st.text_input('Code', key='ps_new_code', placeholder='如 512890')
+            with _pa2: _ps_new_sym  = st.text_input('YF Symbol', key='ps_new_sym', placeholder='如 512890.SS')
+            with _pa3: _ps_new_show = st.checkbox('展示基本面', value=False, key='ps_new_show')
+            with _pa4:
+                st.markdown('<div style="margin-top:28px"></div>', unsafe_allow_html=True)
+                if st.button('➕', key='ps_add'):
+                    if _ps_new_code.strip() and _ps_new_sym.strip():
+                        add_yf_symbol(os.path.dirname(csv_path), _ps_new_code.strip(),
+                                      _ps_new_sym.strip(), show_fundamentals=_ps_new_show)
+                        st.rerun()
 
     if st.session_state.pop('_refresh_prices', False):
         from price_fetcher import fetch_latest_prices
@@ -2582,8 +2619,14 @@ with tab_market:
     _data_dir = os.path.dirname(csv_path)
     with st.expander("📊 个股基本面", expanded=False):
 
+        from fundamentals import get_yf_symbol, get_show_fundamentals, update_show_fundamentals
         _yf_map   = load_yf_symbols(_data_dir)
-        _sym_map  = {k: v for k, v in _yf_map.items() if not k.startswith('_')}
+        # show_fundamentals=True 的才展示基本面
+        _sym_map  = {
+            k: get_yf_symbol(_yf_map, k)
+            for k in _yf_map
+            if not k.startswith('_') and get_show_fundamentals(_yf_map, k)
+        }
 
         _latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
         _stock_codes = list(dict.fromkeys(
@@ -2694,21 +2737,34 @@ with tab_market:
 
         # YF Symbol 管理
         st.divider()
-        with st.expander("管理个股 YF Symbol 映射", expanded=False):
+        with st.expander("管理 YF Symbol 映射", expanded=False):
             st.caption("""**Symbol 填写规则：**
-    - A股上海（6开头）：`601838` → `601838.SS`
-    - A股深圳（0/3开头）：`000001` → `000001.SZ`
-    - 港股（去掉前导零）：`HK0700` → `0700.HK`，`01810` → `1810.HK`
-    - 美股：直接用 ticker（`NVDA`、`AAPL`）
-    - 欧股 ADR（在美上市）：`SAP.DE` → `SAP`""")
+- A股上海（6开头）：`601838` → `601838.SS`
+- A股深圳（0/3开头）：`000001` → `000001.SZ`
+- 港股（去掉前导零）：`HK0700` → `0700.HK`
+- 美股：直接用 ticker（`NVDA`、`AAPL`）
+- 欧股 ADR：`SAP.DE` → `SAP`
 
-            if _sym_map:
+**展示基本面**：勾选后该标的出现在个股基本面面板；不勾选则仅用于价格刷新路由。""")
+
+            # 全量映射（含 show_fundamentals=false 的）
+            _all_sym_map = {
+                k: _yf_map[k] for k in _yf_map if not k.startswith('_')
+            }
+            if _all_sym_map:
                 st.markdown("**当前映射：**")
-                for code, sym in _sym_map.items():
-                    mc1, mc2, mc3 = st.columns([3, 3, 1])
+                for code, entry in _all_sym_map.items():
+                    sym  = get_yf_symbol(_yf_map, code)
+                    show = get_show_fundamentals(_yf_map, code)
+                    mc1, mc2, mc3, mc4 = st.columns([2, 2, 2, 1])
                     with mc1: st.code(code)
                     with mc2: st.code(sym)
                     with mc3:
+                        new_show = st.checkbox('展示基本面', value=show, key=f'show_{code}')
+                        if new_show != show:
+                            update_show_fundamentals(_data_dir, code, new_show)
+                            st.rerun()
+                    with mc4:
                         if st.button('🗑️', key=f'del_{code}', help=f'删除 {code}'):
                             remove_yf_symbol(_data_dir, code)
                             st.rerun()
@@ -2716,7 +2772,7 @@ with tab_market:
                 st.info('暂无映射，请添加。')
 
             st.markdown("**新增映射：**")
-            add_c1, add_c2, add_c3 = st.columns([3, 3, 2])
+            add_c1, add_c2, add_c3, add_c4 = st.columns([2, 2, 2, 1])
             with add_c1:
                 new_code = st.text_input('portfolio.csv Code', key='new_yf_code',
                                          placeholder='如 601838')
@@ -2724,10 +2780,13 @@ with tab_market:
                 new_sym = st.text_input('YF Symbol', key='new_yf_sym',
                                         placeholder='如 601838.SS')
             with add_c3:
+                new_show_fund = st.checkbox('展示基本面', value=True, key='new_yf_show')
+            with add_c4:
                 st.markdown('<div style="margin-top:28px"></div>', unsafe_allow_html=True)
-                if st.button('➕ 添加', key='add_yf'):
+                if st.button('➕', key='add_yf'):
                     if new_code.strip() and new_sym.strip():
-                        add_yf_symbol(_data_dir, new_code.strip(), new_sym.strip())
+                        add_yf_symbol(_data_dir, new_code.strip(), new_sym.strip(),
+                                      show_fundamentals=new_show_fund)
                         st.success(f'已添加 {new_code} → {new_sym}')
                         st.rerun()
                     else:
