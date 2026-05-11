@@ -38,7 +38,7 @@ from market_monitor import (
     GOLD_BIAS_BANDS, GOLD_VIX_BANDS, GOLD_MATRIX,
     TARGETS,
 )
-from backtest import run_backtest
+from backtest import run_backtest, run_all_targets, _TARGET_MIN_DATES
 
 # ─── Page Config ───
 
@@ -3131,6 +3131,73 @@ with tab_backtest:
         'sp500': '$', 'ndx100': '$', 'gold': '$',
     }
 
+    def _make_effectiveness_scatter(points: list, currency: str = '¥'):
+        """四象限散点图：X=XIRR超额(%)，Y=绝对盈亏超额(CNY)。"""
+        import plotly.graph_objects as _go
+
+        xs = [p['xirr_excess'] for p in points]
+        ys = [p['pl_excess']    for p in points]
+        labels = [p['label']   for p in points]
+
+        # 坐标轴范围（加 padding）
+        x_pad = max(abs(x) for x in xs) * 0.3 + 1 if xs else 5
+        y_pad = max(abs(y) for y in ys) * 0.3 + 1000 if ys else 10000
+
+        fig = _go.Figure()
+
+        # 四象限背景色
+        for x0, x1, y0, y1, color, label in [
+            (0, x_pad,  0, y_pad,  'rgba(46,125,50,0.07)',  ''),   # I  右上
+            (-x_pad, 0, 0, y_pad,  'rgba(255,193,7,0.07)',  ''),   # II 左上
+            (-x_pad, 0, -y_pad, 0, 'rgba(211,47,47,0.07)',  ''),   # III左下
+            (0, x_pad,  -y_pad, 0, 'rgba(255,152,0,0.07)',  ''),   # IV 右下
+        ]:
+            fig.add_shape(type='rect', x0=x0, x1=x1, y0=y0, y1=y1,
+                          fillcolor=color, line_width=0, layer='below')
+
+        # 象限标注
+        for x, y, txt in [
+            (x_pad*0.95,  y_pad*0.85,  '多投多赚 ✓'),
+            (-x_pad*0.95, y_pad*0.85,  '少投高效'),
+            (-x_pad*0.95, -y_pad*0.85, '两者皆输 ✗'),
+            (x_pad*0.95,  -y_pad*0.85, '多投无超额'),
+        ]:
+            fig.add_annotation(x=x, y=y, text=txt, showarrow=False,
+                               font=dict(size=11, color='#888'),
+                               xanchor='right' if x < 0 else 'left')
+
+        # 原点十字线
+        fig.add_shape(type='line', x0=-x_pad, x1=x_pad, y0=0, y1=0,
+                      line=dict(color='#ccc', width=1))
+        fig.add_shape(type='line', x0=0, x1=0, y0=-y_pad, y1=y_pad,
+                      line=dict(color='#ccc', width=1))
+
+        # 散点
+        colors = ['#1565c0','#c62828','#2e7d32','#f57f17','#6a1b9a']
+        for i, (p, x, y, lbl) in enumerate(zip(points, xs, ys, labels)):
+            fig.add_trace(_go.Scatter(
+                x=[x], y=[y], mode='markers+text',
+                text=[lbl], textposition='top center',
+                marker=dict(size=14, color=colors[i % len(colors)]),
+                name=lbl,
+                hovertemplate=(
+                    f"<b>{lbl}</b><br>"
+                    f"XIRR超额: {x:+.2f}%<br>"
+                    f"盈亏超额: {currency}{y:+,.0f}<extra></extra>"
+                ),
+            ))
+
+        fig.update_layout(
+            height=420,
+            xaxis_title='XIRR 超额（矩阵 - 固定，%）',
+            yaxis_title=f'绝对盈亏超额（矩阵 - 固定，{currency}）',
+            showlegend=False,
+            xaxis=dict(range=[-x_pad, x_pad], zeroline=False),
+            yaxis=dict(range=[-y_pad, y_pad], zeroline=False),
+            margin=dict(t=30, b=50),
+        )
+        return fig
+
     # ─── Controls ───────────────────────────────────────────
     bt_col1, bt_col2, bt_col3, bt_col4 = st.columns(4)
     with bt_col1:
@@ -3184,6 +3251,8 @@ with tab_backtest:
     with bt_col7:
         st.markdown("<br>", unsafe_allow_html=True)
         bt_run = st.button("▶ 运行回测", type="primary", key='bt_run', use_container_width=True)
+        bt_run_all = st.button("🔭 全标的对比", key='bt_run_all', use_container_width=True,
+                               help="批量跑5个标的，在散点图上对比策略有效性（约需30-60秒）")
 
     if bt_target == 'ndx100':
         st.info(
@@ -3215,6 +3284,22 @@ with tab_backtest:
                 st.session_state['bt_result'] = result
             except Exception as e:
                 st.error(f"回测运行失败: {e}")
+
+    # ─── 全标的对比 ──────────────────────────────────────────
+    if bt_run_all:
+        with st.spinner("正在批量跑5个标的（约需30-60秒）..."):
+            try:
+                _all_results = run_all_targets(
+                    user_start_date=bt_start.strftime('%Y-%m-%d'),
+                    base_amount=bt_base_amount,
+                    freq='W' if bt_freq == '周频' else 'M',
+                    top_multiplier_equity=bt_top_equity,
+                    top_multiplier_gold=bt_top_gold,
+                    end_date=bt_end.strftime('%Y-%m-%d'),
+                )
+                st.session_state['bt_all_results'] = _all_results
+            except Exception as e:
+                st.error(f"全标的对比失败: {e}")
 
     result = st.session_state.get('bt_result')
 
@@ -3349,6 +3434,37 @@ with tab_backtest:
             f"⚠️ {pe_note}仅供参考，不构成投资建议。"
             "历史回测不代表未来收益。XIRR 为资金加权年化收益率。"
         )
+
+        # ─── 策略有效性散点图（单标的）──────────────────────────
+        st.divider()
+        st.subheader("策略有效性定位")
+        _xe = (matrix['xirr'] - fixed['xirr']) if (matrix['xirr'] and fixed['xirr']) else None
+        _ye = (matrix['profit_loss'] - fixed['profit_loss']) if (matrix['profit_loss'] is not None and fixed['profit_loss'] is not None) else None
+        if _xe is not None and _ye is not None:
+            _scatter_fig = _make_effectiveness_scatter(
+                [{'label': _TARGET_NAMES[result['target']], 'xirr_excess': _xe, 'pl_excess': _ye}],
+                cur
+            )
+            st.plotly_chart(_scatter_fig, use_container_width=True)
+            st.caption(f"当前标的：{_TARGET_NAMES[result['target']]}，回测区间 {result['start_date']} ~ {result['end_date']}")
+
+    # ─── 全标的对比散点图 ────────────────────────────────────
+    _all_results = st.session_state.get('bt_all_results')
+    if _all_results:
+        st.divider()
+        st.subheader("全标的策略有效性对比")
+        _pts = [r for r in _all_results if r['xirr_excess'] is not None and r['pl_excess'] is not None]
+        _errs = [r for r in _all_results if r.get('error')]
+        if _pts:
+            _cur_all = '¥'  # 全标的统一用 CNY 口径（已在回测内部换算）
+            _scatter_all = _make_effectiveness_scatter(_pts, _cur_all)
+            st.plotly_chart(_scatter_all, use_container_width=True)
+            # Caption：各标的实际起始日期
+            _date_notes = ' · '.join(f"{r['label']} {r['actual_start']}" for r in _all_results if not r.get('error'))
+            st.caption(f"各标的实际回测起始：{_date_notes}　截止：{bt_end.strftime('%Y-%m-%d')}　基准金额：¥{bt_base_amount:,.0f}/期")
+        if _errs:
+            for r in _errs:
+                st.warning(f"⚠️ {r['label']} 回测失败：{r['error']}")
 
 # ═══════════════════════════════════════════════════════════
 # Tab 6: Quarterly

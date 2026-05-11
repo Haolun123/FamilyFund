@@ -567,3 +567,102 @@ def run_backtest(
         'base_amount':    base_amount,
         'top_multiplier': top_multiplier,
     }
+
+
+# ── 各标的可用最早日期 ────────────────────────────────────
+_TARGET_MIN_DATES = {
+    'csi300':   '2015-01-01',   # QVIX 数据限制
+    'csi_a500': '2015-01-01',
+    'sp500':    '2000-01-01',
+    'ndx100':   '2000-01-01',
+    'gold':     '2000-01-01',
+}
+
+
+def run_all_targets(
+    user_start_date: str,
+    base_amount: float,
+    freq: str = 'M',
+    top_multiplier_equity: float = 10.0,
+    top_multiplier_gold:   float = 5.0,
+    end_date: str | None = None,
+) -> list[dict]:
+    """批量跑所有5个标的，返回散点图所需数据。
+
+    每个标的使用 max(user_start_date, 该标的最早可用日期) 作为实际起始日期。
+
+    Returns:
+        [
+            {
+                'target':       str,
+                'actual_start': str,    # 实际使用的起始日期
+                'xirr_excess':  float | None,   # 矩阵XIRR - 固定XIRR（%）
+                'pl_excess':    float | None,   # 矩阵盈亏 - 固定盈亏（CNY）
+                'fixed_xirr':   float | None,
+                'matrix_xirr':  float | None,
+                'fixed_pl':     float | None,
+                'matrix_pl':    float | None,
+                'error':        str | None,
+            }
+        ]
+    """
+    from datetime import datetime
+
+    _TARGET_NAMES = {
+        'csi300':   'CSI300 沪深300',
+        'csi_a500': '中证A500',
+        'sp500':    '标普500',
+        'ndx100':   '纳指100',
+        'gold':     '黄金',
+    }
+    _TOP_MULT = {
+        'csi300':   top_multiplier_equity,
+        'csi_a500': top_multiplier_equity,
+        'sp500':    top_multiplier_equity,
+        'ndx100':   top_multiplier_equity,
+        'gold':     top_multiplier_gold,
+    }
+
+    results = []
+    for target in ['sp500', 'ndx100', 'csi300', 'csi_a500', 'gold']:
+        min_date = _TARGET_MIN_DATES.get(target, '2000-01-01')
+        actual_start = max(user_start_date, min_date)
+        try:
+            r = run_backtest(
+                target=target,
+                start_date=actual_start,
+                base_amount=base_amount,
+                freq=freq,
+                top_multiplier=_TOP_MULT[target],
+                end_date=end_date,
+            )
+            fixed  = r['fixed']
+            matrix = r['matrix']
+            xirr_e = (matrix['xirr'] - fixed['xirr']) if (
+                matrix['xirr'] is not None and fixed['xirr'] is not None
+            ) else None
+            pl_e = (matrix['profit_loss'] - fixed['profit_loss']) if (
+                matrix['profit_loss'] is not None and fixed['profit_loss'] is not None
+            ) else None
+            results.append({
+                'target':       target,
+                'label':        _TARGET_NAMES[target],
+                'actual_start': actual_start,
+                'xirr_excess':  round(xirr_e, 2) if xirr_e is not None else None,
+                'pl_excess':    round(pl_e, 2)   if pl_e   is not None else None,
+                'fixed_xirr':   fixed['xirr'],
+                'matrix_xirr':  matrix['xirr'],
+                'fixed_pl':     fixed['profit_loss'],
+                'matrix_pl':    matrix['profit_loss'],
+                'error':        None,
+            })
+        except Exception as e:
+            results.append({
+                'target': target, 'label': _TARGET_NAMES[target],
+                'actual_start': actual_start,
+                'xirr_excess': None, 'pl_excess': None,
+                'fixed_xirr': None, 'matrix_xirr': None,
+                'fixed_pl': None, 'matrix_pl': None,
+                'error': str(e)[:80],
+            })
+    return results
