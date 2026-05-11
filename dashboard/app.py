@@ -3139,9 +3139,11 @@ with tab_backtest:
         ys = [p['pl_excess']    for p in points]
         labels = [p['label']   for p in points]
 
-        # 坐标轴范围（加 padding）
-        x_pad = max(abs(x) for x in xs) * 0.3 + 1 if xs else 5
-        y_pad = max(abs(y) for y in ys) * 0.3 + 1000 if ys else 10000
+        # 坐标轴范围：覆盖所有点，两侧留 30% padding，且至少有基本空间
+        max_abs_x = max((abs(x) for x in xs), default=1)
+        max_abs_y = max((abs(y) for y in ys), default=1000)
+        x_pad = max_abs_x * 1.4
+        y_pad = max_abs_y * 1.4
 
         fig = _go.Figure()
 
