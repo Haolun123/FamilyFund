@@ -390,15 +390,14 @@ def _run_simulation(
     target: str,
     base_amount: float,
     top_mult: float,
+    gold_hedge_mode: bool = False,   # True → 黄金用对冲矩阵（标普PE×VIX）
 ) -> pd.DataFrame:
     """
     按月模拟固定策略和矩阵策略，返回逐期明细 DataFrame。
 
     gold 标的：pe_series=None，MA200 从 price_series 滚动计算。
     ndx100：pe_series 为标普500 Shiller PE（代理）。
-
-    假设前提：每期按倍数投入的资金均能到位（由用户 Cash 储备保证），
-    不模拟资金约束。对比指标用 XIRR 和每元成本市值，无需虚拟账户。
+    gold_hedge_mode：True 时黄金使用标普PE×VIX对冲矩阵，False 使用乖离率×VIX原始矩阵。
     """
     is_gold    = (target == 'gold')
     is_a_share = target in ('csi300', 'csi_a500')
@@ -424,9 +423,15 @@ def _run_simulation(
         vol = _series_asof(vol_series, dt)
 
         if is_gold:
-            ma200 = _series_asof(ma200_series, dt)
-            pe_or_bias = ((price - ma200) / ma200 * 100) if (ma200 and ma200 > 0) else None
-            raw_mult = lookup_gold_multiplier(pe_or_bias, vol)
+            if gold_hedge_mode:
+                # 对冲矩阵：用标普PE×VIX，pe_series 传入的是标普PE
+                pe_or_bias = _series_asof(pe_series, dt) if pe_series is not None else None
+                raw_mult = lookup_gold_hedge_multiplier(pe_or_bias, vol)
+            else:
+                # 原始矩阵：用MA200乖离率×VIX
+                ma200 = _series_asof(ma200_series, dt)
+                pe_or_bias = ((price - ma200) / ma200 * 100) if (ma200 and ma200 > 0) else None
+                raw_mult = lookup_gold_multiplier(pe_or_bias, vol)
         else:
             pe_or_bias = _series_asof(pe_series, dt)
             if is_a_share:
@@ -480,6 +485,7 @@ def run_backtest(
     freq: str = 'M',
     top_multiplier: float = 10.0,
     end_date: str | None = None,
+    gold_hedge_mode: bool = False,
 ) -> dict:
     """
     运行 DCA 回测，返回固定策略 vs 矩阵策略的对比结果。
@@ -510,14 +516,18 @@ def run_backtest(
     # 价格往前多取 10 天，确保月初节假日也能通过 asof 找到最近交易日价格
     # 黄金需要额外拉取 MA200 预热数据
     fetch_start = (pd.Timestamp(start_date) - timedelta(days=10)).strftime('%Y-%m-%d')
-    if target == 'gold':
+    if target == 'gold' and not gold_hedge_mode:
         fetch_start = (pd.Timestamp(start_date) - timedelta(days=_MA200_WARMUP_DAYS)).strftime('%Y-%m-%d')
 
     price_series = get_price_series(target, fetch_start)
     if price_series is None or price_series.empty:
         raise ValueError(f'无法获取 {target} 价格数据，请检查网络连接')
 
-    pe_series  = get_pe_series(target, start_date)
+    # 对冲模式下黄金使用标普PE作为信号
+    if target == 'gold' and gold_hedge_mode:
+        pe_series = get_pe_series('sp500', start_date)
+    else:
+        pe_series = get_pe_series(target, start_date)
     vol_series = get_vol_series(target, start_date)
 
     # 生成定投日期序列（月频=每月1日，周频=每周一）
@@ -534,6 +544,7 @@ def run_backtest(
     history_df = _run_simulation(
         monthly_dates, price_series, pe_series, vol_series,
         target, base_amount, top_multiplier,
+        gold_hedge_mode=gold_hedge_mode,
     )
 
     if history_df.empty:

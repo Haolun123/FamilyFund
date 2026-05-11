@@ -31,6 +31,7 @@ from market_monitor import (
     get_market_data, set_pe_override, set_vol_override,
     compute_bias, compute_vix_signal, compute_vxn_signal, compute_pe_signal, compute_qvix_signal,
     lookup_multiplier, lookup_a_share_multiplier, lookup_gold_multiplier,
+    lookup_gold_hedge_multiplier,
     SP500_PE_BANDS, SP500_VIX_BANDS, SP500_MATRIX,
     NDX100_PE_BANDS, NDX100_VIX_BANDS, NDX100_MATRIX,
     CSI300_PE_BANDS, CSI300_QVIX_BANDS, CSI300_MATRIX,
@@ -2626,6 +2627,46 @@ with tab_market:
     else:
         st.dataframe(pd.DataFrame(GOLD_MATRIX, index=gold_row_labels, columns=gold_col_labels),
                      use_container_width=True)
+    st.caption("⚠️ 基于黄金自身乖离率，适合趋势跟踪逻辑。")
+
+    # ── 黄金对冲矩阵（标普PE×VIX，反向对冲逻辑）──────────────
+    st.divider()
+    st.subheader("黄金对冲矩阵（标普PE × VIX）")
+    st.caption(
+        "**对冲逻辑**：股市高估+恐慌时加仓黄金（对冲价值高），股市低估+平静时减仓（不需要对冲）。"
+        "与上方乖离率矩阵方向相反，适合将黄金定位为压舱石/对冲工具的投资者。"
+    )
+
+    from market_monitor import GOLD_HEDGE_PE_BANDS, GOLD_HEDGE_VIX_BANDS, GOLD_HEDGE_MATRIX
+
+    mult_gold_hedge = lookup_gold_hedge_multiplier(pe_sp, vix_val)
+    color_hedge = _mult_color(mult_gold_hedge)
+
+    if pe_sp and vix_val:
+        st.markdown(
+            f"<div style='border:1px solid #ddd; border-radius:8px; padding:16px; text-align:center; max-width:300px;'>"
+            f"<div style='font-size:14px; color:#666; margin-bottom:8px;'>黄金对冲建议</div>"
+            f"<div style='font-size:13px; color:#999;'>标普PE {pe_sp:.1f} × VIX {vix_val:.1f}</div>"
+            f"<div style='font-size:40px; font-weight:bold; color:{color_hedge}; margin:12px 0;'>{mult_gold_hedge}</div>"
+            f"<div style='font-size:11px; color:#aaa;'>顶格 = 5x</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("标普PE或VIX数据不完整，无法计算对冲建议")
+
+    hedge_row_labels = ['PE>32（高估）', 'PE 29-32', 'PE 26-29', 'PE 23-26', 'PE 20-23', 'PE 17-20', 'PE<17（低估）']
+    hedge_col_labels = ['VIX<18(平静)', 'VIX 18-25(警觉)', 'VIX 25-35(恐慌)', 'VIX>35(极恐)']
+
+    st.caption("黄金对冲完整矩阵（🟨 当前位置）")
+    hedge_row = _find_row(pe_sp, GOLD_HEDGE_PE_BANDS) if pe_sp else None
+    hedge_col = _find_col(vix_val, GOLD_HEDGE_VIX_BANDS) if vix_val else None
+    if hedge_row is not None and hedge_col is not None:
+        st.dataframe(_render_matrix(GOLD_HEDGE_MATRIX, hedge_row_labels, hedge_col_labels, hedge_row, hedge_col),
+                     use_container_width=True)
+    else:
+        st.dataframe(pd.DataFrame(GOLD_HEDGE_MATRIX, index=hedge_row_labels, columns=hedge_col_labels),
+                     use_container_width=True)
     st.caption("⚠️ 仅供参考，不构成投资建议。数据来自公开市场，存在延迟。")
 
     # ─── Section: 个股基本面 ───
@@ -3267,6 +3308,18 @@ with tab_backtest:
             "波动率信号使用 **VXN**（纳指专属，来源 CBOE），与实时 Market Tab 保持一致。"
         )
 
+    if bt_target == 'gold':
+        bt_gold_hedge = st.radio(
+            "黄金矩阵模式",
+            options=['原始矩阵（MA200乖离率×VIX）', '对冲矩阵（标普PE×VIX）'],
+            index=0,
+            horizontal=True,
+            key='bt_gold_hedge',
+            help="原始：基于黄金自身估值；对冲：基于股市估值，高PE+高VIX时多买黄金",
+        )
+    else:
+        bt_gold_hedge = '原始矩阵（MA200乖离率×VIX）'
+
     st.divider()
 
     # ─── 日期校验 ────────────────────────────────────────────
@@ -3276,6 +3329,7 @@ with tab_backtest:
     # ─── Run ────────────────────────────────────────────────
     if bt_run:
         top_mult = bt_top_gold if bt_target == 'gold' else bt_top_equity
+        _gold_hedge = (bt_target == 'gold' and '对冲矩阵' in bt_gold_hedge)
         with st.spinner(f"正在拉取 {_TARGET_NAMES[bt_target]} 历史数据并运行回测..."):
             try:
                 result = run_backtest(
@@ -3285,6 +3339,7 @@ with tab_backtest:
                     base_amount=bt_base_amount,
                     freq='W' if bt_freq == '周频' else 'M',
                     top_multiplier=top_mult,
+                    gold_hedge_mode=_gold_hedge,
                 )
                 st.session_state['bt_result'] = result
             except Exception as e:

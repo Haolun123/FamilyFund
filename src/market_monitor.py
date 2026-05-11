@@ -170,7 +170,7 @@ CSI_A500_MATRIX = [
     ['2.0x',  '3.0x',  '5.0x',  '顶格'],  # PE < 30th (低估)
 ]
 
-# ── 黄金 乖离率(MA200)×VIX 定投倍数矩阵 ──────────────────────
+# ── 黄金 乖离率(MA200)×VIX 定投倍数矩阵（原始：基于黄金自身估值）──
 # 黄金无PE，用 MA200 乖离率作为估值锚（对冲/压舱石角色，顶格=5x）
 # 乖离率行分界（从高到低）：> +20%, +10~+20%, -5~+10%, -10~-5%, < -10%
 GOLD_BIAS_BANDS = [20.0, 10.0, -5.0, -10.0]   # 乖离率行分界（> 各值）
@@ -183,6 +183,24 @@ GOLD_MATRIX = [
     ['0.5x',  '1.0x',  '1.5x',  '2.0x'],   # 乖离 -5% ~ +10%（正常）
     ['1.0x',  '1.5x',  '2.5x',  '3.5x'],   # 乖离 -10% ~ -5%（偏低）
     ['1.5x',  '2.5x',  '4.0x',  '顶格'],   # 乖离 < -10%（明显超卖）
+]
+
+# ── 黄金 标普PE×VIX 对冲矩阵（新增：基于股市估值的反向对冲逻辑）──────
+# 逻辑：股市高估+恐慌 → 黄金对冲价值高 → 多买
+#       股市低估+平静 → 不需要对冲 → 少买或暂停
+# 使用标普500 PE 和 VIX（与标普矩阵共用同一数据，无需新增数据源）
+GOLD_HEDGE_PE_BANDS  = [32, 29, 26, 23, 20, 17]  # PE 行分界（从高到低）
+GOLD_HEDGE_VIX_BANDS = [18, 25, 35]               # VIX 列分界（< 各值）
+
+GOLD_HEDGE_MATRIX = [
+    # VIX: <18(平静)  18-25(警觉)  25-35(恐慌)  >35(极恐)
+    ['1.0x',  '1.5x',  '2.5x',  '顶格'],   # PE > 32（股市高估）
+    ['0.8x',  '1.2x',  '2.0x',  '3.0x'],   # PE 29-32
+    ['0.5x',  '0.8x',  '1.5x',  '2.5x'],   # PE 26-29
+    ['0.3x',  '0.5x',  '1.0x',  '2.0x'],   # PE 23-26
+    ['0.2x',  '0.3x',  '0.5x',  '1.2x'],   # PE 20-23
+    ['暂停',  '0.2x',  '0.3x',  '0.8x'],   # PE 17-20
+    ['暂停',  '暂停',  '0.2x',  '0.5x'],   # PE < 17（股市低估）
 ]
 
 
@@ -755,7 +773,7 @@ def lookup_a_share_multiplier(pe: float | None, qvix: float | None, target: str)
 
 
 def lookup_gold_multiplier(bias200: float | None, vix: float | None) -> str:
-    """查黄金 乖离率(MA200)×VIX 矩阵，返回定投倍数建议。
+    """查黄金 乖离率(MA200)×VIX 矩阵，返回定投倍数建议（原始逻辑）。
 
     Args:
         bias200: 黄金 MA200 乖离率（%），如 +5.2 或 -8.1
@@ -768,14 +786,12 @@ def lookup_gold_multiplier(bias200: float | None, vix: float | None) -> str:
     if bias200 is None or vix is None:
         return '—'
 
-    # 乖离率行定位（从高到低找第一个 bias > band）
-    bias_row = len(GOLD_BIAS_BANDS)  # 默认最后行（< 最小值）
+    bias_row = len(GOLD_BIAS_BANDS)
     for i, band in enumerate(GOLD_BIAS_BANDS):
         if bias200 > band:
             bias_row = i
             break
 
-    # VIX 列定位（< 各分界值）
     vix_col = len(GOLD_VIX_BANDS)
     for j, band in enumerate(GOLD_VIX_BANDS):
         if vix < band:
@@ -783,3 +799,37 @@ def lookup_gold_multiplier(bias200: float | None, vix: float | None) -> str:
             break
 
     return GOLD_MATRIX[bias_row][vix_col]
+
+
+def lookup_gold_hedge_multiplier(pe_sp500: float | None, vix: float | None) -> str:
+    """查黄金 标普PE×VIX 对冲矩阵，返回定投倍数建议（对冲逻辑）。
+
+    逻辑：股市高估+恐慌 → 黄金对冲价值高 → 多买；反之少买。
+    与原始矩阵方向相反：高PE/高VIX时加仓黄金（而非减仓）。
+
+    Args:
+        pe_sp500: 标普500 PE 值
+        vix:      VIX 值
+
+    Returns:
+        '暂停' / '0.2x' / ... / '顶格'
+        若任一为 None，返回 '—'
+    """
+    if pe_sp500 is None or vix is None:
+        return '—'
+
+    # PE 行定位（从高到低）
+    pe_row = len(GOLD_HEDGE_PE_BANDS)
+    for i, band in enumerate(GOLD_HEDGE_PE_BANDS):
+        if pe_sp500 > band:
+            pe_row = i
+            break
+
+    # VIX 列定位
+    vix_col = len(GOLD_HEDGE_VIX_BANDS)
+    for j, band in enumerate(GOLD_HEDGE_VIX_BANDS):
+        if vix < band:
+            vix_col = j
+            break
+
+    return GOLD_HEDGE_MATRIX[pe_row][vix_col]
