@@ -6,7 +6,7 @@
   - csi300    沪深300       PE×QVIX 百分位矩阵（akshare，2015起）
   - csi_a500  中证A500      PE×QVIX 百分位矩阵（akshare，2015起）
   - sp500     标普500       PE×VIX 矩阵（Shiller Yale Excel，~2000起）
-  - ndx100    纳指100       PE×VIX 矩阵（⚠️ PE 使用标普500代理，见局限说明）
+  - ndx100    纳指100       PE×VXN 矩阵（⚠️ PE 使用标普500代理；VXN 来源 CBOE，比 VIX 更精准反映纳指期权恐慌）
   - gold      黄金 (USD/oz) MA200乖离率×VIX 矩阵（yfinance，~2000起）
 
 缓存：$FAMILYFUND_DATA/backtest_cache.json，当天已更新则不重新拉取。
@@ -168,6 +168,38 @@ def _fetch_vix_history(start_date: str) -> list[dict] | None:
         return None
 
 
+def _fetch_vxn_history(start_date: str) -> list[dict] | None:
+    """CBOE VXN 历史数据，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。
+    来源：cdn.cboe.com（与 market_monitor._fetch_vxn 相同数据源）。
+    """
+    try:
+        import requests
+        url = 'https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_VXN.json'
+        r = requests.get(url, timeout=15)
+        if not r.ok:
+            return None
+        records = []
+        for item in r.json().get('data', []):
+            d = item.get('date', '')
+            v = item.get('close')
+            if d and v and d >= start_date:
+                records.append({'date': d, 'value': float(v)})
+        return records if records else None
+    except Exception as e:
+        print(f'[backtest] VXN fetch failed: {e}')
+        # Fallback: yfinance ^VXN
+        try:
+            import yfinance as yf
+            raw = yf.download('^VXN', start=start_date, progress=False, auto_adjust=True)
+            if raw.empty:
+                return None
+            close = raw['Close'].squeeze()
+            df = pd.DataFrame({'date': close.index.strftime('%Y-%m-%d'), 'value': close.values})
+            return df.dropna(subset=['value']).to_dict('records')
+        except Exception:
+            return None
+
+
 def _fetch_qvix_history(start_date: str) -> list[dict] | None:
     """akshare QVIX 全历史，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。"""
     try:
@@ -250,7 +282,7 @@ def get_pe_series(target: str, start_date: str) -> pd.Series | None:
 
 
 def get_vol_series(target: str, start_date: str) -> pd.Series | None:
-    """A股 → QVIX；其余 → VIX。"""
+    """A股 → QVIX；纳指100 → VXN；其余 → VIX。"""
     cache = _load_cache()
     if target in ('csi300', 'csi_a500'):
         key = 'bt_qvix'
@@ -261,7 +293,17 @@ def get_vol_series(target: str, start_date: str) -> pd.Series | None:
                 cache[f'{key}_updated'] = date.today().isoformat()
                 _save_cache(cache)
         records = cache.get(key)
+    elif target == 'ndx100':
+        key = 'bt_vxn'
+        if not _cache_is_fresh(cache, key):
+            records = _fetch_vxn_history(start_date)
+            if records:
+                cache[key] = records
+                cache[f'{key}_updated'] = date.today().isoformat()
+                _save_cache(cache)
+        records = cache.get(key)
     else:
+        # sp500 / gold → VIX
         key = 'bt_vix'
         if not _cache_is_fresh(cache, key):
             records = _fetch_vix_history(start_date)
