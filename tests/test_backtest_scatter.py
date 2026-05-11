@@ -25,7 +25,7 @@ class TestRunAllTargets:
             pytest.skip('network not available')
 
     def test_a_share_start_date_clamped(self):
-        """A股起始日期不早于 2015-01-01（QVIX 限制）"""
+        """A股起始日期不早于 2020-01-01（PE 数据限制）"""
         from backtest import run_all_targets, _TARGET_MIN_DATES
         try:
             results = run_all_targets(
@@ -36,7 +36,7 @@ class TestRunAllTargets:
             )
             for r in results:
                 if r['target'] in ('csi300', 'csi_a500'):
-                    assert r['actual_start'] >= '2015-01-01'
+                    assert r['actual_start'] >= '2020-01-01'
                     assert r['actual_start'] == _TARGET_MIN_DATES[r['target']]
         except Exception:
             pytest.skip('network not available')
@@ -111,14 +111,14 @@ class TestTargetMinDates:
 
     def test_a_share_min_2015(self):
         from backtest import _TARGET_MIN_DATES
-        assert _TARGET_MIN_DATES['csi300']   == '2015-01-01'
-        assert _TARGET_MIN_DATES['csi_a500'] == '2015-01-01'
+        assert _TARGET_MIN_DATES['csi300']   == '2020-01-01'
+        assert _TARGET_MIN_DATES['csi_a500'] == '2020-01-01'
 
-    def test_us_min_2000(self):
+    def test_us_min_dates(self):
         from backtest import _TARGET_MIN_DATES
-        assert _TARGET_MIN_DATES['sp500']  == '2000-01-01'
-        assert _TARGET_MIN_DATES['ndx100'] == '2000-01-01'
-        assert _TARGET_MIN_DATES['gold']   == '2000-01-01'
+        assert _TARGET_MIN_DATES['sp500']  == '1990-01-01'
+        assert _TARGET_MIN_DATES['ndx100'] == '2009-10-01'  # VXN starts 2009-09-14
+        assert _TARGET_MIN_DATES['gold']   == '1990-01-01'
 
     def test_actual_start_takes_later_date(self):
         """actual_start = max(user_start, min_date)"""
@@ -126,7 +126,10 @@ class TestTargetMinDates:
         user = '2010-01-01'
         for target in ('csi300', 'csi_a500'):
             actual = max(user, _TARGET_MIN_DATES[target])
-            assert actual == '2015-01-01'
-        for target in ('sp500', 'ndx100'):
-            actual = max(user, _TARGET_MIN_DATES[target])
-            assert actual == '2010-01-01'  # user_start 更晚
+            assert actual == '2020-01-01'
+        # sp500/gold: min=1990, user=2010 → user wins
+        actual_sp = max(user, _TARGET_MIN_DATES['sp500'])
+        assert actual_sp == '2010-01-01'
+        # ndx100: min=2009-10-01, user=2010-01-01 → user wins
+        actual_ndx = max(user, _TARGET_MIN_DATES['ndx100'])
+        assert actual_ndx == '2010-01-01'
