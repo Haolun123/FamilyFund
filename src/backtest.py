@@ -75,7 +75,9 @@ def _cache_is_fresh(cache: dict, key: str) -> bool:
 # ══════════════════════════════════════════════════════════════
 
 def _fetch_price_history(target: str, start_date: str) -> list[dict] | None:
-    """拉取日线收盘价，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。"""
+    """拉取日线收盘价全量历史，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。
+    不截断 start_date，由调用方过滤。
+    """
     try:
         if target in ('csi300', 'csi_a500'):
             import akshare as ak
@@ -83,11 +85,10 @@ def _fetch_price_history(target: str, start_date: str) -> list[dict] | None:
             df = ak.stock_zh_index_daily(symbol=sym)
             df = df[['date', 'close']].rename(columns={'close': 'value'})
             df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
-            df = df[df['date'] >= start_date]
         else:
             import yfinance as yf
             sym = {'gold': 'GC=F', 'sp500': '^GSPC', 'ndx100': '^NDX'}[target]
-            raw = yf.download(sym, start=start_date, progress=False, auto_adjust=True)
+            raw = yf.download(sym, start='1900-01-01', progress=False, auto_adjust=True)
             if raw.empty:
                 return None
             close = raw['Close'].squeeze()
@@ -139,16 +140,16 @@ def _fetch_pe_shiller(start_date: str) -> list[dict] | None:
 
 
 def _fetch_pe_akshare(symbol: str, start_date: str) -> list[dict] | None:
-    """akshare A股 PE 历史，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。"""
+    """akshare A股 PE 全量历史，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。
+    不截断 start_date，由调用方过滤。
+    """
     try:
         import akshare as ak
         df = ak.stock_index_pe_lg(symbol=symbol)
-        # 明确取'滚动市盈率'列（与 market_monitor.py 保持一致）
         df = df[['日期', '滚动市盈率']].rename(columns={'日期': 'date', '滚动市盈率': 'value'})
         df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
         df['value'] = pd.to_numeric(df['value'], errors='coerce')
         df = df.dropna(subset=['value'])
-        df = df[df['date'] >= start_date]
         return df.to_dict('records')
     except Exception as e:
         print(f'[backtest] akshare PE fetch failed for {symbol}: {e}')
@@ -156,10 +157,12 @@ def _fetch_pe_akshare(symbol: str, start_date: str) -> list[dict] | None:
 
 
 def _fetch_vix_history(start_date: str) -> list[dict] | None:
-    """yfinance ^VIX 日线，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。"""
+    """yfinance ^VIX 全量日线，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。
+    不截断 start_date，由调用方过滤。
+    """
     try:
         import yfinance as yf
-        raw = yf.download('^VIX', start=start_date, progress=False, auto_adjust=True)
+        raw = yf.download('^VIX', start='1990-01-01', progress=False, auto_adjust=True)
         if raw.empty:
             return None
         close = raw['Close'].squeeze()
@@ -171,8 +174,8 @@ def _fetch_vix_history(start_date: str) -> list[dict] | None:
 
 
 def _fetch_vxn_history(start_date: str) -> list[dict] | None:
-    """CBOE VXN 历史数据，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。
-    来源：cdn.cboe.com（与 market_monitor._fetch_vxn 相同数据源）。
+    """CBOE VXN 全量历史数据，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。
+    不截断 start_date，由调用方过滤。
     """
     try:
         import requests
@@ -184,15 +187,14 @@ def _fetch_vxn_history(start_date: str) -> list[dict] | None:
         for item in r.json().get('data', []):
             d = item.get('date', '')
             v = item.get('close')
-            if d and v and d >= start_date:
+            if d and v:
                 records.append({'date': d, 'value': float(v)})
         return records if records else None
     except Exception as e:
         print(f'[backtest] VXN fetch failed: {e}')
-        # Fallback: yfinance ^VXN
         try:
             import yfinance as yf
-            raw = yf.download('^VXN', start=start_date, progress=False, auto_adjust=True)
+            raw = yf.download('^VXN', start='2009-01-01', progress=False, auto_adjust=True)
             if raw.empty:
                 return None
             close = raw['Close'].squeeze()
@@ -203,7 +205,9 @@ def _fetch_vxn_history(start_date: str) -> list[dict] | None:
 
 
 def _fetch_qvix_history(start_date: str) -> list[dict] | None:
-    """akshare QVIX 全历史，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。"""
+    """akshare QVIX 全历史，返回 [{'date': 'YYYY-MM-DD', 'value': float}]。
+    不截断 start_date，由调用方过滤。
+    """
     try:
         import akshare as ak
         df = ak.index_option_300etf_qvix()
@@ -211,7 +215,6 @@ def _fetch_qvix_history(start_date: str) -> list[dict] | None:
         df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
         df['value'] = pd.to_numeric(df['value'], errors='coerce')
         df = df.dropna(subset=['value'])
-        df = df[df['date'] >= start_date]
         return df.to_dict('records')
     except Exception as e:
         print(f'[backtest] QVIX fetch failed: {e}')
