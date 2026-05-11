@@ -648,42 +648,48 @@ def run_all_targets(
     for target in ['sp500', 'ndx100', 'csi300', 'csi_a500', 'gold']:
         min_date = _TARGET_MIN_DATES.get(target, '2000-01-01')
         actual_start = max(user_start_date, min_date)
-        try:
-            r = run_backtest(
-                target=target,
-                start_date=actual_start,
-                base_amount=base_amount,
-                freq=freq,
-                top_multiplier=_TOP_MULT[target],
-                end_date=end_date,
-            )
-            fixed  = r['fixed']
-            matrix = r['matrix']
-            xirr_e = (matrix['xirr'] - fixed['xirr']) if (
-                matrix['xirr'] is not None and fixed['xirr'] is not None
-            ) else None
-            pl_e = (matrix['profit_loss'] - fixed['profit_loss']) if (
-                matrix['profit_loss'] is not None and fixed['profit_loss'] is not None
-            ) else None
-            results.append({
-                'target':       target,
-                'label':        _TARGET_NAMES[target],
-                'actual_start': actual_start,
-                'xirr_excess':  round(xirr_e, 2) if xirr_e is not None else None,
-                'pl_excess':    round(pl_e, 2)   if pl_e   is not None else None,
-                'fixed_xirr':   fixed['xirr'],
-                'matrix_xirr':  matrix['xirr'],
-                'fixed_pl':     fixed['profit_loss'],
-                'matrix_pl':    matrix['profit_loss'],
-                'error':        None,
-            })
-        except Exception as e:
-            results.append({
-                'target': target, 'label': _TARGET_NAMES[target],
-                'actual_start': actual_start,
-                'xirr_excess': None, 'pl_excess': None,
-                'fixed_xirr': None, 'matrix_xirr': None,
-                'fixed_pl': None, 'matrix_pl': None,
-                'error': str(e)[:80],
-            })
+        # 黄金跑两次：原始矩阵 + 对冲矩阵
+        modes = [False, True] if target == 'gold' else [False]
+        for hedge in modes:
+            label_suffix = '(对冲)' if hedge else ('(原始)' if target == 'gold' else '')
+            label = _TARGET_NAMES[target] + label_suffix
+            try:
+                r = run_backtest(
+                    target=target,
+                    start_date=actual_start,
+                    base_amount=base_amount,
+                    freq=freq,
+                    top_multiplier=_TOP_MULT[target],
+                    end_date=end_date,
+                    gold_hedge_mode=hedge,
+                )
+                fixed  = r['fixed']
+                matrix = r['matrix']
+                xirr_e = (matrix['xirr'] - fixed['xirr']) if (
+                    matrix['xirr'] is not None and fixed['xirr'] is not None
+                ) else None
+                pl_e = (matrix['profit_loss'] - fixed['profit_loss']) if (
+                    matrix['profit_loss'] is not None and fixed['profit_loss'] is not None
+                ) else None
+                results.append({
+                    'target':       target,
+                    'label':        label,
+                    'actual_start': actual_start,
+                    'xirr_excess':  round(xirr_e, 2) if xirr_e is not None else None,
+                    'pl_excess':    round(pl_e, 2)   if pl_e   is not None else None,
+                    'fixed_xirr':   fixed['xirr'],
+                    'matrix_xirr':  matrix['xirr'],
+                    'fixed_pl':     fixed['profit_loss'],
+                    'matrix_pl':    matrix['profit_loss'],
+                    'error':        None,
+                })
+            except Exception as e:
+                results.append({
+                    'target': target, 'label': label,
+                    'actual_start': actual_start,
+                    'xirr_excess': None, 'pl_excess': None,
+                    'fixed_xirr': None, 'matrix_xirr': None,
+                    'fixed_pl': None, 'matrix_pl': None,
+                    'error': str(e)[:80],
+                })
     return results

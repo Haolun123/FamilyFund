@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 class TestRunAllTargets:
 
-    def test_returns_five_targets(self):
-        """run_all_targets 应返回5个标的的结果"""
+    def test_returns_six_results(self):
+        """run_all_targets 返回6个结果（黄金跑两次：原始+对冲）"""
         from backtest import run_all_targets
         try:
             results = run_all_targets(
@@ -18,9 +18,12 @@ class TestRunAllTargets:
                 freq='M',
                 end_date='2022-12-31',
             )
-            assert len(results) == 5
+            assert len(results) == 6
             targets = [r['target'] for r in results]
-            assert set(targets) == {'csi300', 'csi_a500', 'sp500', 'ndx100', 'gold'}
+            assert targets.count('gold') == 2
+            labels = [r['label'] for r in results]
+            assert any('原始' in l for l in labels)
+            assert any('对冲' in l for l in labels)
         except Exception:
             pytest.skip('network not available')
 

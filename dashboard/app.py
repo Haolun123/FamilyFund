@@ -3520,8 +3520,17 @@ with tab_backtest:
             _scatter_all = _make_effectiveness_scatter(_pts, _cur_all)
             st.plotly_chart(_scatter_all, use_container_width=True)
             # Caption：各标的实际起始日期
-            _date_notes = ' · '.join(f"{r['label']} {r['actual_start']}" for r in _all_results if not r.get('error'))
-            st.caption(f"各标的实际回测起始：{_date_notes}　截止：{bt_end.strftime('%Y-%m-%d')}　基准金额：¥{bt_base_amount:,.0f}/期")
+            # 去重：黄金两条只显示一次日期
+            _seen = set()
+            _date_parts = []
+            for r in _all_results:
+                if not r.get('error'):
+                    key = (r['target'], r['actual_start'])
+                    if key not in _seen:
+                        _seen.add(key)
+                        _date_parts.append(f"{_TARGET_NAMES.get(r['target'], r['target'])} {r['actual_start']}")
+            _date_notes = ' · '.join(_date_parts)
+            st.caption(f"各标的实际回测起始：{_date_notes}　截止：{bt_end.strftime('%Y-%m-%d')}　基准金额：¥{bt_base_amount:,.0f}/期　黄金显示两个点（原始/对冲矩阵）")
         if _errs:
             for r in _errs:
                 st.warning(f"⚠️ {r['label']} 回测失败：{r['error']}")
