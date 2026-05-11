@@ -87,79 +87,38 @@ if raw_df is None:
     st.error("无法加载数据文件。请确保 data/portfolio.csv 或 data/portfolio_sample.csv 存在。")
     st.stop()
 
-# ─── Sidebar ───
+# ─── Sidebar：系统状态（仅全局信息）───
 
-st.sidebar.title("📊 FamilyFund")
-st.sidebar.caption("家庭基金管理仪表板")
+st.sidebar.title("FamilyFund")
+st.sidebar.caption("家庭基金管理系统")
 st.sidebar.divider()
 
-# Data source info
 data_name = os.path.basename(csv_path)
 dates = sorted(raw_df['Date'].unique())
-st.sidebar.markdown(f"**数据源**: `{data_name}`")
-st.sidebar.markdown(f"**周期数**: {len(dates)}")
+_latest_snap = dates[-1] if dates else '—'
+_fund_start  = dates[0]  if dates else '—'
 
-# PDF export
-st.sidebar.divider()
-st.sidebar.subheader("导出")
-_pdf_bytes = generate_pdf_report(raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df)
-_latest_date = fund_nav_df.iloc[-1]['Date']
-st.sidebar.download_button(
-    label="Download PDF Report",
-    data=_pdf_bytes,
-    file_name=f"FamilyFund_{_latest_date}.pdf",
-    mime="application/pdf",
-)
+st.sidebar.markdown(f"**最新快照** {_latest_snap}")
+st.sidebar.markdown(f"**建仓日期** {_fund_start}")
+st.sidebar.markdown(f"**快照期数** {len(dates)} 期")
+st.sidebar.markdown(f"**数据文件** `{data_name}`")
 
-# Date range filter
-st.sidebar.subheader("日期范围")
-date_options = dates
-if len(date_options) > 1:
-    start_idx, end_idx = st.sidebar.select_slider(
-        "选择日期范围",
-        options=list(range(len(date_options))),
-        value=(0, len(date_options) - 1),
-        format_func=lambda i: date_options[i],
-        label_visibility="collapsed",
-    )
-    date_start = date_options[start_idx]
-    date_end = date_options[end_idx]
-else:
-    date_start = date_end = date_options[0]
+# ─── Portfolio Tab 控件（在 Tab 内使用，此处预先计算所需变量）───
 
-# Asset class filter
-st.sidebar.subheader("资产类别")
-# Asset class filter（Cash 作为流动性储备，不参与分类对比）
-all_classes = sorted(c for c in raw_df['Asset_Class'].unique() if c != 'Cash')
-display_map = {cls: CLASS_DISPLAY_NAMES.get(cls, cls) for cls in raw_df['Asset_Class'].unique()}
-
-select_all = st.sidebar.checkbox("全选", value=True)
-if select_all:
-    selected_classes = all_classes
-else:
-    selected_classes = st.sidebar.multiselect(
-        "选择类别",
-        options=all_classes,
-        default=all_classes,
-        format_func=lambda c: display_map[c],
-        label_visibility="collapsed",
-    )
-
-# Benchmark overlay
-st.sidebar.divider()
-st.sidebar.subheader("基准对比")
+# 日期范围、类别筛选、基准对比 → 移至 Portfolio Tab 顶部
+# 以下变量在 Tab1 内部定义，此处设默认值供其他 Tab 引用
+date_start = dates[0]  if dates else ''
+date_end   = dates[-1] if dates else ''
+all_classes   = sorted(c for c in raw_df['Asset_Class'].unique() if c != 'Cash')
+display_map   = {cls: CLASS_DISPLAY_NAMES.get(cls, cls) for cls in raw_df['Asset_Class'].unique()}
+selected_classes  = all_classes
 selected_benchmarks = []
-for bkey, bname in BENCHMARK_DISPLAY_NAMES.items():
-    if st.sidebar.checkbox(bname, value=False, key=f"bm_{bkey}"):
-        selected_benchmarks.append(bkey)
+benchmark_data    = {}
+fund_start_date   = raw_df['Date'].min()
 
-# Load benchmark data (cached, with iCloud fallback)
-fund_start_date = raw_df['Date'].min()
-benchmark_data = get_benchmarks(fund_start_date) if selected_benchmarks else {}
-
-# Filter data by date range
-filtered_raw = raw_df[(raw_df['Date'] >= date_start) & (raw_df['Date'] <= date_end)]
-filtered_fund = fund_nav_df[(fund_nav_df['Date'] >= date_start) & (fund_nav_df['Date'] <= date_end)]
+# Filter data（默认全量，Tab1 内部会用用户选择后的值覆盖本地变量）
+filtered_raw  = raw_df
+filtered_fund = fund_nav_df
 
 # ─── Global session_state initialization ───
 # Must run before any tab widgets to prevent widget value= overriding cache
@@ -184,6 +143,62 @@ with tab_dashboard:
 
     # 加载目标配置比例（不缓存，用户可能刚修改过）
     target_alloc = load_target_allocation(os.path.dirname(csv_path))
+
+    # ─── Portfolio 筛选控件 ───
+    with st.expander("🔧 筛选与导出", expanded=False):
+        _fc1, _fc2, _fc3 = st.columns([2, 2, 1])
+        with _fc1:
+            st.markdown("**日期范围**")
+            if len(dates) > 1:
+                _start_idx, _end_idx = st.select_slider(
+                    "日期范围",
+                    options=list(range(len(dates))),
+                    value=(0, len(dates) - 1),
+                    format_func=lambda i: dates[i],
+                    label_visibility="collapsed",
+                    key="port_date_range",
+                )
+                date_start = dates[_start_idx]
+                date_end   = dates[_end_idx]
+            else:
+                date_start = date_end = dates[0]
+
+        with _fc2:
+            st.markdown("**资产类别**")
+            _select_all = st.checkbox("全选", value=True, key="port_select_all")
+            if _select_all:
+                selected_classes = all_classes
+            else:
+                selected_classes = st.multiselect(
+                    "选择类别", options=all_classes, default=all_classes,
+                    format_func=lambda c: display_map[c],
+                    label_visibility="collapsed", key="port_classes",
+                )
+
+        with _fc3:
+            st.markdown("**导出**")
+            _pdf_bytes = generate_pdf_report(raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df)
+            _latest_date = fund_nav_df.iloc[-1]['Date']
+            st.download_button(
+                label="📄 PDF",
+                data=_pdf_bytes,
+                file_name=f"FamilyFund_{_latest_date}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+
+        st.markdown("**基准对比**")
+        _bm_cols = st.columns(len(BENCHMARK_DISPLAY_NAMES))
+        for _i, (bkey, bname) in enumerate(BENCHMARK_DISPLAY_NAMES.items()):
+            with _bm_cols[_i]:
+                if st.checkbox(bname, value=False, key=f"bm_{bkey}"):
+                    selected_benchmarks.append(bkey)
+
+        benchmark_data = get_benchmarks(fund_start_date) if selected_benchmarks else {}
+
+    # 根据筛选更新 filtered 变量
+    filtered_raw  = raw_df[(raw_df['Date'] >= date_start) & (raw_df['Date'] <= date_end)]
+    filtered_fund = fund_nav_df[(fund_nav_df['Date'] >= date_start) & (fund_nav_df['Date'] <= date_end)]
 
     # ─── Section 1: Fund Overview ───
 
