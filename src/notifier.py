@@ -158,7 +158,7 @@ def _format_message(market_data: dict) -> str:
     lines.append(f'> CSI300　　{c300_str}')
     lines.append(f'> 中证A500　{a500_str} _(PE代理:中证500)_')
 
-    # 黄金
+    # 黄金（矩阵策略经回测验证失效，建议固定定投，此处仅展示乖离率供参考）
     gold_entry  = market_data.get('gold')
     gold_bias200 = None
     if gold_entry:
@@ -166,7 +166,7 @@ def _format_message(market_data: dict) -> str:
         gold_bias200 = gold_bias.get('bias200')
     mult_gold = lookup_gold_multiplier(gold_bias200, vix_val)
     if gold_bias200 is not None and vix_val:
-        gold_str = f'乖离(MA200) {gold_bias200:+.1f}% × VIX {vix_val:.1f} → **{mult_gold}**'
+        gold_str = f'乖离(MA200) {gold_bias200:+.1f}% × VIX {vix_val:.1f} → {mult_gold} ⚠️固定定投更优'
     else:
         gold_str = '⚠️ 数据不完整'
     lines.append(f'> 黄金　　　{gold_str}')
