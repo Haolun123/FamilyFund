@@ -3299,6 +3299,8 @@ with tab_backtest:
         bt_run = st.button("▶ 运行回测", type="primary", key='bt_run', use_container_width=True)
         bt_run_all = st.button("🔭 全标的对比", key='bt_run_all', use_container_width=True,
                                help="批量跑5个标的，在散点图上对比策略有效性（约需30-60秒）")
+        bt_gen_report = st.button("📄 生成回测报告", key='bt_gen_report', use_container_width=True,
+                                  help="生成全标的 HTML 报告，保存到 data/reports/，可用浏览器打印为PDF")
 
     if bt_target == 'ndx100':
         st.info(
@@ -3360,6 +3362,33 @@ with tab_backtest:
                 st.session_state['bt_all_results'] = _all_results
             except Exception as e:
                 st.error(f"全标的对比失败: {e}")
+
+    # ─── 生成回测报告 ────────────────────────────────────
+    if bt_gen_report:
+        with st.spinner("正在跑全标的回测并生成报告（约需60-90秒）..."):
+            try:
+                from backtest_report import generate_backtest_report
+                report_path = generate_backtest_report(
+                    data_dir=os.path.dirname(csv_path),
+                    start_date=bt_start.strftime('%Y-%m-%d'),
+                    end_date=bt_end.strftime('%Y-%m-%d'),
+                    base_amount=bt_base_amount,
+                    freq='W' if bt_freq == '周频' else 'M',
+                    top_multiplier_equity=bt_top_equity,
+                    top_multiplier_gold=bt_top_gold,
+                )
+                st.success(f"报告已生成：`{os.path.basename(report_path)}`")
+                st.caption(f"保存路径：{report_path}　用浏览器打开后可打印为 PDF")
+                # 提供下载
+                with open(report_path, 'rb') as f:
+                    st.download_button(
+                        label="⬇ 下载 HTML 报告",
+                        data=f.read(),
+                        file_name=os.path.basename(report_path),
+                        mime='text/html',
+                    )
+            except Exception as e:
+                st.error(f"报告生成失败: {e}")
 
     result = st.session_state.get('bt_result')
 
