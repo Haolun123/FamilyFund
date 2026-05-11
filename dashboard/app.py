@@ -2412,7 +2412,7 @@ with tab_market:
                 f"</div>",
                 unsafe_allow_html=True,
             )
-            st.caption("⚠️ 标普长期慢牛，PE 由盈利增长驱动持续抬升，矩阵信号有系统性踏空风险。建议参考而非严格执行。")
+            st.caption("ℹ️ 回测验证：标普500矩阵策略在20年（2005起）视角下有效，XIRR超额+0.2%，绝对多赚约150万。核心价值在于危机时顶格加仓（2008/2020），而非日常减仓择时。")
         else:
             st.info("标普500: 数据不完整，无法计算")
 
@@ -2587,7 +2587,7 @@ with tab_market:
         "基于 MA200乖离率 × VIX 矩阵。黄金无PE，以MA200乖离率作为估值锚。"
         "黄金定位为对冲/压舱石仓位，顶格=5x，整体倍数低于权益类。"
     )
-    st.warning("⚠️ 2024年起黄金进入结构性重估（去美元化/央行购金驱动），MA200乖离率持续高位，信号可能长期偏空。回测显示此期间固定定投市值约为矩阵策略的4倍。建议结合宏观判断，不宜严格执行减仓信号。", icon=None)
+    st.warning("⚠️ 回测验证：黄金两套矩阵（原始+对冲）在2024年结构性牛市中均失效，固定定投反而最优。矩阵策略对黄金的择时价值有限，建议黄金采用固定定投，不依赖矩阵信号。", icon=None)
 
     gold_entry = market_data.get('gold')
     gold_bias200 = None
@@ -2982,7 +2982,7 @@ with tab_market:
         _dca_df = _pd_dca.DataFrame(_rows)
         st.dataframe(_dca_df, use_container_width=True, hide_index=True)
         st.markdown(f"**本周建议总投入：¥{_total_suggested:,}**")
-        st.caption("⚠️ 标普500（US_Blend_Fund）和黄金（Gold）的矩阵信号仅供参考：标普长期慢牛易系统性踏空；黄金2024年起结构性重估，MA200信号可能持续偏空。建议结合宏观判断自行决策。")
+        st.caption("⚠️ 回测验证：黄金两套矩阵在结构性行情中均失效，建议黄金采用固定定投。标普500矩阵策略经20年回测验证有效（核心在危机加仓），可正常执行。")
     else:
         st.info("暂无启用的定投计划，点击下方「管理定投计划」添加。")
 
