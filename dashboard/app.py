@@ -3158,12 +3158,12 @@ with tab_backtest:
         'gold':     '黄金 (GC=F)',
     }
     _DEFAULT_STARTS = {
-        'csi300':   _date(2015, 1, 1), 'csi_a500': _date(2015, 1, 1),
+        'csi300':   _date(2020, 1, 1), 'csi_a500': _date(2020, 1, 1),
         'sp500':    _date(2000, 1, 1), 'ndx100':   _date(2010, 1, 1),
         'gold':     _date(2000, 1, 1),
     }
     _MIN_DATES = {
-        'csi300':   _date(2015, 1, 1), 'csi_a500': _date(2015, 1, 1),
+        'csi300':   _date(2020, 1, 1), 'csi_a500': _date(2020, 1, 1),
         'sp500':    _date(1990, 1, 1), 'ndx100':   _date(2009, 10, 1),
         'gold':     _date(1990, 1, 1),
     }

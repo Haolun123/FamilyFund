@@ -39,7 +39,7 @@ class TestRunAllTargets:
             )
             for r in results:
                 if r['target'] in ('csi300', 'csi_a500'):
-                    assert r['actual_start'] >= '2015-01-01'
+                    assert r['actual_start'] >= '2020-01-01'
                     assert r['actual_start'] == _TARGET_MIN_DATES[r['target']]
         except Exception:
             pytest.skip('network not available')
@@ -114,8 +114,8 @@ class TestTargetMinDates:
 
     def test_a_share_min_2015(self):
         from backtest import _TARGET_MIN_DATES
-        assert _TARGET_MIN_DATES['csi300']   == '2015-01-01'
-        assert _TARGET_MIN_DATES['csi_a500'] == '2015-01-01'
+        assert _TARGET_MIN_DATES['csi300']   == '2020-01-01'
+        assert _TARGET_MIN_DATES['csi_a500'] == '2020-01-01'
 
     def test_us_min_dates(self):
         from backtest import _TARGET_MIN_DATES
@@ -129,7 +129,7 @@ class TestTargetMinDates:
         user = '2010-01-01'
         for target in ('csi300', 'csi_a500'):
             actual = max(user, _TARGET_MIN_DATES[target])
-            assert actual == '2015-01-01'
+            assert actual == '2020-01-01'
         # sp500/gold: min=1990, user=2010 → user wins
         actual_sp = max(user, _TARGET_MIN_DATES['sp500'])
         assert actual_sp == '2010-01-01'
