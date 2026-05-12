@@ -3725,8 +3725,11 @@ with tab_quarterly:
             if qoq:
                 nw_prev = qoq.get('net_worth_prev', 0)
                 nw_curr = qoq.get('net_worth_curr', 0)
-                asset_d = qoq.get('asset_delta', 0)
-                liab_d  = qoq.get('liability_delta', 0)
+                # asset_delta / liability_delta 是按类别拆分的 dict，需要求和
+                _ad = qoq.get('asset_delta', 0)
+                _ld = qoq.get('liability_delta', 0)
+                asset_d = sum(_ad.values()) if isinstance(_ad, dict) else _ad
+                liab_d  = sum(_ld.values()) if isinstance(_ld, dict) else _ld
                 fig_wf = go.Figure(go.Waterfall(
                     name='净资产变动',
                     orientation='v',
