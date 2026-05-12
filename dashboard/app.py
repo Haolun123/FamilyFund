@@ -2276,9 +2276,9 @@ with tab_market:
     else:
         cn_treasury_label, cn_treasury_emoji = '偏低（宽松）', '🟢'
 
-    # 红利利差（上证红利近似股息率 = A股PE对应的1/PE×40%，粗估 ≈ 4-5%）
-    # 用沪深300PE倒数×40%作为代理（更容易获取）
-    _div_yield_proxy = (1 / pe_csi300 * 100 * 0.4) if (pe_csi300 and pe_csi300 > 0) else None
+    # 红利利差（沪深300 PE倒数×40% 近似股息率 - 中国10Y国债）
+    _pe_csi300_for_div = (market_data.get('pe_csi300') or {}).get('value')
+    _div_yield_proxy = (1 / _pe_csi300_for_div * 100 * 0.4) if (_pe_csi300_for_div and _pe_csi300_for_div > 0) else None
     _div_spread = round(_div_yield_proxy - cn_treasury_val, 2) if (_div_yield_proxy and cn_treasury_val) else None
 
     # 美债收益率信号（仅展示，不参与矩阵）
