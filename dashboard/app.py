@@ -21,7 +21,7 @@ from nav_engine import (
 )
 from fx_service import get_exchange_rate, get_stock_price, load_sap_price_cache, save_sap_price_cache
 from sap_stock import load_own_sap, load_move_sap, own_sap_summary, move_sap_summary
-from pdf_report import generate_report as generate_pdf_report
+from portfolio_report import generate_report as generate_pdf_report
 from benchmark import get_benchmarks, BENCHMARK_DISPLAY_NAMES, BENCHMARK_COLORS
 from fundamentals import (
     load_yf_symbols, save_yf_symbols, get_all_fundamentals,
@@ -178,13 +178,13 @@ with tab_dashboard:
 
         with _fc3:
             st.markdown("**导出**")
-            _pdf_bytes = generate_pdf_report(raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df)
+            _html_bytes = generate_pdf_report(raw_df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_df)
             _latest_date = fund_nav_df.iloc[-1]['Date']
             st.download_button(
-                label="📄 PDF",
-                data=_pdf_bytes,
-                file_name=f"FamilyFund_{_latest_date}.pdf",
-                mime="application/pdf",
+                label="📄 HTML 报告",
+                data=_html_bytes,
+                file_name=f"FamilyFund_{_latest_date}.html",
+                mime="text/html",
                 use_container_width=True,
             )
 
@@ -3685,223 +3685,144 @@ with tab_quarterly:
         # ─── PDF 导出 ────────────────────────────────────────
         st.divider()
 
-        def _generate_quarterly_pdf(q_curr, curr, q_prev, qoq, asset_df, liab_df, compare_df=None):
-            import io
-            import matplotlib
-            import matplotlib.pyplot as plt
-            from matplotlib.backends.backend_pdf import PdfPages
-            try:
-                import mpl_fontkit as fk
-                fk.install('NotoSansSC', verbose=False)
-            except Exception:
-                pass
-            matplotlib.rcParams['font.sans-serif'] = [
-                'Arial Unicode MS', 'Noto Sans CJK SC', 'Noto Sans SC',
-                'PingFang SC', 'SimHei',
-            ]
-            matplotlib.rcParams['axes.unicode_minus'] = False
+        def _generate_quarterly_html(q_curr, curr, q_prev, qoq, asset_df, liab_df, compare_df=None):
+            """季度财报 HTML 报告生成。"""
+            import plotly.graph_objects as go
+            import plotly.io as pio
 
-            PAGE = (11.69, 8.27)
-            buf = io.BytesIO()
+            # ── KPI ──
+            net_worth   = curr['net_worth']
+            total_assets = curr['total_assets']
+            total_liab   = curr['total_liabilities']
+            qoq_nw = qoq['net_worth_change'] if qoq else None
+            qoq_pct = qoq['net_worth_change_pct'] if qoq else None
 
-            def _style_table(tbl, fontsize=7):
-                tbl.auto_set_font_size(False)
-                tbl.set_fontsize(fontsize)
-                tbl.scale(1, 1.4)
-                for (row, col), cell in tbl.get_celld().items():
-                    cell.set_edgecolor('#e0e0e0')
-                    cell.PAD = 0.04
-                    if row == 0:
-                        cell.set_facecolor('#2196F3')
-                        cell.set_text_props(color='white', fontweight='bold', fontsize=fontsize)
-                    elif '小计' in str(cell.get_text().get_text()):
-                        cell.set_facecolor('#e3f2fd')
-                        cell.set_text_props(fontweight='bold')
-                    elif row % 2 == 0:
-                        cell.set_facecolor('#fafafa')
+            kpi_html = f"""
+            <div class="kpi-row">
+              <div class="kpi"><div class="kpi-label">净资产</div>
+                <div class="kpi-value">¥{net_worth:,.0f}</div>
+                {'<div class="kpi-delta ' + ('pos' if qoq_nw>=0 else 'neg') + '">' + ('+' if qoq_nw>=0 else '') + f'¥{qoq_nw:,.0f} ({qoq_pct:+.1f}%)</div>' if qoq_nw is not None else ''}</div>
+              <div class="kpi"><div class="kpi-label">总资产</div><div class="kpi-value">¥{total_assets:,.0f}</div></div>
+              <div class="kpi"><div class="kpi-label">总负债</div><div class="kpi-value">¥{total_liab:,.0f}</div></div>
+              <div class="kpi"><div class="kpi-label">资产负债率</div>
+                <div class="kpi-value">{total_liab/total_assets*100:.1f}%</div></div>
+            </div>"""
 
-            with PdfPages(buf) as pdf:
-                # ── Page 1: KPI + 资产负债表（左右分列）──
-                fig = plt.figure(figsize=PAGE)
-                fig.suptitle(f'FamilyFund 家庭财报  {q_curr}', fontsize=15,
-                             fontweight='bold', color='#1a237e', y=0.98)
+            # ── 资产负债表 ──
+            def _df_to_html(df, title):
+                rows = ''
+                for _, row in df.iterrows():
+                    vals = ''.join(f'<td>{v}</td>' for v in row.values)
+                    cls = ' class="subtotal"' if '小计' in str(row.iloc[0]) else ''
+                    rows += f'<tr{cls}>{vals}</tr>'
+                cols = ''.join(f'<th>{c}</th>' for c in df.columns)
+                return f'<h3>{title}</h3><table class="data-table"><thead><tr>{cols}</tr></thead><tbody>{rows}</tbody></table>'
 
-                # KPI 行（顶部 12% 高度）
-                ax_kpi = fig.add_axes([0.02, 0.86, 0.96, 0.10])
-                ax_kpi.axis('off')
-                kpis = [
-                    ('家庭净资产', f'¥{curr["net_worth"]:,.0f}'),
-                    ('总资产',     f'¥{curr["total_assets"]:,.0f}'),
-                    ('总负债',     f'¥{curr["total_liabilities"]:,.0f}'),
-                    ('资产负债率', f'{curr["debt_ratio"]:.1f}%'),
-                    ('金融投资占比', f'{curr["investment_ratio"]:.1f}%'),
-                ]
-                if q_prev and qoq:
-                    kpis.append(('QoQ净资产', f'¥{qoq["net_worth_delta"]:+,.0f}'))
-                n = len(kpis)
-                for i, (label, val) in enumerate(kpis):
-                    x = (i + 0.5) / n
-                    ax_kpi.text(x, 0.75, val, ha='center', va='center',
-                                fontsize=12, fontweight='bold', color='#1565c0',
-                                transform=ax_kpi.transAxes)
-                    ax_kpi.text(x, 0.15, label, ha='center', va='center',
-                                fontsize=7.5, color='#666', transform=ax_kpi.transAxes)
+            bs_html = _df_to_html(asset_df, '资产明细') + _df_to_html(liab_df, '负债明细')
 
-                # 分隔线
-                fig.add_axes([0.02, 0.845, 0.96, 0.005]).set_axis_off()
+            # ── 瀑布图（如果有 QoQ 数据）──
+            waterfall_html = ''
+            if qoq and 'waterfall' in qoq:
+                wf = qoq['waterfall']
+                fig_wf = go.Figure(go.Waterfall(
+                    name='净资产变动',
+                    orientation='v',
+                    measure=wf.get('measure', []),
+                    x=wf.get('x', []),
+                    y=wf.get('y', []),
+                    text=[f'¥{v:+,.0f}' for v in wf.get('y', [])],
+                    textposition='outside',
+                    connector=dict(line=dict(color='#888')),
+                ))
+                fig_wf.update_layout(
+                    title=f'净资产 QoQ 变动瀑布图（{q_prev} → {q_curr}）',
+                    height=400, showlegend=False, margin=dict(t=50, b=40),
+                )
+                waterfall_html = f'<h2>净资产变动分析</h2>{pio.to_html(fig_wf, full_html=False, include_plotlyjs=False)}'
 
-                # 资产端表格（左半）
-                ax_a = fig.add_axes([0.02, 0.06, 0.47, 0.77])
-                ax_a.axis('off')
-                ax_a.set_title('资产端', fontsize=10, fontweight='bold',
-                               color='#1565c0', pad=4, loc='left')
-                a_vals = []
-                for _, r in asset_df.iterrows():
-                    if r['账户/项目'] == '':
-                        continue
-                    a_vals.append([r['大类'], r['账户/项目'],
-                                   f'¥{r["金额(CNY)"]:,.0f}'])
-                if a_vals:
-                    tbl_a = ax_a.table(
-                        cellText=a_vals,
-                        colLabels=['大类', '项目', '金额'],
-                        loc='upper center', cellLoc='left',
-                        colWidths=[0.28, 0.42, 0.30],
+            # ── 资产结构对比（如果有 compare_df）──
+            compare_html = ''
+            if compare_df is not None and not compare_df.empty:
+                try:
+                    categories = compare_df.iloc[:, 0].tolist()
+                    curr_vals  = compare_df.iloc[:, 1].tolist()
+                    prev_vals  = compare_df.iloc[:, 2].tolist() if compare_df.shape[1] > 2 else None
+                    fig_bar = go.Figure()
+                    fig_bar.add_trace(go.Bar(name=q_curr, x=categories, y=curr_vals, marker_color='#1565c0'))
+                    if prev_vals:
+                        fig_bar.add_trace(go.Bar(name=q_prev, x=categories, y=prev_vals, marker_color='#90caf9'))
+                    fig_bar.update_layout(
+                        title='资产结构对比', barmode='group', height=350,
+                        margin=dict(t=50, b=40),
                     )
-                    _style_table(tbl_a)
-                ax_a.text(0.0, -0.02, f'总资产  ¥{curr["total_assets"]:,.0f}',
-                          transform=ax_a.transAxes, fontsize=9,
-                          fontweight='bold', color='#1565c0')
+                    compare_html = f'<h2>资产结构对比</h2>{pio.to_html(fig_bar, full_html=False, include_plotlyjs=False)}'
+                except Exception:
+                    pass
 
-                # 负债端表格（右半）
-                ax_l = fig.add_axes([0.51, 0.06, 0.47, 0.77])
-                ax_l.axis('off')
-                ax_l.set_title('负债端', fontsize=10, fontweight='bold',
-                               color='#c62828', pad=4, loc='left')
-                l_vals = []
-                for _, r in liab_df.iterrows():
-                    if r['账户/项目'] == '':
-                        continue
-                    l_vals.append([r['大类'], r['账户/项目'],
-                                   f'¥{r["金额(CNY)"]:,.0f}'])
-                if l_vals:
-                    tbl_l = ax_l.table(
-                        cellText=l_vals,
-                        colLabels=['大类', '项目', '金额'],
-                        loc='upper center', cellLoc='left',
-                        colWidths=[0.28, 0.42, 0.30],
-                    )
-                    _style_table(tbl_l)
-                ax_l.text(0.0, -0.02,
-                          f'总负债  ¥{curr["total_liabilities"]:,.0f}    '
-                          f'净资产  ¥{curr["net_worth"]:,.0f}',
-                          transform=ax_l.transAxes, fontsize=9,
-                          fontweight='bold', color='#c62828')
+            # plotly JS
+            import plotly
+            plotly_js_path = os.path.join(os.path.dirname(plotly.__file__), 'package_data', 'plotly.min.js')
+            if os.path.exists(plotly_js_path):
+                with open(plotly_js_path) as f_js:
+                    plotly_js = f'<script>{f_js.read()}</script>'
+            else:
+                plotly_js = '<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>'
 
-                # 垂直分隔线
-                fig.add_axes([0.494, 0.06, 0.003, 0.80]).set_axis_off()
-
-                fig.text(0.5, 0.01,
-                         f'FamilyFund Quarterly Report · {q_curr} · Generated by FamilyFund',
-                         ha='center', fontsize=7, color='#999')
-                pdf.savefig(fig, bbox_inches='tight')
-                plt.close(fig)
-
-                # ── Page 2: 净资产瀑布图 ──
-                if q_prev and qoq and compare_df is not None:
-                    wf_data = generate_waterfall_data(qoq)
-                    labels = [d['label'] for d in wf_data]
-                    values = [d['value'] for d in wf_data]
-                    types  = [d['type']  for d in wf_data]
-                    running = 0
-                    bottoms, heights, colors_wf = [], [], []
-                    for v, t in zip(values, types):
-                        if t == 'absolute':
-                            bottoms.append(0)
-                            heights.append(v)
-                            colors_wf.append('#1565c0')
-                            running = v
-                        else:
-                            bottoms.append(min(running, running + v))
-                            heights.append(abs(v))
-                            colors_wf.append('#2e7d32' if v >= 0 else '#d32f2f')
-                            running += v
-
-                    fig2, ax_wf = plt.subplots(figsize=PAGE)
-                    fig2.suptitle(f'净资产变化瀑布图  {q_prev} → {q_curr}', fontsize=14,
-                                  fontweight='bold', color='#1a237e', y=0.97)
-                    ax_wf.bar(range(len(labels)), heights, bottom=bottoms,
-                              color=colors_wf, width=0.55, edgecolor='white', linewidth=0.5)
-                    ax_wf.set_xticks(range(len(labels)))
-                    wrapped = [l.replace(' ', '\n', 1) if len(l) > 8 else l for l in labels]
-                    ax_wf.set_xticklabels(wrapped, rotation=0, ha='center', fontsize=9)
-                    ax_wf.yaxis.set_major_formatter(
-                        matplotlib.ticker.FuncFormatter(lambda x, _: f'¥{x/1e4:.0f}万'))
-                    ax_wf.tick_params(axis='x', which='both', length=0)
-                    ax_wf.grid(axis='y', alpha=0.3, linestyle='--')
-                    ax_wf.spines['top'].set_visible(False)
-                    ax_wf.spines['right'].set_visible(False)
-                    # 在柱子上方标注金额
-                    for i, (h, b, v) in enumerate(zip(heights, bottoms, values)):
-                        y_pos = b + h + max(heights) * 0.01
-                        ax_wf.text(i, y_pos, f'¥{v/1e4:+.0f}万',
-                                   ha='center', va='bottom', fontsize=8,
-                                   color='#2e7d32' if v >= 0 else '#d32f2f',
-                                   fontweight='bold')
-                    fig2.subplots_adjust(left=0.1, right=0.95, top=0.90, bottom=0.15)
-                    fig2.text(0.5, 0.02,
-                              f'FamilyFund Quarterly Report · {q_curr} · Page 2',
-                              ha='center', fontsize=7, color='#999')
-                    pdf.savefig(fig2, bbox_inches='tight')
-                    plt.close(fig2)
-
-                    # ── Page 3: 资产结构对比 ──
-                    fig3, ax_bar = plt.subplots(figsize=PAGE)
-                    fig3.suptitle(f'资产结构对比  {q_prev} vs {q_curr}', fontsize=14,
-                                  fontweight='bold', color='#1a237e', y=0.97)
-                    x_pos = range(len(compare_df))
-                    w = 0.35
-                    bars1 = ax_bar.bar([i - w/2 for i in x_pos], compare_df[q_prev],
-                                        width=w, label=q_prev, color='#90CAF9', edgecolor='white')
-                    bars2 = ax_bar.bar([i + w/2 for i in x_pos], compare_df[q_curr],
-                                        width=w, label=q_curr, color='#1565c0', edgecolor='white')
-                    ax_bar.set_xticks(list(x_pos))
-                    ax_bar.set_xticklabels(compare_df['大类'], rotation=20,
-                                           ha='right', fontsize=10)
-                    ax_bar.yaxis.set_major_formatter(
-                        matplotlib.ticker.FuncFormatter(lambda x, _: f'¥{x/1e4:.0f}万'))
-                    ax_bar.legend(fontsize=10, loc='upper right')
-                    ax_bar.grid(axis='y', alpha=0.3, linestyle='--')
-                    ax_bar.spines['top'].set_visible(False)
-                    ax_bar.spines['right'].set_visible(False)
-                    ax_bar.tick_params(axis='x', which='both', length=0)
-                    fig3.subplots_adjust(left=0.1, right=0.95, top=0.90, bottom=0.18)
-                    fig3.text(0.5, 0.02,
-                              f'FamilyFund Quarterly Report · {q_curr} · Page 3',
-                              ha='center', fontsize=7, color='#999')
-                    pdf.savefig(fig3, bbox_inches='tight')
-                    plt.close(fig3)
-
-            buf.seek(0)
-            return buf.getvalue()
+            html = f"""<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<title>FamilyFund 季度财报 {q_curr}</title>
+{plotly_js}
+<style>
+  body{{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+        max-width:1100px;margin:0 auto;padding:24px 40px;color:#333}}
+  h1{{color:#1a237e;border-bottom:3px solid #1565c0;padding-bottom:10px}}
+  h2{{color:#1565c0;margin-top:32px}}
+  h3{{color:#444;margin-top:20px}}
+  .kpi-row{{display:flex;gap:16px;margin:20px 0;flex-wrap:wrap}}
+  .kpi{{background:#f5f5f5;border-radius:8px;padding:16px 20px;flex:1;min-width:160px}}
+  .kpi-label{{font-size:12px;color:#888;margin-bottom:4px}}
+  .kpi-value{{font-size:22px;font-weight:bold;color:#1a237e}}
+  .kpi-delta.pos{{color:#2e7d32;font-size:13px}}
+  .kpi-delta.neg{{color:#c62828;font-size:13px}}
+  .data-table{{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 20px}}
+  .data-table th{{background:#1565c0;color:white;padding:8px 10px;text-align:left}}
+  .data-table td{{padding:6px 10px;border-bottom:1px solid #f0f0f0}}
+  .data-table tr.subtotal td{{background:#e3f2fd;font-weight:bold}}
+  .data-table tr:nth-child(even){{background:#fafafa}}
+  .footer{{color:#aaa;font-size:12px;text-align:center;margin-top:40px;
+            border-top:1px solid #eee;padding-top:16px}}
+  @media print{{body{{padding:10px 20px}}h2{{page-break-before:always}}
+    h2:first-of-type{{page-break-before:avoid}}}}
+</style></head><body>
+<h1>📊 FamilyFund 家庭季度财报　{q_curr}</h1>
+{kpi_html}
+<h2>资产负债表</h2>
+{bs_html}
+{waterfall_html}
+{compare_html}
+<div class="footer">FamilyFund　{q_curr}　仅供个人财务管理参考</div>
+</body></html>"""
+            return html
 
         col_export, _ = st.columns([1, 3])
         with col_export:
             try:
                 _cd = compare_df if (q_prev and 'compare_df' in dir()) else None
                 _qoq = qoq if q_prev else None
-                pdf_bytes = _generate_quarterly_pdf(
+                html_bytes = _generate_quarterly_html(
                     q_curr, curr, q_prev, _qoq, asset_df, liab_df, _cd
-                )
+                ).encode('utf-8')
+                fname_html = f"FamilyFund_Quarterly_{q_curr}.html"
                 st.download_button(
-                    label="📄 下载季度 PDF 报告",
-                    data=pdf_bytes,
-                    file_name=f"FamilyFund_Quarterly_{q_curr}.pdf",
-                    mime="application/pdf",
+                    label="📄 下载季度报告 HTML",
+                    data=html_bytes,
+                    file_name=fname_html,
+                    mime="text/html",
                     type="primary",
                 )
+                st.caption("用浏览器打开后可打印为 PDF")
             except Exception as e:
-                st.error(f"PDF 生成失败: {e}")
+                st.error(f"报告生成失败: {e}")
 
 # ═══════════════════════════════════════════════════════════
 # Tab 7: Planning
@@ -4379,90 +4300,93 @@ with tab_tenth:
                     st.markdown(f"### {_label_c}")
                     st.markdown(result['agent_c'])
 
-                # PDF 导出
+                # HTML 报告导出
                 st.divider()
-                if st.button("📄 导出审查报告 PDF", key='tm_pdf'):
+                if st.button("📄 导出审查报告 HTML", key='tm_pdf'):
                     try:
-                        import matplotlib
-                        import textwrap
                         import re
-                        matplotlib.rcParams['font.sans-serif'] = [
-                            'Arial Unicode MS', 'Noto Sans CJK SC', 'PingFang SC', 'SimHei',
-                        ]
-                        matplotlib.rcParams['axes.unicode_minus'] = False
-                        from matplotlib.backends.backend_pdf import PdfPages
-                        import matplotlib.pyplot as plt
-                        import io
 
-                        def _strip_markdown(text: str) -> str:
-                            """把 Markdown 转成适合 PDF 纯文本渲染的格式。"""
+                        def _md_to_html(text: str) -> str:
+                            """简单 Markdown → HTML 转换（不依赖外部库）。"""
                             lines = []
                             for line in text.split('\n'):
-                                # ## 标题 → 加空行 + 全大写
-                                m = re.match(r'^(#{1,3})\s+(.*)', line)
-                                if m:
-                                    level = len(m.group(1))
-                                    heading = m.group(2).strip()
-                                    if level == 1:
-                                        lines.append('')
-                                        lines.append(f'【 {heading.upper()} 】')
-                                        lines.append('')
-                                    elif level == 2:
-                                        lines.append('')
-                                        lines.append(f'▍ {heading}')
-                                        lines.append('')
-                                    else:
-                                        lines.append(f'  • {heading}')
-                                    continue
-                                # **bold** → 去掉星号
-                                line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
-                                # *italic* → 去掉星号
-                                line = re.sub(r'\*(.+?)\*', r'\1', line)
-                                # - 列表项 → • 符号
-                                line = re.sub(r'^(\s*)-\s+', r'\1• ', line)
+                                line = re.sub(r'^### (.+)', r'<h4>\1</h4>', line)
+                                line = re.sub(r'^## (.+)',  r'<h3>\1</h3>', line)
+                                line = re.sub(r'^# (.+)',   r'<h2>\1</h2>', line)
+                                line = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', line)
+                                line = re.sub(r'\*(.+?)\*',     r'<i>\1</i>', line)
+                                line = re.sub(r'^- (.+)',   r'<li>\1</li>', line)
                                 lines.append(line)
-                            return '\n'.join(lines)
+                            html = '\n'.join(lines)
+                            html = re.sub(r'(<li>.*?</li>\n?)+',
+                                          lambda m: f'<ul>{m.group(0)}</ul>', html, flags=re.DOTALL)
+                            html = html.replace('\n', '<br>')
+                            return html
 
-                        buf = io.BytesIO()
-                        _a_title = "Agent A: Value Trap Inquisitor" if _is_buy else "Agent A: Contrarian Defense Counsel"
-                        _b_title = "Agent B: Macro Stress Tester"   if _is_buy else "Agent B: Macro Stress Tester (Hold Risk)"
-                        page_texts = [
-                            ("Decision Summary + Context", result['context']),
+                        _a_title = "Agent A：价值陷阱审问官" if _is_buy else "Agent A：逆向价值辩护律师"
+                        _b_title = "Agent B：宏观压测机" if _is_buy else "Agent B：宏观压测机（持有风险）"
+                        _c_title = "Agent C：流动性与集中度审计员"
+                        _direction = "买入" if _is_buy else "卖出"
+
+                        sections = [
+                            ("决策摘要 & 持仓上下文", result['context']),
                             (_a_title, result['agent_a']),
                             (_b_title, result['agent_b']),
-                            ("Agent C: Concentration / Liquidity Auditor", result['agent_c']),
+                            (_c_title, result['agent_c']),
                         ]
-                        with PdfPages(buf) as pdf:
-                            for title, text in page_texts:
-                                fig, ax = plt.subplots(figsize=(11.69, 8.27))
-                                ax.axis('off')
-                                ax.set_title(title, fontsize=13, fontweight='bold', pad=12)
-                                clean = _strip_markdown(text)
-                                wrapped = '\n'.join(
-                                    '\n'.join(textwrap.wrap(line, width=100)) if line.strip() else ''
-                                    for line in clean.split('\n')
-                                )
-                                ax.text(0.02, 0.95, wrapped, transform=ax.transAxes,
-                                        fontsize=8, verticalalignment='top',
-                                        linespacing=1.4)
-                                pdf.savefig(fig, bbox_inches='tight')
-                                plt.close(fig)
-                        buf.seek(0)
 
-                        # 保存到 iCloud
+                        sections_html = ''
+                        colors = ['#1565c0','#c62828','#e65100','#2e7d32']
+                        for i, (title, text) in enumerate(sections):
+                            sections_html += f'''
+                            <div class="section" style="border-left:4px solid {colors[i]}">
+                                <h2 style="color:{colors[i]}">{title}</h2>
+                                <div class="content">{_md_to_html(text)}</div>
+                            </div>'''
+
+                        html = f'''<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<title>第十人审查报告 - {decision["asset_name"]}</title>
+<style>
+  body{{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+        max-width:900px;margin:0 auto;padding:30px 40px;color:#333}}
+  h1{{color:#1a1a2e;border-bottom:3px solid #333;padding-bottom:10px}}
+  .meta{{background:#f5f5f5;border-radius:8px;padding:14px;margin:16px 0;font-size:14px}}
+  .meta span{{margin-right:20px}}
+  .section{{background:#fafafa;border-radius:0 8px 8px 0;
+             padding:20px 24px;margin:20px 0;page-break-inside:avoid}}
+  .section h2{{margin-top:0;font-size:16px}}
+  .content{{font-size:14px;line-height:1.8}}
+  .content h3,.content h4{{color:#444;margin:12px 0 6px}}
+  .content ul{{padding-left:20px}}
+  .footer{{color:#aaa;font-size:12px;text-align:center;margin-top:40px;
+            border-top:1px solid #eee;padding-top:16px}}
+  @media print{{body{{padding:10px 20px}}.section{{page-break-inside:avoid}}}}
+</style></head><body>
+<h1>🔍 第十人审查报告</h1>
+<div class="meta">
+  <span>📅 {date.today().isoformat()}</span>
+  <span>🎯 标的：{decision["asset_name"]} ({decision.get("code","")})</span>
+  <span>📌 方向：{_direction}</span>
+  <span>💰 金额：¥{decision.get("amount_cny",0):,.0f}</span>
+</div>
+{sections_html}
+<div class="footer">FamilyFund 第十人系统　{date.today().isoformat()}　仅供个人投资决策参考</div>
+</body></html>'''
+
                         reports_dir = os.path.join(_tm_data_dir, 'tenth_man_reports')
                         os.makedirs(reports_dir, exist_ok=True)
-                        fname = f"{date.today().isoformat()}_{decision['asset_name']}.pdf"
+                        fname = f"{date.today().isoformat()}_{decision['asset_name']}.html"
                         fpath = os.path.join(reports_dir, fname)
-                        with open(fpath, 'wb') as f:
-                            f.write(buf.getvalue())
+                        with open(fpath, 'w', encoding='utf-8') as f:
+                            f.write(html)
 
                         st.download_button(
-                            label=f"下载 {fname}",
-                            data=buf.getvalue(),
+                            label=f"⬇ 下载 {fname}",
+                            data=html.encode('utf-8'),
                             file_name=fname,
-                            mime='application/pdf',
+                            mime='text/html',
                         )
-                        st.success(f"已保存至 {fpath}")
+                        st.success(f"已保存至 {fpath}　用浏览器打开可打印为 PDF")
                     except Exception as e:
-                        st.error(f"PDF 生成失败：{e}")
+                        st.error(f"报告生成失败：{e}")

@@ -44,7 +44,7 @@
 | 3 | **财务独立测算** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
 | 4 | **储蓄率追踪** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
 | 5 | **定投管理模块** | `DESIGN_DCA_MANAGER.md` | ✅ 已完成 |
-| 6 | **PDF 导出全面切换为 HTML**（Portfolio/Quarterly/10th Man）| — | 无，立即可做。消除中文字体问题，图表用 Plotly，浏览器打印→PDF |
+| 6 | **PDF 导出全面切换为 HTML**（Portfolio/Quarterly/10th Man）| — | ✅ 已完成 |
 
 ### P3 — 需前置数据积累
 
