@@ -25,22 +25,35 @@ def generate_report(df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_d
     cum_return  = latest_fund['Cumulative_Return(%)']
     total_value = latest_fund['Total_Value']
 
+    # 总成本 = 建仓日全部持仓 + 后续所有外部入金（Cash 行正 NCF，非建仓日）
     first_date = df['Date'].min()
     initial_investment = df[df['Date'] == first_date]['Total_Value'].sum()
-    total_pl = total_value - initial_investment
-    total_pl_rate = total_pl / initial_investment * 100 if initial_investment else 0
+    subsequent_inflows = df[
+        (df['Date'] > first_date) &
+        (df['Asset_Class'] == 'Cash') &
+        (df['Net_Cash_Flow'] > 0)
+    ]['Net_Cash_Flow'].sum()
+    total_cost = initial_investment + subsequent_inflows
+    total_pl = total_value - total_cost
+    total_pl_rate = total_pl / total_cost * 100 if total_cost else 0
 
     # ── 图1: NAV 走势 ────────────────────────────────────────
+    nav_vals = fund_nav_df['NAV']
+    nav_min = float(nav_vals.min())
+    nav_max = float(nav_vals.max())
+    nav_padding = max((nav_max - nav_min) * 0.15, 0.02)
+
     fig_nav = go.Figure()
     fig_nav.add_trace(go.Scatter(
         x=fund_nav_df['Date'], y=fund_nav_df['NAV'],
         name='单位净值', line=dict(color='#1565c0', width=2.5),
-        fill='tozeroy', fillcolor='rgba(21,101,192,0.08)',
+        fill='tonexty', fillcolor='rgba(21,101,192,0.08)',
     ))
     fig_nav.add_hline(y=1.0, line_dash='dash', line_color='#888', annotation_text='基准 1.0')
     fig_nav.update_layout(
-        title='基金净值走势', height=320,
+        title='基金净值走势', height=380,
         yaxis_title='单位净值', hovermode='x unified',
+        yaxis=dict(range=[nav_min - nav_padding, nav_max + nav_padding]),
         legend=dict(orientation='h', yanchor='bottom', y=1.02),
         margin=dict(t=50, b=40),
     )
@@ -48,6 +61,7 @@ def generate_report(df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_d
     # ── 图2: 分类净值对比 ────────────────────────────────────
     fig_class = go.Figure()
     colors = ['#1565c0','#c62828','#2e7d32','#f57f17','#6a1b9a','#00838f','#4e342e']
+    all_class_navs = []
     for i, (cls, nav_df) in enumerate(class_nav_dict.items()):
         if cls == 'Cash':
             continue
@@ -56,11 +70,17 @@ def generate_report(df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_d
             x=nav_df['Date'], y=nav_df['NAV'],
             name=name, line=dict(color=colors[i % len(colors)], width=1.8),
         ))
+        all_class_navs.extend(nav_df['NAV'].tolist())
     fig_class.add_hline(y=1.0, line_dash='dash', line_color='#ccc')
+    if all_class_navs:
+        cn_min = min(all_class_navs)
+        cn_max = max(all_class_navs)
+        cn_pad = max((cn_max - cn_min) * 0.1, 0.05)
+        fig_class.update_yaxes(range=[cn_min - cn_pad, cn_max + cn_pad])
     fig_class.update_layout(
-        title='分类净值对比', height=320, hovermode='x unified',
+        title='分类净值对比', height=420, hovermode='x unified',
         yaxis_title='分类净值',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
         margin=dict(t=50, b=40),
     )
 
@@ -156,8 +176,7 @@ def generate_report(df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_d
   .kpi-value{{font-size:20px;font-weight:bold;color:#1a237e}}
   .kpi-value.pos{{color:#2e7d32}}
   .kpi-value.neg{{color:#c62828}}
-  .charts-grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}}
-  .chart-full{{margin:16px 0}}
+  .chart-full{{margin:20px 0}}
   table{{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}}
   th{{background:#1565c0;color:white;padding:8px 10px;text-align:left;font-weight:600}}
   td{{padding:7px 10px;border-bottom:1px solid #f0f0f0}}
@@ -184,18 +203,18 @@ def generate_report(df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_d
     <div class="kpi-value {'pos' if cum_return>=0 else 'neg'}">{cum_return:+.2f}%</div></div>
   <div class="kpi"><div class="kpi-label">绝对盈亏</div>
     <div class="kpi-value {'pos' if total_pl>=0 else 'neg'}">¥{total_pl:+,.0f}</div></div>
-  <div class="kpi"><div class="kpi-label">初始投入</div>
-    <div class="kpi-value">¥{initial_investment:,.0f}</div></div>
+  <div class="kpi"><div class="kpi-label">总投入成本</div>
+    <div class="kpi-value">¥{total_cost:,.0f}</div></div>
 </div>
 
 <h2>净值走势</h2>
 <div class="chart-full">{_fig_html(fig_nav)}</div>
 
-<h2>资产配置与分类表现</h2>
-<div class="charts-grid">
-  <div>{_fig_html(fig_class)}</div>
-  <div>{_fig_html(fig_pie)}</div>
-</div>
+<h2>分类净值对比</h2>
+<div class="chart-full">{_fig_html(fig_class)}</div>
+
+<h2>资产配置</h2>
+<div class="chart-full">{_fig_html(fig_pie)}</div>
 
 <h2>分类业绩一览</h2>
 <table>
