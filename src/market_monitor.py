@@ -441,6 +441,23 @@ def get_market_data(force_refresh: bool = False) -> dict:
             cache['treasury_10y_updated'] = today
             cache_dirty = True
 
+    # ── 中国10Y国债收益率（akshare bond_zh_us_rate）──
+    if _should_fetch('cn_treasury_10y'):
+        try:
+            import akshare as ak
+            df_bond = ak.bond_zh_us_rate(start_date=(
+                pd.Timestamp.today() - pd.Timedelta(days=10)
+            ).strftime('%Y%m%d'))
+            col = '中国国债收益率10年'
+            if df_bond is not None and col in df_bond.columns:
+                val = pd.to_numeric(df_bond[col], errors='coerce').dropna()
+                if len(val) > 0:
+                    cache['cn_treasury_10y'] = {'price': round(float(val.iloc[-1]), 3)}
+                    cache['cn_treasury_10y_updated'] = today
+                    cache_dirty = True
+        except Exception:
+            pass
+
     # ── A股PE（akshare，不支持手动覆盖）──
     for pe_key, ak_symbol, source_note in [
         ('pe_csi300',   '沪深300', 'akshare 沪深300 滚动PE'),
@@ -458,7 +475,7 @@ def get_market_data(force_refresh: bool = False) -> dict:
         _save_cache(cache)
 
     # ── 组装结果 ──
-    all_keys = list(TARGETS.keys()) + ['vix', 'vxn', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500', 'treasury_10y']
+    all_keys = list(TARGETS.keys()) + ['vix', 'vxn', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500', 'treasury_10y', 'cn_treasury_10y']
     result = {}
     for key in all_keys:
         result[key] = cache.get(key)

@@ -2245,7 +2245,8 @@ with tab_market:
     qvix_entry      = market_data.get('qvix')
     pe_sp_entry     = market_data.get('pe_sp500')
     pe_ndx_entry    = market_data.get('pe_ndx100')
-    treasury_entry  = market_data.get('treasury_10y')
+    treasury_entry    = market_data.get('treasury_10y')
+    cn_treasury_entry = market_data.get('cn_treasury_10y')
 
     vix_val       = vix_entry.get('price')      if vix_entry      else None
     vxn_val       = vxn_entry.get('price')      if vxn_entry      else None
@@ -2254,7 +2255,8 @@ with tab_market:
     qvix_val      = qvix_entry.get('price')     if qvix_entry     else None
     pe_sp         = (pe_sp_entry.get('manual_override') or pe_sp_entry.get('value'))   if pe_sp_entry  else None
     pe_ndx        = (pe_ndx_entry.get('manual_override') or pe_ndx_entry.get('value')) if pe_ndx_entry else None
-    treasury_val  = treasury_entry.get('price') if treasury_entry else None
+    treasury_val    = treasury_entry.get('price')    if treasury_entry    else None
+    cn_treasury_val = cn_treasury_entry.get('price') if cn_treasury_entry else None
     sp_src        = ('手动' if (pe_sp_entry or {}).get('manual_override') else 'VOO auto') if pe_sp_entry else '—'
     ndx_src       = ('手动' if (pe_ndx_entry or {}).get('manual_override') else 'QQQ auto') if pe_ndx_entry else '—'
 
@@ -2263,6 +2265,21 @@ with tab_market:
     qvix_label,  qvix_emoji  = compute_qvix_signal(qvix_val)
     sp_pe_label,  sp_pe_emoji  = compute_pe_signal(pe_sp,  'sp500')
     ndx_pe_label, ndx_pe_emoji = compute_pe_signal(pe_ndx, 'ndx100')
+
+    # 中国10Y国债信号
+    if cn_treasury_val is None:
+        cn_treasury_label, cn_treasury_emoji = '数据不可用', '❓'
+    elif cn_treasury_val >= 3.0:
+        cn_treasury_label, cn_treasury_emoji = '偏高', '🔴'
+    elif cn_treasury_val >= 2.5:
+        cn_treasury_label, cn_treasury_emoji = '中性', '🟡'
+    else:
+        cn_treasury_label, cn_treasury_emoji = '偏低（宽松）', '🟢'
+
+    # 红利利差（上证红利近似股息率 = A股PE对应的1/PE×40%，粗估 ≈ 4-5%）
+    # 用沪深300PE倒数×40%作为代理（更容易获取）
+    _div_yield_proxy = (1 / pe_csi300 * 100 * 0.4) if (pe_csi300 and pe_csi300 > 0) else None
+    _div_spread = round(_div_yield_proxy - cn_treasury_val, 2) if (_div_yield_proxy and cn_treasury_val) else None
 
     # 美债收益率信号（仅展示，不参与矩阵）
     if treasury_val is None:
@@ -2274,7 +2291,7 @@ with tab_market:
     else:
         treasury_label, treasury_emoji = '偏低（宽松）', '🟢'
 
-    kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
+    kpi1, kpi2, kpi3, kpi4, kpi5, kpi6, kpi7, kpi8 = st.columns(8)
     with kpi1:
         st.metric("VIX 标普波动率", f"{vix_val:.1f}" if vix_val else "—")
         st.markdown(f"{vix_emoji} **{vix_label}**")
@@ -2313,7 +2330,22 @@ with tab_market:
     with kpi6:
         st.metric("美债10Y收益率", f"{treasury_val:.2f}%" if treasury_val else "—")
         st.markdown(f"{treasury_emoji} **{treasury_label}**")
-        st.caption(f"仅供参考，不参与矩阵计算　更新: {meta.get('treasury_10y_updated', '未知')}")
+        st.caption(f"仅供参考　更新: {meta.get('treasury_10y_updated', '未知')}")
+    with kpi7:
+        st.metric("中国10Y国债", f"{cn_treasury_val:.2f}%" if cn_treasury_val else "—")
+        st.markdown(f"{cn_treasury_emoji} **{cn_treasury_label}**")
+        st.caption(f"更新: {meta.get('cn_treasury_10y_updated', '未知')}")
+    with kpi8:
+        if _div_spread is not None:
+            _ds_color = '#2e7d32' if _div_spread >= 2 else ('#888' if _div_spread >= 1 else '#d32f2f')
+            st.metric("红利-国债利差", f"{_div_spread:+.2f}pp")
+            st.markdown(f"<span style='color:{_ds_color};font-weight:bold'>"
+                       f"{'宽松✓' if _div_spread>=2 else ('中性' if _div_spread>=1 else '收窄✗')}</span>",
+                       unsafe_allow_html=True)
+            st.caption(f"沪深300近似股息率 - 中国10Y　参考第十八节结论")
+        else:
+            st.metric("红利-国债利差", "—")
+            st.caption("数据不完整")
 
     # 手动覆盖（折叠）
     with st.expander("手动覆盖（网络不可达时使用）", expanded=False):
