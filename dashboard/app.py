@@ -3694,8 +3694,8 @@ with tab_quarterly:
             net_worth   = curr['net_worth']
             total_assets = curr['total_assets']
             total_liab   = curr['total_liabilities']
-            qoq_nw = qoq['net_worth_change'] if qoq else None
-            qoq_pct = qoq['net_worth_change_pct'] if qoq else None
+            qoq_nw = qoq['net_worth_delta'] if qoq else None
+            qoq_pct = qoq['net_worth_pct'] if qoq else None
 
             kpi_html = f"""
             <div class="kpi-row">
@@ -3720,23 +3720,26 @@ with tab_quarterly:
 
             bs_html = _df_to_html(asset_df, '资产明细') + _df_to_html(liab_df, '负债明细')
 
-            # ── 瀑布图（如果有 QoQ 数据）──
+            # ── 瀑布图（基于 qoq 数值）──
             waterfall_html = ''
-            if qoq and 'waterfall' in qoq:
-                wf = qoq['waterfall']
+            if qoq:
+                nw_prev = qoq.get('net_worth_prev', 0)
+                nw_curr = qoq.get('net_worth_curr', 0)
+                asset_d = qoq.get('asset_delta', 0)
+                liab_d  = qoq.get('liability_delta', 0)
                 fig_wf = go.Figure(go.Waterfall(
                     name='净资产变动',
                     orientation='v',
-                    measure=wf.get('measure', []),
-                    x=wf.get('x', []),
-                    y=wf.get('y', []),
-                    text=[f'¥{v:+,.0f}' for v in wf.get('y', [])],
+                    measure=['absolute', 'relative', 'relative', 'total'],
+                    x=[q_prev, '资产变动', '负债变动', q_curr],
+                    y=[nw_prev, asset_d, -liab_d, nw_curr],
+                    text=[f'¥{v:,.0f}' for v in [nw_prev, asset_d, -liab_d, nw_curr]],
                     textposition='outside',
                     connector=dict(line=dict(color='#888')),
                 ))
                 fig_wf.update_layout(
                     title=f'净资产 QoQ 变动瀑布图（{q_prev} → {q_curr}）',
-                    height=400, showlegend=False, margin=dict(t=50, b=40),
+                    height=380, showlegend=False, margin=dict(t=50, b=40),
                 )
                 waterfall_html = f'<h2>净资产变动分析</h2>{pio.to_html(fig_wf, full_html=False, include_plotlyjs=False)}'
 
