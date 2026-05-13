@@ -140,15 +140,13 @@ def compute_suggestion(plan: dict, market_data: dict) -> dict:
         unit = plan.get('unit', 'cny')
         if unit == 'gram':
             base_unit = plan.get('base_amount_unit', 1)
-            min_unit  = plan.get('min_unit', 1)
-            gold_entry = market_data.get('gold') or {}
-            gold_price = gold_entry.get('price')
+            gold_price_cny = _estimate_gold_price_cny(market_data)
             suggested_unit = base_unit
-            suggested_cny  = round(suggested_unit * gold_price / 10) * 10 if gold_price else None
+            suggested_cny  = round(suggested_unit * gold_price_cny / 10) * 10 if gold_price_cny else None
             return {
                 'multiplier_str': '1.0x', 'multiplier': 1.0, 'arrow': '→',
                 'suggested_cny': suggested_cny, 'suggested_unit': suggested_unit,
-                'unit': 'gram', 'gold_price_cny': gold_price,
+                'unit': 'gram', 'gold_price_cny': gold_price_cny,
             }
         suggested_cny = round(base_cny * 1.0 / 10) * 10
         return {
@@ -254,8 +252,8 @@ def _estimate_gold_price_cny(market_data: dict) -> float | None:
     if not price_usd_oz:
         return None
     try:
-        from fx_service import get_rate
-        usd_cny = get_rate('USD', 'CNY')
+        from fx_service import get_exchange_rate
+        usd_cny = get_exchange_rate('USD', 'CNY')
         if usd_cny:
             return round(price_usd_oz * usd_cny / 31.1035, 2)
     except Exception:
