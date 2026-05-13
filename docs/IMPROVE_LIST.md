@@ -30,6 +30,7 @@
 | PDF 报告（6页 A4 横版） | `src/pdf_report.py` |
 | 人生阶段规划（里程碑支出曲线 + FI情景对比）| `src/life_stages_engine.py` + `dashboard/app.py` Tab1 Section7，见 `DESIGN_LIFE_STAGES.md` |
 | 定投管理模块（DCA Manager）| `src/dca_manager.py` + `dashboard/app.py` Tab5 底部，见 `DESIGN_DCA_MANAGER.md` |
+| 第十人系统（Anti-Fragile Allocation Red Teamer）| `src/tenth_man.py` + `dashboard/app.py` Tab8，见 `DESIGN_TENTH_MAN.md` |
 
 ---
 
