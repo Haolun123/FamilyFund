@@ -3244,7 +3244,7 @@ with tab_market:
                             _new_base_unit = st.number_input(
                                 '基础买入克数（g）',
                                 value=float(_plan.get('base_amount_unit', 2)),
-                                min_value=1.0, step=0.5, format='%.1f', key=f'dca_base_{_pid}',
+                                min_value=1.0, step=0.1, format='%.2f', key=f'dca_base_{_pid}',
                             )
                         else:
                             _new_base_cny = st.number_input('基础金额（CNY）', value=int(_plan.get('base_amount_cny', 500)), min_value=0, step=100, key=f'dca_base_{_pid}')
@@ -3304,7 +3304,7 @@ with tab_market:
                 _add_plat = st.text_input('执行平台', key='dca_add_plat')
                 _is_gold_add = (_add_ac == 'Gold')
                 if _is_gold_add:
-                    _add_base_unit = st.number_input('基础买入克数（g）', value=2.0, min_value=1.0, step=0.5, format='%.1f', key='dca_add_base')
+                    _add_base_unit = st.number_input('基础买入克数（g）', value=2.0, min_value=1.0, step=0.1, format='%.2f', key='dca_add_base')
                 else:
                     _add_base_cny  = st.number_input('基础金额（CNY）', value=500, min_value=0, step=100, key='dca_add_base')
             _add_note = st.text_input('备注（可选）', key='dca_add_note')
