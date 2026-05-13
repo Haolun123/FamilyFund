@@ -3241,11 +3241,19 @@ with tab_market:
                         _new_plat = st.text_input('执行平台', value=_plan.get('platform', ''), key=f'dca_plat_{_pid}')
                         _is_gold_edit = (_new_ac == 'Gold')
                         if _is_gold_edit:
-                            _new_base_unit = st.number_input(
-                                '基础买入克数（g）',
-                                value=float(_plan.get('base_amount_unit', 2)),
-                                min_value=1.0, step=0.1, format='%.2f', key=f'dca_base_{_pid}',
+                            _raw_unit_str = st.text_input(
+                                '基础买入克数（g，≥1，支持任意小数）',
+                                value=str(_plan.get('base_amount_unit', 2)),
+                                key=f'dca_base_{_pid}',
                             )
+                            try:
+                                _new_base_unit = float(_raw_unit_str)
+                                if _new_base_unit < 1:
+                                    st.warning('克数不能小于 1g')
+                                    _new_base_unit = max(1.0, _new_base_unit)
+                            except ValueError:
+                                st.warning('请输入有效数字')
+                                _new_base_unit = float(_plan.get('base_amount_unit', 2))
                         else:
                             _new_base_cny = st.number_input('基础金额（CNY）', value=int(_plan.get('base_amount_cny', 500)), min_value=0, step=100, key=f'dca_base_{_pid}')
                     _new_note = st.text_input('备注', value=_plan.get('note', ''), key=f'dca_note_{_pid}')
@@ -3304,7 +3312,15 @@ with tab_market:
                 _add_plat = st.text_input('执行平台', key='dca_add_plat')
                 _is_gold_add = (_add_ac == 'Gold')
                 if _is_gold_add:
-                    _add_base_unit = st.number_input('基础买入克数（g）', value=2.0, min_value=1.0, step=0.1, format='%.2f', key='dca_add_base')
+                    _raw_add_unit_str = st.text_input('基础买入克数（g，≥1，支持任意小数）', value='2', key='dca_add_base')
+                    try:
+                        _add_base_unit = float(_raw_add_unit_str)
+                        if _add_base_unit < 1:
+                            st.warning('克数不能小于 1g')
+                            _add_base_unit = max(1.0, _add_base_unit)
+                    except ValueError:
+                        st.warning('请输入有效数字')
+                        _add_base_unit = 2.0
                 else:
                     _add_base_cny  = st.number_input('基础金额（CNY）', value=500, min_value=0, step=100, key='dca_add_base')
             _add_note = st.text_input('备注（可选）', key='dca_add_note')

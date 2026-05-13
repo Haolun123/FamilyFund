@@ -216,7 +216,7 @@ def compute_suggestion(plan: dict, market_data: dict) -> dict:
             suggested_units = 0
         else:
             # 保留一位小数（招行积存金支持 0.1g 精度）
-            suggested_units = round(raw, 2)
+            suggested_units = round(raw, 4)
         # 参考人民币金额（展示用，非决策依据）
         gold_price_cny = _estimate_gold_price_cny(market_data)
         suggested_cny = round(gold_price_cny * suggested_units, -1) if (gold_price_cny and suggested_units > 0) else None
