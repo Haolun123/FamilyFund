@@ -131,6 +131,32 @@ def compute_suggestion(plan: dict, market_data: dict) -> dict:
         compute_bias,
     )
 
+    # ── 固定定投模式：跳过矩阵信号，强制 1.0x ──
+    if plan.get('mode', 'matrix') == 'fixed':
+        mult_str = '1.0x'
+        multiplier = 1.0
+        arrow = '→'
+        base_cny = plan.get('base_amount_cny', 0)
+        unit = plan.get('unit', 'cny')
+        if unit == 'gram':
+            base_unit = plan.get('base_amount_unit', 1)
+            min_unit  = plan.get('min_unit', 1)
+            gold_entry = market_data.get('gold') or {}
+            gold_price = gold_entry.get('price')
+            suggested_unit = base_unit
+            suggested_cny  = round(suggested_unit * gold_price / 10) * 10 if gold_price else None
+            return {
+                'multiplier_str': '1.0x', 'multiplier': 1.0, 'arrow': '→',
+                'suggested_cny': suggested_cny, 'suggested_unit': suggested_unit,
+                'unit': 'gram', 'gold_price_cny': gold_price,
+            }
+        suggested_cny = round(base_cny * 1.0 / 10) * 10
+        return {
+            'multiplier_str': '1.0x', 'multiplier': 1.0, 'arrow': '→',
+            'suggested_cny': suggested_cny, 'suggested_unit': None,
+            'unit': 'cny', 'gold_price_cny': None,
+        }
+
     asset_class = plan.get('asset_class', '')
     vix   = (market_data.get('vix')  or {}).get('price')
     vxn   = (market_data.get('vxn')  or {}).get('price')

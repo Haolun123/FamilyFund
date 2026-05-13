@@ -2993,12 +2993,16 @@ with tab_market:
             else:
                 _base_str = f"¥{_plan.get('base_amount_cny', 0):,}"
                 _sug_str  = f"¥{_sug['suggested_cny']:,}"
-            # 标普/黄金加警示标注
-            _signal_str = f"{_mult} {_arrow}"
-            if _ac == 'US_Blend_Fund':
-                _signal_str += ' ⚠️'
-            elif _ac == 'Gold':
-                _signal_str += ' ⚠️'
+            # 标普/黄金加警示标注；固定模式用不同标签
+            _is_fixed_mode = _plan.get('mode', 'matrix') == 'fixed'
+            if _is_fixed_mode:
+                _signal_str = '固定 →'
+            else:
+                _signal_str = f"{_mult} {_arrow}"
+                if _ac == 'US_Blend_Fund':
+                    _signal_str += ' ⚠️'
+                elif _ac == 'Gold':
+                    _signal_str += ' ⚠️'
             _rows.append({
                 '标的':      _plan.get('name', '—'),
                 '类型':      _ASSET_CLASS_LABELS.get(_ac, _ac or '—'),
@@ -3245,6 +3249,11 @@ with tab_market:
                         else:
                             _new_base_cny = st.number_input('基础金额（CNY）', value=int(_plan.get('base_amount_cny', 500)), min_value=0, step=100, key=f'dca_base_{_pid}')
                     _new_note = st.text_input('备注', value=_plan.get('note', ''), key=f'dca_note_{_pid}')
+                    _new_use_matrix = st.toggle(
+                        '启用矩阵信号（关闭则固定定投 1.0x）',
+                        value=(_plan.get('mode', 'matrix') == 'matrix'),
+                        key=f'dca_mode_{_pid}',
+                    )
                     _sv1, _sv2 = st.columns([1, 5])
                     with _sv1:
                         if st.button('💾 保存', key=f'dca_save_{_pid}'):
@@ -3257,6 +3266,7 @@ with tab_market:
                                     'unit': 'gram',
                                     'base_amount_unit': _new_base_unit,
                                     'min_unit': 1,
+                                    'mode': 'matrix' if _new_use_matrix else 'fixed',
                                 }
                             else:
                                 _save_fields = {
@@ -3265,6 +3275,7 @@ with tab_market:
                                     'asset_class': _new_ac, 'frequency': _new_freq,
                                     'note': _new_note,
                                     'unit': 'cny',
+                                    'mode': 'matrix' if _new_use_matrix else 'fixed',
                                 }
                             update_plan(_data_dir, _pid, _save_fields)
                             st.session_state['dca_editing'].pop(_pid, None)
@@ -3297,6 +3308,11 @@ with tab_market:
                 else:
                     _add_base_cny  = st.number_input('基础金额（CNY）', value=500, min_value=0, step=100, key='dca_add_base')
             _add_note = st.text_input('备注（可选）', key='dca_add_note')
+            _add_use_matrix = st.toggle(
+                '启用矩阵信号（关闭则固定定投 1.0x）',
+                value=True,
+                key='dca_add_mode',
+            )
             _ab1, _ab2 = st.columns([1, 5])
             with _ab1:
                 if st.button('✅ 添加', key='dca_add_confirm'):
@@ -3313,6 +3329,7 @@ with tab_market:
                                 'unit': 'gram',
                                 'base_amount_unit': _add_base_unit,
                                 'min_unit': 1,
+                                'mode': 'matrix' if _add_use_matrix else 'fixed',
                             }
                         else:
                             _new_plan = {
@@ -3325,6 +3342,7 @@ with tab_market:
                                 'enabled': True,
                                 'note': _add_note.strip(),
                                 'unit': 'cny',
+                                'mode': 'matrix' if _add_use_matrix else 'fixed',
                             }
                         add_plan(_data_dir, _new_plan)
                         st.session_state['dca_adding'] = False
