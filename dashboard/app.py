@@ -2987,7 +2987,7 @@ with tab_market:
             _ac = _plan.get('asset_class', '')
             if _sug['unit'] == 'gram':
                 _base_str = f"{_plan.get('base_amount_unit', '—')}g"
-                _sug_str  = f"{_sug['suggested_unit']:.0f}g"
+                _sug_str  = f"{_sug['suggested_unit']:g}g"
                 if _sug['suggested_cny']:
                     _sug_str += f"（≈¥{_sug['suggested_cny']:,}）"
             else:
