@@ -3018,6 +3018,174 @@ with tab_market:
     else:
         st.info("暂无启用的定投计划，点击下方「管理定投计划」添加。")
 
+    # ═══════════════════════════════════════════════════════════
+    # 弹药池与现金流压力测试
+    # ═══════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("💰 弹药健康度")
+
+    # ── 数据准备 ──────────────────────────────────────────────
+    from fi_engine import load_fi_config as _load_fi_cfg_ammo
+    _ammo_fi_cfg = _load_fi_cfg_ammo(_data_dir)
+    _emergency_reserve = float(_ammo_fi_cfg.get('emergency_reserve_cny', 200000))
+    _top_mult_equity   = float(_ammo_fi_cfg.get('top_multiplier_equity', 10.0))
+    _top_mult_gold     = float(_ammo_fi_cfg.get('top_multiplier_gold', 5.0))
+    _monthly_savings   = (float(_ammo_fi_cfg.get('monthly_income_cny', 0))
+                          * float(_ammo_fi_cfg.get('monthly_savings_target_pct', 0)))
+
+    _ammo_latest_date = raw_df['Date'].max()
+    _ammo_latest      = raw_df[raw_df['Date'] == _ammo_latest_date]
+    _cash_val  = float(_ammo_latest[_ammo_latest['Asset_Class'] == 'Cash']['Total_Value'].sum())
+    _fi_val    = float(_ammo_latest[_ammo_latest['Asset_Class'] == 'Fixed_Income']['Total_Value'].sum())
+    _ammo_pool = _cash_val + _fi_val - _emergency_reserve
+
+    # 月消耗（按当前信号，按频率折算）
+    _monthly_cost = 0.0
+    if _suggestions:
+        for _ap, _as in _suggestions:
+            _acny = _as.get('suggested_cny') or 0
+            _freq = _ap.get('frequency', 'weekly')
+            if _freq == 'weekly':
+                _monthly_cost += _acny * 4.33
+            elif _freq == 'biweekly':
+                _monthly_cost += _acny * 2.17
+            else:
+                _monthly_cost += _acny
+    _weekly_cost = _total_suggested if _suggestions else 0.0
+
+    # 全部顶格每周消耗
+    _gold_price_cny = (market_data.get('gold', {}).get('price') or 0)
+    _max_weekly = 0.0
+    for _ap in _dca_plans:
+        if not _ap.get('enabled', True):
+            continue
+        if _ap.get('asset_class') == 'Gold':
+            _base_cny = float(_ap.get('base_amount_unit', 0)) * _gold_price_cny
+            _max_weekly += _base_cny * _top_mult_gold
+        else:
+            _base_cny = float(_ap.get('base_amount_cny', 0))
+            _max_weekly += _base_cny * _top_mult_equity
+
+    _weeks_current = (_ammo_pool / _weekly_cost) if _weekly_cost > 0 else float('inf')
+    _weeks_extreme = (_ammo_pool / _max_weekly)  if _max_weekly > 0 else float('inf')
+
+    # 颜色标签
+    def _ammo_status(weeks):
+        if weeks == float('inf'):
+            return '🟢', '无限'
+        if weeks > 8:
+            return '🟢', f'{weeks:.1f} 周'
+        if weeks >= 4:
+            return '🟡', f'⚠️ {weeks:.1f} 周'
+        return '🔴', f'🔴 {weeks:.1f} 周'
+
+    _ic, _iv = _ammo_status(_weeks_current)
+    _ec, _ev = _ammo_status(_weeks_extreme)
+
+    # ── KPI 展示 ──────────────────────────────────────────────
+    _ac1, _ac2, _ac3 = st.columns(3)
+    with _ac1:
+        st.metric("弹药池余额", f"¥{_ammo_pool:,.0f}")
+    with _ac2:
+        st.metric("可支撑（当前信号）", _iv)
+    with _ac3:
+        st.metric("可支撑（全部顶格）", _ev)
+
+    st.caption(
+        f"弹药池 = Cash ¥{_cash_val:,.0f} + 固收 ¥{_fi_val:,.0f} - 备用金 ¥{_emergency_reserve:,.0f}　｜　"
+        f"月消耗速率 ¥{_monthly_cost:,.0f}（当前信号持续）　｜　月新增储蓄 ¥{_monthly_savings:,.0f}"
+    )
+
+    if _weeks_extreme < 4:
+        st.error(f"🔴 警告：全部顶格仅能支撑 {_weeks_extreme:.1f} 周，建议补充现金或降低基础金额。")
+    elif _weeks_extreme < 8:
+        st.warning(f"⚠️ 关注：全部顶格可支撑 {_weeks_extreme:.1f} 周（健康基准：≥8周）。")
+
+    # ── 压力测试（折叠）─────────────────────────────────────
+    with st.expander("⚡ 压力测试", expanded=False):
+        _sc1, _sc2, _sc3, _sc4 = st.columns([2, 2, 2, 1])
+        with _sc1:
+            _stress_weeks = st.number_input("极端持续周数", min_value=1, max_value=52,
+                                            value=8, step=1, key='ammo_stress_weeks')
+        with _sc2:
+            _stress_mode = st.selectbox("信号强度", ["当前信号", "全部顶格"],
+                                        key='ammo_stress_mode')
+        with _sc3:
+            _stress_savings = st.number_input("月新增储蓄（¥）", min_value=0,
+                                              value=int(_monthly_savings), step=1000,
+                                              key='ammo_stress_savings')
+        with _sc4:
+            st.write("")
+            st.write("")
+            _run_stress = st.button("运行压测", key='ammo_run_stress')
+
+        if _stress_mode == "当前信号":
+            _stress_weekly = _weekly_cost
+        else:
+            _stress_weekly = _max_weekly
+
+        # 压测摘要（按钮触发或直接展示）
+        if _stress_weekly > 0:
+            _total_consume = _stress_weekly * _stress_weeks
+            _months_in_period = _stress_weeks / 4.33
+            _savings_inject   = _stress_savings * _months_in_period
+            _end_balance      = _ammo_pool - _total_consume + _savings_inject
+
+            # 临界周数（逐步模拟，含月储蓄补充）
+            _b = _ammo_pool
+            _critical_week = None
+            for _w in range(1, _stress_weeks + 1):
+                _b -= _stress_weekly
+                if (_w % 4) == 0:
+                    _b += _stress_savings
+                if _b < 0 and _critical_week is None:
+                    _critical_week = _w
+
+            st.markdown(f"""
+| 项目 | 数值 |
+|------|------|
+| 每周消耗 | ¥{_stress_weekly:,.0f} |
+| {_stress_weeks}周总消耗 | ¥{_total_consume:,.0f} |
+| 弹药池起始 | ¥{_ammo_pool:,.0f} |
+| 月储蓄补充（{_months_in_period:.1f}个月）| +¥{_savings_inject:,.0f} |
+| {_stress_weeks}周后余额 | ¥{_end_balance:,.0f} {'✅' if _end_balance >= 0 else '⚠️ 不足'} |
+| 临界周数 | {'**第 ' + str(_critical_week) + ' 周耗尽**' if _critical_week else f'≥{_stress_weeks}周，不会耗尽'} |
+""")
+
+            if _critical_week:
+                _half_base  = int(_ammo_pool / (_critical_week / 0.5) / 1000) * 1000 if _stress_weekly else 0
+                st.warning(
+                    f"**建议方案 A**：将所有基础金额降低 50%，每周消耗 ¥{_stress_weekly/2:,.0f}，可延长至约 {_critical_week * 2} 周\n\n"
+                    f"**建议方案 B**：补充现金至弹药池达 ¥{_total_consume - _savings_inject:,.0f}，保证全程不中断"
+                )
+
+            # 折线图
+            import plotly.graph_objects as _go_ammo
+            _bal_list = []
+            _b2 = _ammo_pool
+            for _w2 in range(_stress_weeks + 1):
+                _bal_list.append(_b2)
+                if _w2 < _stress_weeks:
+                    _b2 -= _stress_weekly
+                    if _w2 % 4 == 3:
+                        _b2 += _stress_savings
+            _fig_ammo = _go_ammo.Figure()
+            _fig_ammo.add_trace(_go_ammo.Scatter(
+                x=list(range(_stress_weeks + 1)), y=_bal_list,
+                mode='lines+markers', name='弹药池余额',
+                line=dict(color='#2196F3', width=2),
+            ))
+            _fig_ammo.add_hline(y=0, line_dash='dash', line_color='red',
+                                annotation_text='耗尽线', annotation_position='bottom right')
+            _fig_ammo.update_layout(
+                xaxis_title='第N周', yaxis_title='弹药池余额（¥）',
+                height=320, margin=dict(l=40, r=20, t=20, b=40),
+                yaxis=dict(tickformat=',.0f'),
+            )
+            st.plotly_chart(_fig_ammo, use_container_width=True)
+        else:
+            st.info("暂无定投计划，无法计算消耗速率。")
+
     # ── 配置区（可折叠）────────────────────────────────────
     with st.expander("⚙ 管理定投计划", expanded=False):
 
