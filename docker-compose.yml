@@ -4,6 +4,7 @@ services:
     container_name: familyfund
     ports:
       - "8501:8501"
+      - "127.0.0.1:5174:5174"   # MCP SSE，只绑本机
     volumes:
       - ${FAMILYFUND_DATA:-./data}:/app/data
       - ./src:/app/src

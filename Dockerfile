@@ -23,7 +23,12 @@ COPY assets/fonts/ArialUnicodeMS.ttf /usr/local/lib/python3.13/site-packages/mat
 RUN python3 -c "import matplotlib.font_manager as fm; fm._load_fontmanager(try_read_cache=False); print('Font cache rebuilt')"
 
 EXPOSE 8501
+EXPOSE 5174
 
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 
-ENTRYPOINT ["streamlit", "run", "dashboard/app.py"]
+COPY mcp_server.py /app/mcp_server.py
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+ENTRYPOINT ["/app/start.sh"]
