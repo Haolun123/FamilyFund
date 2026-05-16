@@ -1142,8 +1142,109 @@ with tab_update:
                 else:
                     st.markdown(f"❌ `{code}` — {res['msg']}")
 
+    # ─── 📱 短信解析（第一步）───────────────────────────────
+    st.subheader("📱 步骤一：导入定投确认短信")
+    st.caption("粘贴本周所有定投确认短信，系统自动更新份额、净值，并登记调仓记录。完成后再手动补充其余持仓价格。")
+
+    sms_text = st.text_area("短信内容（多条短信用空行分隔）", height=120, key="sms_input",
+                            placeholder="【博时基金】尊敬的...确认成功，份额为...净值为...\n\n【南方基金】...")
+    if st.button("🔍 解析短信", key="sms_parse", type="primary"):
+        if sms_text.strip():
+            from sms_parser import parse_sms
+            _holdings = [
+                {'code': str(row['Code']), 'name': str(row['Name'])}
+                for _, row in st.session_state['update_template'][
+                    st.session_state['update_template']['Asset_Class'] != 'Cash'
+                ].iterrows()
+                if pd.notna(row['Name']) and pd.notna(row['Code'])
+            ]
+            _parsed = parse_sms(sms_text, _holdings)
+            st.session_state['sms_parsed'] = _parsed
+            st.rerun()
+        else:
+            st.warning("请先粘贴短信内容")
+
+    if 'sms_parsed' in st.session_state:
+        _parsed = st.session_state['sms_parsed']
+        st.markdown("**解析结果：**")
+        _any_error = False
+        for i, r in enumerate(_parsed):
+            if r.get('parse_error'):
+                st.error(f"第{i+1}条短信无法解析")
+                _any_error = True
+                continue
+            _match_str = f"{r['matched_code']} ({r['matched_name']})" if r['matched_code'] else "❓ 未匹配"
+            _gold_str  = f"（{r['shares']}克）" if r['is_gold'] else ""
+            st.markdown(
+                f"**{i+1}.** {r['confirm_date']} · {r['action']} · "
+                f"{r['fund_name']} → {_match_str}  "
+                f"金额 ¥{r['amount']:,.2f}{_gold_str} · 净值 {r['nav']:.4f} · 份额 {r['shares']}"
+            )
+            if not r['matched_code']:
+                _options = [''] + [
+                    f"{row['Name']} ({row['Code']})"
+                    for _, row in st.session_state['update_template'][
+                        st.session_state['update_template']['Asset_Class'] != 'Cash'
+                    ].iterrows()
+                    if pd.notna(row['Name'])
+                ]
+                _sel = st.selectbox(f"手动选择持仓（第{i+1}条）", _options, key=f"sms_match_{i}")
+                if _sel:
+                    _name, _code = _sel.rsplit(' (', 1)
+                    _code = _code.rstrip(')')
+                    _parsed[i]['matched_code'] = _code
+                    _parsed[i]['matched_name'] = _name
+                    st.session_state['sms_parsed'] = _parsed
+
+        if not _any_error:
+            if st.button("✅ 应用解析结果", key="sms_apply", type="primary"):
+                _shares_updated = 0
+                for r in _parsed:
+                    if r.get('parse_error') or not r['matched_code']:
+                        continue
+                    # 1. 填入调仓辅助器（NCF / Cash）
+                    st.session_state['rebalance_entries'].append({
+                        'type':        r['action'],
+                        'asset_name':  r['matched_name'],
+                        'asset_label': f"{r['matched_name']} ({r['matched_code']})",
+                        'amount':      r['amount'],
+                        'price':       r['nav'],
+                        'fee':         0.0,
+                        'is_new':      False,
+                        'new_asset':   {},
+                    })
+                    # 2. 自动更新持仓表 Shares 和 Current_Price
+                    _tpl = st.session_state['update_template']
+                    _mask = _tpl['Code'].astype(str) == str(r['matched_code'])
+                    if not _mask.any():
+                        _mask = _tpl['Name'].astype(str) == str(r['matched_name'])
+                    if _mask.any():
+                        _idx = _tpl[_mask].index[0]
+                        if r['action'] == '买入':
+                            _tpl.at[_idx, 'Shares'] = round(
+                                float(_tpl.at[_idx, 'Shares'] or 0) + float(r['shares']), 6
+                            )
+                        else:
+                            _tpl.at[_idx, 'Shares'] = round(
+                                max(0.0, float(_tpl.at[_idx, 'Shares'] or 0) - float(r['shares'])), 6
+                            )
+                        _tpl.at[_idx, 'Current_Price'] = float(r['nav'])
+                        st.session_state['update_template'] = _tpl
+                        _shares_updated += 1
+                del st.session_state['sms_parsed']
+                st.success(f"✅ 已自动更新 {_shares_updated} 个标的的 Shares / Current_Price，调仓辅助器已登记")
+                st.rerun()
+
+        if st.button("清除解析结果", key="sms_clear"):
+            del st.session_state['sms_parsed']
+            st.rerun()
+
+    st.divider()
+
     # ─── Editable table ───
-    st.markdown("**编辑持仓** (可增删行，修改价格/份额/市值。买卖 NCF 通过调仓辅助器自动填写，外部入金/出金记在 Cash 行的 Net_Cash_Flow)")
+    st.subheader("步骤二：确认 / 补充持仓数据")
+    st.caption("定投标的已由短信解析自动更新。其余持仓请手动更新 Current_Price，份额无变化可不动。")
+    st.markdown("买卖 NCF 通过调仓辅助器自动填写，外部入金/出金记在 Cash 行的 Net_Cash_Flow")
 
     edited_df = st.data_editor(
         st.session_state['update_template'],
@@ -1200,7 +1301,7 @@ with tab_update:
         st.rerun()
 
     # ─── 调仓辅助器（在编辑持仓表之后，确保 edited_df 已赋值）───
-    with st.expander("⚖️ 调仓辅助器（设置每行 NCF）", expanded=False):
+    with st.expander("⚖️ 步骤三：调仓辅助器（登记其他买卖 / 外部入金）", expanded=False):
         st.caption(
             "登记本期所有买卖及外部资金操作。点击「应用」后：\n"
             "① 更新 Cash 行 Total_Value；"
@@ -1462,102 +1563,6 @@ with tab_update:
         if entries and st.button("清空所有条目", key="rb_clear", type="secondary"):
             st.session_state['rebalance_entries'] = []
             st.rerun()
-
-        # ── 从短信导入 ──────────────────────────────────────
-        st.divider()
-        with st.expander("📱 从短信导入", expanded=False):
-            st.caption("粘贴基金确认短信（多条用空行分隔），自动提取信息填入调仓辅助器。")
-            sms_text = st.text_area("短信内容", height=150, key="sms_input",
-                                    placeholder="【博时基金】尊敬的...确认成功，份额为...净值为...\n\n【南方基金】...")
-            if st.button("解析短信", key="sms_parse", type="primary"):
-                if sms_text.strip():
-                    from sms_parser import parse_sms
-                    _holdings = [
-                        {'code': str(row['Code']), 'name': str(row['Name'])}
-                        for _, row in edited_df[edited_df['Asset_Class'] != 'Cash'].iterrows()
-                        if pd.notna(row['Name']) and pd.notna(row['Code'])
-                    ]
-                    _parsed = parse_sms(sms_text, _holdings)
-                    st.session_state['sms_parsed'] = _parsed
-                    st.rerun()
-                else:
-                    st.warning("请先粘贴短信内容")
-
-            # 展示解析结果并允许填入调仓辅助器
-            if 'sms_parsed' in st.session_state:
-                _parsed = st.session_state['sms_parsed']
-                st.markdown("**解析结果：**")
-                _any_error = False
-                for i, r in enumerate(_parsed):
-                    if r.get('parse_error'):
-                        st.error(f"第{i+1}条短信无法解析")
-                        _any_error = True
-                        continue
-                    _match_str = f"{r['matched_code']} ({r['matched_name']})" if r['matched_code'] else "❓ 未匹配"
-                    _gold_str  = f"（{r['shares']}克）" if r['is_gold'] else ""
-                    st.markdown(
-                        f"**{i+1}.** {r['confirm_date']} · {r['action']} · "
-                        f"{r['fund_name']} → {_match_str}  "
-                        f"金额 ¥{r['amount']:,.2f}{_gold_str} · 净值 {r['nav']:.4f} · 份额 {r['shares']}"
-                    )
-                    # 未匹配时提供下拉选择
-                    if not r['matched_code']:
-                        _options = [''] + [
-                            f"{row['Name']} ({row['Code']})"
-                            for _, row in edited_df[edited_df['Asset_Class'] != 'Cash'].iterrows()
-                            if pd.notna(row['Name'])
-                        ]
-                        _sel = st.selectbox(f"手动选择持仓（第{i+1}条）", _options, key=f"sms_match_{i}")
-                        if _sel:
-                            _name, _code = _sel.rsplit(' (', 1)
-                            _code = _code.rstrip(')')
-                            _parsed[i]['matched_code'] = _code
-                            _parsed[i]['matched_name'] = _name
-                            st.session_state['sms_parsed'] = _parsed
-
-                if not _any_error:
-                    if st.button("✅ 填入调仓辅助器", key="sms_apply", type="primary"):
-                        _shares_updated = 0
-                        for r in _parsed:
-                            if r.get('parse_error') or not r['matched_code']:
-                                continue
-                            # 1. 填入调仓辅助器（NCF / Cash）
-                            st.session_state['rebalance_entries'].append({
-                                'type':       r['action'],
-                                'asset_name': r['matched_name'],
-                                'asset_label': f"{r['matched_name']} ({r['matched_code']})",
-                                'amount':     r['amount'],
-                                'price':      r['nav'],
-                                'fee':        0.0,
-                                'is_new':     False,
-                                'new_asset':  {},
-                            })
-                            # 2. 自动更新持仓表 Shares 和 Current_Price
-                            _tpl = st.session_state['update_template']
-                            _mask = _tpl['Code'].astype(str) == str(r['matched_code'])
-                            if not _mask.any():
-                                # Code 未匹配，尝试 Name 匹配
-                                _mask = _tpl['Name'].astype(str) == str(r['matched_name'])
-                            if _mask.any():
-                                _idx = _tpl[_mask].index[0]
-                                if r['action'] == '买入':
-                                    _tpl.at[_idx, 'Shares'] = round(
-                                        float(_tpl.at[_idx, 'Shares'] or 0) + float(r['shares']), 6
-                                    )
-                                else:  # 卖出
-                                    _tpl.at[_idx, 'Shares'] = round(
-                                        max(0.0, float(_tpl.at[_idx, 'Shares'] or 0) - float(r['shares'])), 6
-                                    )
-                                _tpl.at[_idx, 'Current_Price'] = float(r['nav'])
-                                st.session_state['update_template'] = _tpl
-                                _shares_updated += 1
-                        del st.session_state['sms_parsed']
-                        st.success(f"已填入 {len([r for r in _parsed if not r.get('parse_error')])} 条记录，自动更新 {_shares_updated} 行 Shares 和 Current_Price")
-                        st.rerun()
-
-                if st.button("清除解析结果", key="sms_clear"):
-                    del st.session_state['sms_parsed']
-                    st.rerun()
 
     # ─── Validation ───
 
