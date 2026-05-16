@@ -52,7 +52,7 @@ def _fetch_eastmoney(code: str) -> dict:
             'msg':    '天天基金',
         }
     except Exception as e:
-        return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)[:50]}
+        return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)}
 
 
 # ── yfinance ──────────────────────────────────────────────
@@ -75,7 +75,7 @@ def _fetch_yf(symbol: str, label: str = '') -> dict:
             'msg':    label or symbol,
         }
     except Exception as e:
-        return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)[:50]}
+        return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)}
 
 
 def _fetch_gold_cny() -> dict:
@@ -99,7 +99,7 @@ def _fetch_gold_cny() -> dict:
             'msg':    f'GC=F × USD/CNY / 31.1035',
         }
     except Exception as e:
-        return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)[:50]}
+        return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)}
 
 
 # ── 路由 ──────────────────────────────────────────────────
