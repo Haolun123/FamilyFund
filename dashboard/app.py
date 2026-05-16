@@ -2050,6 +2050,8 @@ with tab_sap:
                 except Exception as e:
                     st.error(f"FX fetch failed: {e}")
 
+            move_activity = st.selectbox("Activity", ["Award", "Dividend"], key="move_sap_activity")
+
             move_col1, move_col2, move_col3 = st.columns(3)
             with move_col1:
                 move_date = st.date_input("交易日期", value=date.today(), key="move_sap_date")
@@ -2071,28 +2073,41 @@ with tab_sap:
                 st.session_state['move_sap_rows'] = [{'qty': 0.0}]
 
             move_rows = []
-            for i, row_data in enumerate(st.session_state['move_sap_rows']):
+            if move_activity == 'Dividend':
+                # 分红：单行输入
                 mc1, mc2 = st.columns([2, 2])
                 with mc1:
-                    mqty = st.number_input(f"Tranche {i+1} Qty", value=row_data['qty'],
-                                           format="%.4f", key=f"move_qty_{i}")
+                    mqty = st.number_input("Dividend Qty (shares)", value=st.session_state['move_sap_rows'][0]['qty'],
+                                           format="%.6f", key="move_qty_0")
                 cny_val = round(move_price * mqty * move_fx, 2)
                 with mc2:
-                    st.text_input(f"CNY", value=f"¥{cny_val:,.2f}", disabled=True, key=f"move_cny_{i}")
-                move_rows.append({'qty': mqty, 'cny': cny_val})
+                    st.text_input("CNY", value=f"¥{cny_val:,.2f}", disabled=True, key="move_cny_0")
+                move_rows = [{'qty': mqty, 'cny': cny_val}]
+                st.session_state['move_sap_rows'] = [{'qty': mqty}]
+            else:
+                # Award：多 tranche 布局
+                for i, row_data in enumerate(st.session_state['move_sap_rows']):
+                    mc1, mc2 = st.columns([2, 2])
+                    with mc1:
+                        mqty = st.number_input(f"Tranche {i+1} Qty", value=row_data['qty'],
+                                               format="%.4f", key=f"move_qty_{i}")
+                    cny_val = round(move_price * mqty * move_fx, 2)
+                    with mc2:
+                        st.text_input(f"CNY", value=f"¥{cny_val:,.2f}", disabled=True, key=f"move_cny_{i}")
+                    move_rows.append({'qty': mqty, 'cny': cny_val})
 
-            st.session_state['move_sap_rows'] = [{'qty': r['qty']} for r in move_rows]
+                st.session_state['move_sap_rows'] = [{'qty': r['qty']} for r in move_rows]
 
-            btn_move_col1, btn_move_col2 = st.columns(2)
-            with btn_move_col1:
-                if st.button("+ Add Row", key="move_add_row"):
-                    st.session_state['move_sap_rows'].append({'qty': 0.0})
-                    st.rerun()
-            with btn_move_col2:
-                if len(st.session_state['move_sap_rows']) > 1:
-                    if st.button("- Remove Last", key="move_remove_row"):
-                        st.session_state['move_sap_rows'].pop()
+                btn_move_col1, btn_move_col2 = st.columns(2)
+                with btn_move_col1:
+                    if st.button("+ Add Row", key="move_add_row"):
+                        st.session_state['move_sap_rows'].append({'qty': 0.0})
                         st.rerun()
+                with btn_move_col2:
+                    if len(st.session_state['move_sap_rows']) > 1:
+                        if st.button("- Remove Last", key="move_remove_row"):
+                            st.session_state['move_sap_rows'].pop()
+                            st.rerun()
 
             # Summary
             move_total_qty = sum(r['qty'] for r in move_rows)
@@ -2110,7 +2125,7 @@ with tab_sap:
                         if r['qty'] != 0:
                             new_rows.append({
                                 'Date': date_str,
-                                'Activity': 'Award',
+                                'Activity': move_activity,
                                 'Price_EUR': round(move_price, 6),
                                 'Quantity': round(r['qty'], 6),
                                 'FX_Rate': round(move_fx, 4),
