@@ -478,9 +478,16 @@ When new SAP transactions are recorded (monthly Own SAP vesting, quarterly Move 
 |-------|----------|---------------|-----------------|
 | Own SAP monthly vesting | Updated total from `own_sap.csv` | Shares × Price × FX | **Sum of `Cost_CNY`** from new transactions |
 | Move SAP quarterly vesting | Updated total from `move_sap.csv` | Shares × Price × FX | **Sum of `CNY`** from new vesting rows (FMV at vesting) |
-| Own SAP dividend reinvest | Updated total | Updated value | **Cost_CNY** of dividend row |
-| Move SAP dividend reinvest | Updated total | Updated value | **CNY** of dividend row (full value) |
+| Own SAP dividend reinvest | Updated total | Updated value | **0**（分红复投 = 持股内部回报，不记外部入金） |
+| Move SAP dividend reinvest | Updated total | Updated value | **0**（同上） |
 | No SAP activity this week | Same as last week | Updated value (price change) | 0 |
+
+**NCF 语义说明：**
+
+- **归属（Vesting / Purchase / Match）**：外部价值进入基金（放弃的工资 / 雇主薪酬补偿），NCF ≠ 0
+- **分红复投（Dividend）**：持股孵化的回报，从未离开投资圈子，与红利低波 ETF 底层分红复投一致，NCF = 0，收益体现在 NAV 上升
+
+这与业界公募基金全收益（Total Return）标准对齐。
 
 ### Why These NCF Values?
 
