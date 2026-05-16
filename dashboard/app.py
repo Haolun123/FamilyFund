@@ -1233,6 +1233,8 @@ with tab_update:
                         _shares_updated += 1
                 del st.session_state['sms_parsed']
                 st.success(f"✅ 已自动更新 {_shares_updated} 个标的的 Shares / Current_Price，调仓辅助器已登记")
+                # 短信应用后自动触发刷新净值，补全其余标的价格
+                st.session_state['_refresh_prices'] = True
                 st.rerun()
 
         if st.button("清除解析结果", key="sms_clear"):
@@ -1243,7 +1245,7 @@ with tab_update:
 
     # ─── Editable table ───
     st.subheader("步骤二：确认 / 补充持仓数据")
-    st.caption("定投标的已由短信解析自动更新。其余持仓请手动更新 Current_Price，份额无变化可不动。")
+    st.caption("短信解析后已自动刷新所有标的净值。如有拉取失败或固定收益产品，请手动补充 Current_Price。")
     st.markdown("买卖 NCF 通过调仓辅助器自动填写，外部入金/出金记在 Cash 行的 Net_Cash_Flow")
 
     edited_df = st.data_editor(
