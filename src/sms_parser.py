@@ -29,7 +29,7 @@ from difflib import get_close_matches
 
 # ── 正则 ──────────────────────────────────────────────────
 
-# 格式A：博时等，含完整年份，"申购"关键词
+# 格式A：博时等，含完整年份，"申购/买入"关键词，确认日期在申购日之后
 _PAT_A = re.compile(
     r'于(\d{4})年(\d{1,2})月(\d{1,2})日'   # 申购日（不用）
     r'.*?(申购|买入)'
@@ -41,14 +41,38 @@ _PAT_A = re.compile(
     re.DOTALL,
 )
 
-# 格式B：南方基金，"定投"关键词，日期不含年份
+# 格式A2：博时定投格式，"YYYY年MM月DD日您通过...定期定投...确认成功，份额为...净值为"
+_PAT_A2 = re.compile(
+    r'(\d{4})年(\d{1,2})月(\d{1,2})日'      # 确认日期（含完整年份）
+    r'.*?定(?:期定投|投)'
+    r'.*?(?:（博时钱包支付）)?\s*'
+    r'(.+?)\s*'                              # 基金名称
+    r'([\d,]+\.?\d*)\s*元'                   # 金额
+    r'.*?确认成功'
+    r'.*?份额为([\d.]+)份'                   # 份额
+    r'.*?净值为([\d.]+)',                    # 净值
+    re.DOTALL,
+)
+
+# 格式B：南方基金定投，"定投"关键词，日期不含年份，份额/净值后无"为"
 _PAT_B = re.compile(
     r'您(\d{1,2})月(\d{1,2})日定投'         # 定投月日（不用）
     r'(.+?)基金'                             # 基金名称
     r'([\d,]+\.?\d*)\s*元'                   # 金额
     r'于(\d{1,2})月(\d{1,2})日确认成功'     # 确认月日
-    r'.*?确认份额([\d.]+)份'                 # 份额
-    r'.*?成交净值([\d.]+)',                  # 净值
+    r'.*?确认份额([\d.]+)份'                 # 份额（无"为"）
+    r'.*?成交净值([\d.]+)',                  # 净值（无"为"）
+    re.DOTALL,
+)
+
+# 格式B2：南方基金申购，"申购"关键词，份额/净值后有"为"
+_PAT_B2 = re.compile(
+    r'您(\d{1,2})月(\d{1,2})日申购'         # 申购月日（不用）
+    r'(.+?)基金'                             # 基金名称
+    r'([\d,]+\.?\d*)\s*元'                   # 金额
+    r'于(\d{1,2})月(\d{1,2})日确认成功'     # 确认月日
+    r'.*?确认份额为([\d.]+)份'               # 份额（有"为"）
+    r'.*?成交净值为([\d.]+)',                # 净值（有"为"）
     re.DOTALL,
 )
 
@@ -100,7 +124,7 @@ def _parse_one(sms: str) -> dict | None:
             'matched_name': None,
         }
 
-    # 格式A：博时等
+    # 格式A：博时申购，含完整年份
     m = _PAT_A.search(sms)
     if m:
         base_year = int(m.group(1))
@@ -122,8 +146,51 @@ def _parse_one(sms: str) -> dict | None:
             'matched_name': None,
         }
 
-    # 格式B：南方基金定投
+    # 格式A2：博时定投，"YYYY年MM月DD日您通过...定期定投...确认成功"
+    m = _PAT_A2.search(sms)
+    if m:
+        y, mo, d_ = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        fund_name = m.group(4).strip()
+        amount    = _parse_amount(m.group(5))
+        shares    = float(m.group(6))
+        nav       = float(m.group(7))
+        return {
+            'confirm_date': f'{y:04d}-{mo:02d}-{d_:02d}',
+            'action':       '买入',
+            'fund_name':    fund_name,
+            'amount':       amount,
+            'shares':       shares,
+            'nav':          nav,
+            'is_gold':      False,
+            'raw':          sms,
+            'matched_code': None,
+            'matched_name': None,
+        }
+
+    # 格式B：南方基金定投（"定投"关键词，份额/净值无"为"）
     m = _PAT_B.search(sms)
+    if m:
+        confirm_mo, confirm_d = int(m.group(5)), int(m.group(6))
+        year      = _infer_year(confirm_mo)
+        fund_name = m.group(3).strip()
+        amount    = _parse_amount(m.group(4))
+        shares    = float(m.group(7))
+        nav       = float(m.group(8))
+        return {
+            'confirm_date': f'{year:04d}-{confirm_mo:02d}-{confirm_d:02d}',
+            'action':       '买入',
+            'fund_name':    fund_name,
+            'amount':       amount,
+            'shares':       shares,
+            'nav':          nav,
+            'is_gold':      False,
+            'raw':          sms,
+            'matched_code': None,
+            'matched_name': None,
+        }
+
+    # 格式B2：南方基金申购（"申购"关键词，份额/净值有"为"）
+    m = _PAT_B2.search(sms)
     if m:
         confirm_mo, confirm_d = int(m.group(5)), int(m.group(6))
         year      = _infer_year(confirm_mo)
