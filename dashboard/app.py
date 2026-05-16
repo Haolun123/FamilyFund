@@ -1517,9 +1517,11 @@ with tab_update:
 
                 if not _any_error:
                     if st.button("✅ 填入调仓辅助器", key="sms_apply", type="primary"):
+                        _shares_updated = 0
                         for r in _parsed:
                             if r.get('parse_error') or not r['matched_code']:
                                 continue
+                            # 1. 填入调仓辅助器（NCF / Cash）
                             st.session_state['rebalance_entries'].append({
                                 'type':       r['action'],
                                 'asset_name': r['matched_name'],
@@ -1530,8 +1532,27 @@ with tab_update:
                                 'is_new':     False,
                                 'new_asset':  {},
                             })
+                            # 2. 自动更新持仓表 Shares 和 Current_Price
+                            _tpl = st.session_state['update_template']
+                            _mask = _tpl['Code'].astype(str) == str(r['matched_code'])
+                            if not _mask.any():
+                                # Code 未匹配，尝试 Name 匹配
+                                _mask = _tpl['Name'].astype(str) == str(r['matched_name'])
+                            if _mask.any():
+                                _idx = _tpl[_mask].index[0]
+                                if r['action'] == '买入':
+                                    _tpl.at[_idx, 'Shares'] = round(
+                                        float(_tpl.at[_idx, 'Shares'] or 0) + float(r['shares']), 6
+                                    )
+                                else:  # 卖出
+                                    _tpl.at[_idx, 'Shares'] = round(
+                                        max(0.0, float(_tpl.at[_idx, 'Shares'] or 0) - float(r['shares'])), 6
+                                    )
+                                _tpl.at[_idx, 'Current_Price'] = float(r['nav'])
+                                st.session_state['update_template'] = _tpl
+                                _shares_updated += 1
                         del st.session_state['sms_parsed']
-                        st.success(f"已填入 {len([r for r in _parsed if not r.get('parse_error')])} 条记录")
+                        st.success(f"已填入 {len([r for r in _parsed if not r.get('parse_error')])} 条记录，自动更新 {_shares_updated} 行 Shares 和 Current_Price")
                         st.rerun()
 
                 if st.button("清除解析结果", key="sms_clear"):
