@@ -40,6 +40,10 @@ from market_monitor import (
     TARGETS,
 )
 from backtest import run_backtest, run_all_targets, _TARGET_MIN_DATES
+from research_library import (
+    get_reports_dir, load_ticker_map, list_tickers,
+    list_ticker_files, read_analysis_md, get_report_path, find_folder_by_code,
+)
 
 # ─── Page Config ───
 
@@ -132,8 +136,8 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_sap, tab_market, tab_backtest, tab_quarterly, tab_planning, tab_tenth = st.tabs(
-    ["Portfolio", "Ledger", "SAP", "Market", "Backtest", "Quarterly", "Planning", "10th Man"]
+tab_dashboard, tab_update, tab_sap, tab_market, tab_backtest, tab_quarterly, tab_planning, tab_tenth, tab_research = st.tabs(
+    ["Portfolio", "Ledger", "SAP", "Market", "Backtest", "Quarterly", "Planning", "10th Man", "研报库"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -500,7 +504,21 @@ with tab_dashboard:
         },
     )
 
-    # Footer
+    # ── 研报快速入口 ──
+    _pf_reports_dir = get_reports_dir(os.path.dirname(csv_path))
+    if os.path.isdir(_pf_reports_dir):
+        _pf_links = []
+        for _pf_code in holdings['Code'].dropna().unique():
+            _pf_folder = find_folder_by_code(_pf_reports_dir, str(_pf_code))
+            if _pf_folder:
+                _pf_links.append((_pf_folder, _pf_code))
+        if _pf_links:
+            _pf_rcols = st.columns(len(_pf_links))
+            for _pf_i, (_pf_folder, _pf_code) in enumerate(_pf_links):
+                with _pf_rcols[_pf_i]:
+                    if st.button(f"📄 {_pf_folder}", key=f'pf_rl_{_pf_code}'):
+                        st.session_state['research_target'] = _pf_folder
+
     st.caption(f"共 {len(holdings)} 条持仓 | 筛选市值合计: ¥{holdings['Total_Value'].sum():,.2f} | 数据日期: {latest_date_all}")
 
     # ─── Section 3b: Risk Concentration ───
@@ -4673,3 +4691,74 @@ with tab_tenth:
                         st.success(f"已保存至 {fpath}　用浏览器打开可打印为 PDF")
                     except Exception as e:
                         st.error(f"报告生成失败：{e}")
+
+# ═══════════════════════════════════════════════════════════
+# Tab 9 — 研报库
+# ═══════════════════════════════════════════════════════════
+
+with tab_research:
+    _rl_data_dir = os.path.dirname(csv_path)
+    _rl_reports_dir = get_reports_dir(_rl_data_dir)
+
+    if not os.path.isdir(_rl_reports_dir):
+        st.warning(f"未找到研报库目录：{_rl_reports_dir}\n\n请设置环境变量 `FINANCE_REPORTS_DIR` 或确认 `Finance Reports/` 目录与 data/ 同级。")
+    else:
+        _rl_tickers = list_tickers(_rl_reports_dir)
+        _rl_tm = load_ticker_map(_rl_reports_dir)
+
+        # ── 布局：左 30% 标的列表 | 右 70% 文档区 ──
+        _rl_col_left, _rl_col_right = st.columns([3, 7])
+
+        with _rl_col_left:
+            st.markdown("#### 🔴 持仓中")
+            for _rl_folder in _rl_tickers.get('持仓', []):
+                if st.button(_rl_folder, key=f'rl_h_{_rl_folder}', use_container_width=True):
+                    st.session_state['rl_selected'] = _rl_folder
+
+            st.markdown("#### 👁 观察中")
+            for _rl_folder in _rl_tickers.get('观察', []):
+                if st.button(_rl_folder, key=f'rl_w_{_rl_folder}', use_container_width=True):
+                    st.session_state['rl_selected'] = _rl_folder
+
+        with _rl_col_right:
+            # 处理持仓 Tab 联动跳转
+            if 'research_target' in st.session_state:
+                st.session_state['rl_selected'] = st.session_state.pop('research_target')
+
+            _rl_selected = st.session_state.get('rl_selected')
+
+            if not _rl_selected:
+                st.info("← 从左侧选择标的查看研报")
+            else:
+                st.markdown(f"## {_rl_selected}")
+                _rl_files = list_ticker_files(_rl_reports_dir, _rl_selected)
+
+                # ── 分析文档 ──
+                st.markdown("### 📄 分析文档")
+                if not _rl_files['analysis']:
+                    st.caption("暂无分析文档")
+                else:
+                    for _rl_md_name in _rl_files['analysis']:
+                        with st.expander(_rl_md_name.removesuffix('.md'), expanded=False):
+                            _rl_md_text = read_analysis_md(_rl_reports_dir, _rl_selected, _rl_md_name)
+                            if _rl_md_text:
+                                st.markdown(_rl_md_text)
+                            else:
+                                st.warning("文档读取失败")
+
+                # ── 原始财报 ──
+                st.markdown("### 📋 原始财报")
+                if not _rl_files['reports']:
+                    st.caption("暂无财报文件")
+                else:
+                    for _rl_pdf_name in _rl_files['reports']:
+                        _rl_pdf_path = get_report_path(_rl_reports_dir, _rl_selected, _rl_pdf_name)
+                        if os.path.exists(_rl_pdf_path):
+                            with open(_rl_pdf_path, 'rb') as _rl_f:
+                                st.download_button(
+                                    label=f"⬇ {_rl_pdf_name}",
+                                    data=_rl_f.read(),
+                                    file_name=_rl_pdf_name,
+                                    mime='application/pdf',
+                                    key=f'dl_{_rl_selected}_{_rl_pdf_name}',
+                                )
