@@ -62,19 +62,19 @@ OWN_SAP_CSV = os.path.join(BASE_DIR, 'data', 'own_sap.csv')
 MOVE_SAP_CSV = os.path.join(BASE_DIR, 'data', 'move_sap.csv')
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def _rl_load_ticker_map(reports_dir):
     return load_ticker_map(reports_dir)
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def _rl_list_tickers(reports_dir):
     return list_tickers(reports_dir)
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def _rl_list_files(reports_dir, folder_name):
     return list_ticker_files(reports_dir, folder_name)
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def _rl_read_md(reports_dir, folder_name, filename):
     return read_analysis_md(reports_dir, folder_name, filename)
 
@@ -4705,6 +4705,14 @@ with tab_research:
     if not os.path.isdir(_rl_reports_dir):
         st.warning(f"未找到研报库目录：{_rl_reports_dir}\n\n请设置环境变量 `FINANCE_REPORTS_DIR` 或确认 `Finance Reports/` 目录与 data/ 同级。")
     else:
+        # 手动刷新按钮（清除文件系统缓存，立即看到新增/修改的研报）
+        if st.button("🔄 刷新研报库", key='rl_refresh', help='清除缓存，扫描最新文件'):
+            _rl_load_ticker_map.clear()
+            _rl_list_tickers.clear()
+            _rl_list_files.clear()
+            _rl_read_md.clear()
+            st.rerun()
+
         _rl_tickers = _rl_list_tickers(_rl_reports_dir)
 
         # ── 布局：左 30% 标的列表 | 右 70% 文档区 ──
