@@ -4770,11 +4770,8 @@ with tab_research:
                     for _rl_pdf_name in _rl_files['reports']:
                         _rl_pdf_path = get_report_path(_rl_reports_dir, _rl_selected, _rl_pdf_name)
                         if os.path.exists(_rl_pdf_path):
-                            with open(_rl_pdf_path, 'rb') as _rl_f:
-                                st.download_button(
-                                    label=f"⬇ {_rl_pdf_name}",
-                                    data=_rl_f.read(),
-                                    file_name=_rl_pdf_name,
-                                    mime='application/pdf',
-                                    key=f'dl_{_rl_selected}_{_rl_pdf_name}',
-                                )
+                            # 用宿主机路径构造 file:// 链接，浏览器直接打开 PDF
+                            _rl_host_reports = os.environ.get('FINANCE_REPORTS_HOST_DIR', _rl_reports_dir)
+                            _rl_host_path = _rl_pdf_path.replace(_rl_reports_dir, _rl_host_reports, 1)
+                            _rl_file_url = 'file://' + _rl_host_path.replace(' ', '%20')
+                            st.markdown(f"📄 [{_rl_pdf_name}]({_rl_file_url})")

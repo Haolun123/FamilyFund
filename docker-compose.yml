@@ -9,4 +9,6 @@ services:
       - ${FAMILYFUND_DATA:-./data}:/app/data
       - ./src:/app/src
       - ./dashboard:/app/dashboard
+    environment:
+      - FINANCE_REPORTS_HOST_DIR=${FAMILYFUND_DATA:-./data}/Finance Reports
     restart: unless-stopped
