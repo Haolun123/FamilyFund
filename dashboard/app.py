@@ -508,9 +508,11 @@ with tab_dashboard:
     _pf_reports_dir = get_reports_dir(os.path.dirname(csv_path))
     if os.path.isdir(_pf_reports_dir):
         _pf_links = []
+        _pf_seen = set()
         for _pf_code in holdings['Code'].dropna().unique():
             _pf_folder = find_folder_by_code(_pf_reports_dir, str(_pf_code))
-            if _pf_folder:
+            if _pf_folder and _pf_folder not in _pf_seen:
+                _pf_seen.add(_pf_folder)
                 _pf_links.append((_pf_folder, _pf_code))
         if _pf_links:
             _pf_rcols = st.columns(len(_pf_links))
@@ -518,6 +520,10 @@ with tab_dashboard:
                 with _pf_rcols[_pf_i]:
                     if st.button(f"📄 {_pf_folder}", key=f'pf_rl_{_pf_code}'):
                         st.session_state['research_target'] = _pf_folder
+                        # 自动展开第一篇分析文档
+                        _pf_files = _rl_list_files(_pf_reports_dir, _pf_folder)
+                        if _pf_files['analysis']:
+                            st.session_state['rl_auto_expand'] = _pf_files['analysis'][0]
 
     st.caption(f"共 {len(holdings)} 条持仓 | 筛选市值合计: ¥{holdings['Total_Value'].sum():,.2f} | 数据日期: {latest_date_all}")
 
@@ -4740,7 +4746,6 @@ with tab_research:
             # 处理持仓 Tab 联动跳转
             if 'research_target' in st.session_state:
                 st.session_state['rl_selected'] = st.session_state.pop('research_target')
-
             _rl_selected = st.session_state.get('rl_selected')
 
             if not _rl_selected:
@@ -4754,8 +4759,10 @@ with tab_research:
                 if not _rl_files['analysis']:
                     st.caption("暂无分析文档")
                 else:
+                    _rl_auto_expand = st.session_state.pop('rl_auto_expand', None)
                     for _rl_md_name in _rl_files['analysis']:
-                        with st.expander(_rl_md_name.removesuffix('.md'), expanded=False):
+                        _rl_expanded = (_rl_md_name == _rl_auto_expand)
+                        with st.expander(_rl_md_name.removesuffix('.md'), expanded=_rl_expanded):
                             _rl_md_text = _rl_read_md(_rl_reports_dir, _rl_selected, _rl_md_name)
                             if _rl_md_text:
                                 st.markdown(_rl_md_text)
