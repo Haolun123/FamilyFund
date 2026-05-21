@@ -42,7 +42,7 @@ from market_monitor import (
 from backtest import run_backtest, run_all_targets, _TARGET_MIN_DATES
 from research_library import (
     get_reports_dir, load_ticker_map, list_tickers,
-    list_ticker_files, read_analysis_md, get_report_path, find_folder_by_code,
+    list_ticker_files, read_analysis_md, get_report_path,
 )
 
 # ─── Page Config ───
@@ -520,27 +520,6 @@ with tab_dashboard:
             '净现金流': st.column_config.NumberColumn(format="¥%.2f"),
         },
     )
-
-    # ── 研报快速入口 ──
-    _pf_reports_dir = get_reports_dir(os.path.dirname(csv_path))
-    if os.path.isdir(_pf_reports_dir):
-        _pf_links = []
-        _pf_seen = set()
-        for _pf_code in holdings['Code'].dropna().unique():
-            _pf_folder = find_folder_by_code(_pf_reports_dir, str(_pf_code))
-            if _pf_folder and _pf_folder not in _pf_seen:
-                _pf_seen.add(_pf_folder)
-                _pf_links.append((_pf_folder, _pf_code))
-        if _pf_links:
-            _pf_rcols = st.columns(len(_pf_links))
-            for _pf_i, (_pf_folder, _pf_code) in enumerate(_pf_links):
-                with _pf_rcols[_pf_i]:
-                    if st.button(f"📄 {_pf_folder}", key=f'pf_rl_{_pf_code}'):
-                        st.session_state['research_target'] = _pf_folder
-                        # 自动展开第一篇分析文档
-                        _pf_files = list_ticker_files(_pf_reports_dir, _pf_folder)
-                        if _pf_files['analysis']:
-                            st.session_state['rl_auto_expand'] = _pf_files['analysis'][0]
 
     st.caption(f"共 {len(holdings)} 条持仓 | 筛选市值合计: ¥{holdings['Total_Value'].sum():,.2f} | 数据日期: {latest_date_all}")
 
