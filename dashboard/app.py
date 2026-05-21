@@ -136,8 +136,8 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_sap, tab_market, tab_backtest, tab_quarterly, tab_planning, tab_tenth, tab_research = st.tabs(
-    ["Portfolio", "Ledger", "SAP", "Market", "Backtest", "Quarterly", "Planning", "10th Man", "研报库"]
+tab_dashboard, tab_update, tab_sap, tab_market, tab_research, tab_backtest, tab_quarterly, tab_planning, tab_tenth = st.tabs(
+    ["Portfolio", "Ledger", "SAP", "Market", "Research", "Backtest", "Quarterly", "Planning", "10th Man"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -4693,8 +4693,25 @@ with tab_tenth:
                         st.error(f"报告生成失败：{e}")
 
 # ═══════════════════════════════════════════════════════════
-# Tab 9 — 研报库
+# Tab 9 — Research
 # ═══════════════════════════════════════════════════════════
+
+# 缓存文件系统扫描，避免每次 rerun 重复 IO
+@st.cache_data
+def _rl_load_ticker_map(reports_dir):
+    return load_ticker_map(reports_dir)
+
+@st.cache_data
+def _rl_list_tickers(reports_dir):
+    return list_tickers(reports_dir)
+
+@st.cache_data
+def _rl_list_files(reports_dir, folder_name):
+    return list_ticker_files(reports_dir, folder_name)
+
+@st.cache_data
+def _rl_read_md(reports_dir, folder_name, filename):
+    return read_analysis_md(reports_dir, folder_name, filename)
 
 with tab_research:
     _rl_data_dir = os.path.dirname(csv_path)
@@ -4703,8 +4720,7 @@ with tab_research:
     if not os.path.isdir(_rl_reports_dir):
         st.warning(f"未找到研报库目录：{_rl_reports_dir}\n\n请设置环境变量 `FINANCE_REPORTS_DIR` 或确认 `Finance Reports/` 目录与 data/ 同级。")
     else:
-        _rl_tickers = list_tickers(_rl_reports_dir)
-        _rl_tm = load_ticker_map(_rl_reports_dir)
+        _rl_tickers = _rl_list_tickers(_rl_reports_dir)
 
         # ── 布局：左 30% 标的列表 | 右 70% 文档区 ──
         _rl_col_left, _rl_col_right = st.columns([3, 7])
@@ -4731,7 +4747,7 @@ with tab_research:
                 st.info("← 从左侧选择标的查看研报")
             else:
                 st.markdown(f"## {_rl_selected}")
-                _rl_files = list_ticker_files(_rl_reports_dir, _rl_selected)
+                _rl_files = _rl_list_files(_rl_reports_dir, _rl_selected)
 
                 # ── 分析文档 ──
                 st.markdown("### 📄 分析文档")
@@ -4740,7 +4756,7 @@ with tab_research:
                 else:
                     for _rl_md_name in _rl_files['analysis']:
                         with st.expander(_rl_md_name.removesuffix('.md'), expanded=False):
-                            _rl_md_text = read_analysis_md(_rl_reports_dir, _rl_selected, _rl_md_name)
+                            _rl_md_text = _rl_read_md(_rl_reports_dir, _rl_selected, _rl_md_name)
                             if _rl_md_text:
                                 st.markdown(_rl_md_text)
                             else:
