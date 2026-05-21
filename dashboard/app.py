@@ -63,6 +63,23 @@ MOVE_SAP_CSV = os.path.join(BASE_DIR, 'data', 'move_sap.csv')
 
 
 @st.cache_data
+def _rl_load_ticker_map(reports_dir):
+    return load_ticker_map(reports_dir)
+
+@st.cache_data
+def _rl_list_tickers(reports_dir):
+    return list_tickers(reports_dir)
+
+@st.cache_data
+def _rl_list_files(reports_dir, folder_name):
+    return list_ticker_files(reports_dir, folder_name)
+
+@st.cache_data
+def _rl_read_md(reports_dir, folder_name, filename):
+    return read_analysis_md(reports_dir, folder_name, filename)
+
+
+@st.cache_data
 def load_data(csv_path):
     df = load_portfolio(csv_path)
     if df is None:
@@ -521,7 +538,7 @@ with tab_dashboard:
                     if st.button(f"📄 {_pf_folder}", key=f'pf_rl_{_pf_code}'):
                         st.session_state['research_target'] = _pf_folder
                         # 自动展开第一篇分析文档
-                        _pf_files = _rl_list_files(_pf_reports_dir, _pf_folder)
+                        _pf_files = list_ticker_files(_pf_reports_dir, _pf_folder)
                         if _pf_files['analysis']:
                             st.session_state['rl_auto_expand'] = _pf_files['analysis'][0]
 
@@ -4701,23 +4718,6 @@ with tab_tenth:
 # ═══════════════════════════════════════════════════════════
 # Tab 9 — Research
 # ═══════════════════════════════════════════════════════════
-
-# 缓存文件系统扫描，避免每次 rerun 重复 IO
-@st.cache_data
-def _rl_load_ticker_map(reports_dir):
-    return load_ticker_map(reports_dir)
-
-@st.cache_data
-def _rl_list_tickers(reports_dir):
-    return list_tickers(reports_dir)
-
-@st.cache_data
-def _rl_list_files(reports_dir, folder_name):
-    return list_ticker_files(reports_dir, folder_name)
-
-@st.cache_data
-def _rl_read_md(reports_dir, folder_name, filename):
-    return read_analysis_md(reports_dir, folder_name, filename)
 
 with tab_research:
     _rl_data_dir = os.path.dirname(csv_path)
