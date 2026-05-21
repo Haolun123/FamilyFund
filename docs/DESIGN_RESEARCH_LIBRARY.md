@@ -135,5 +135,5 @@ st.session_state['research_target'] = folder_name
 | 问题 | 选项 | 倾向 |
 |------|------|------|
 | PDF 查看方式 | 下载 vs iframe 内嵌预览 | 待定 |
-| Tab 顺序 | 第 6 个（现有 5 个 Tab 之后） | 第 6 个 |
+| Tab 顺序 | 第 9 个（现有 8 个 Tab 之后） | 第 9 个 |
 | `_meta` 框架文档 | 是否在研报库展示 | 待定，可作独立小节 |

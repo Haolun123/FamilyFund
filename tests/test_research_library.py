@@ -19,6 +19,15 @@ from research_library import (
     find_folder_by_code,
     extract_ticker_from_folder,
     _ticker_base_dir,
+    # 决策相关
+    load_decisions,
+    get_decision,
+    get_decision_history,
+    update_decision,
+    format_decision_badge,
+    DECISION_ACTIONS,
+    DECISION_MARKETS,
+    SUMMARY_MAX_LEN,
 )
 
 
@@ -238,3 +247,125 @@ def test_find_folder_by_code_watchlist_empty(reports_dir):
 ])
 def test_extract_ticker_from_folder(folder, expected):
     assert extract_ticker_from_folder(folder) == expected
+
+
+# ── 决策映射测试 ─────────────────────────────────────────
+
+def test_load_decisions_missing(tmp_path):
+    """文件不存在时返回空 dict，不抛异常。"""
+    assert load_decisions(str(tmp_path)) == {}
+
+
+def test_load_decisions_corrupt(tmp_path):
+    """JSON 损坏时返回空 dict。"""
+    meta = tmp_path / "_meta"
+    meta.mkdir()
+    (meta / "decisions.json").write_text("not json", encoding='utf-8')
+    assert load_decisions(str(tmp_path)) == {}
+
+
+def test_get_decision_unknown(tmp_path):
+    """未评估标的返回 None。"""
+    assert get_decision(str(tmp_path), "未评估标的") is None
+
+
+def test_update_decision_first_time(tmp_path):
+    """首次写入：current 有值，history 为空。"""
+    update_decision(str(tmp_path), "招商银行（600036.SS）",
+                    "买入", "A股", "2026-05-21", "PB 0.83x 龙头折价", "x.md")
+    cur = get_decision(str(tmp_path), "招商银行（600036.SS）")
+    assert cur['action'] == "买入"
+    assert cur['market'] == "A股"
+    assert cur['date'] == "2026-05-21"
+    assert cur['summary'] == "PB 0.83x 龙头折价"
+    assert cur['source_doc'] == "x.md"
+    assert get_decision_history(str(tmp_path), "招商银行（600036.SS）") == []
+
+
+def test_update_decision_archives_history(tmp_path):
+    """更新决策时旧 current 归档到 history。"""
+    update_decision(str(tmp_path), "成都银行（601838.SS）",
+                    "买入", "A股", "2026-04-10", "建仓", "v1.md")
+    update_decision(str(tmp_path), "成都银行（601838.SS）",
+                    "持有", "A股", "2026-05-18", "外资股东不动", "v2.md")
+    cur = get_decision(str(tmp_path), "成都银行（601838.SS）")
+    history = get_decision_history(str(tmp_path), "成都银行（601838.SS）")
+    assert cur['action'] == "持有"
+    assert cur['date'] == "2026-05-18"
+    assert len(history) == 1
+    assert history[0]['action'] == "买入"
+    assert history[0]['date'] == "2026-04-10"
+
+
+def test_update_decision_history_sorted_desc(tmp_path):
+    """history 按日期降序（新→旧）排序。"""
+    folder = "测试（TEST）"
+    update_decision(str(tmp_path), folder, "买入", "A股", "2026-01-01", "v1", "")
+    update_decision(str(tmp_path), folder, "持有", "A股", "2026-03-01", "v2", "")
+    update_decision(str(tmp_path), folder, "加仓", "A股", "2026-05-01", "v3", "")
+    history = get_decision_history(str(tmp_path), folder)
+    assert [h['date'] for h in history] == ["2026-03-01", "2026-01-01"]
+
+
+def test_update_decision_invalid_action(tmp_path):
+    with pytest.raises(ValueError, match="action"):
+        update_decision(str(tmp_path), "x", "瞎搞", "A股", "2026-05-21", "s", "")
+
+
+def test_update_decision_invalid_market(tmp_path):
+    with pytest.raises(ValueError, match="market"):
+        update_decision(str(tmp_path), "x", "买入", "美股", "2026-05-21", "s", "")
+
+
+def test_update_decision_summary_too_long(tmp_path):
+    summary = "a" * (SUMMARY_MAX_LEN + 1)
+    with pytest.raises(ValueError, match="summary"):
+        update_decision(str(tmp_path), "x", "买入", "A股", "2026-05-21", summary, "")
+
+
+def test_update_decision_summary_exact_max(tmp_path):
+    """恰好 50 字可以保存。"""
+    summary = "a" * SUMMARY_MAX_LEN
+    update_decision(str(tmp_path), "x", "买入", "A股", "2026-05-21", summary, "")
+    assert get_decision(str(tmp_path), "x")['summary'] == summary
+
+
+def test_format_decision_badge_with_market():
+    decision = {"action": "买入", "market": "A股", "date": "2026-05-21",
+                "summary": "x", "source_doc": ""}
+    assert format_decision_badge(decision) == "🟢 买入·A股"
+
+
+def test_format_decision_badge_na_market():
+    decision = {"action": "持有", "market": "N/A", "date": "2026-05-21",
+                "summary": "x", "source_doc": ""}
+    assert format_decision_badge(decision) == "🔵 持有"
+
+
+def test_format_decision_badge_none():
+    """未评估返回固定标签。"""
+    assert format_decision_badge(None) == "❓ 未评估"
+
+
+@pytest.mark.parametrize("action,expected_icon", [
+    ("买入", "🟢"),
+    ("加仓", "🟢"),
+    ("持有", "🔵"),
+    ("观察", "🟡"),
+    ("减仓", "🟠"),
+    ("卖出", "🔴"),
+    ("不感兴趣", "⚪"),
+])
+def test_format_decision_badge_all_actions(action, expected_icon):
+    decision = {"action": action, "market": "N/A", "date": "2026-05-21",
+                "summary": "x", "source_doc": ""}
+    assert format_decision_badge(decision).startswith(expected_icon)
+
+
+def test_decisions_persist_to_disk(tmp_path):
+    """写入后磁盘文件存在且内容正确。"""
+    update_decision(str(tmp_path), "x", "买入", "A股", "2026-05-21", "s", "doc.md")
+    decisions_file = tmp_path / "_meta" / "decisions.json"
+    assert decisions_file.exists()
+    data = json.loads(decisions_file.read_text(encoding='utf-8'))
+    assert data["x"]["current"]["action"] == "买入"

@@ -188,3 +188,107 @@ portfolio.csv
 - **SAP Tab 默认价格硬编码** — 缓存为空时应提示手动输入，待改进
 
 详见 `docs/IMPROVE_LIST.md`。
+
+---
+
+## 个股研报分析工作流
+
+当用户说"分析 XXX"、"评估 XXX"、"用芒格框架分析 XXX"等类似指令时，按以下流程执行。
+
+### Step 1: 准备工作
+
+- 路径：`$FAMILYFUND_DATA/Finance Reports/`
+  - 持仓标的：`<中文名（代码）>/reports/` 直接放在根目录
+  - 观察标的：`_watchlist/<中文名（代码）>/reports/` 放在 `_watchlist/` 下
+- 文件夹命名规范：`中文名（代码）`，括号必须用全角 `（）`
+- 财报 PDF 应已由用户放入 `reports/` 子目录
+- 如果文件夹不存在或没 PDF，提醒用户先准备数据，不要继续
+
+### Step 2: 数据采集
+
+1. **读取财报 PDF**：用 Read 工具取最新 1-2 期 PDF 的关键页（首页 + 财务数据章节，通常前 5-10 页）
+2. **拉取实时数据**：必须先 `setproxy` 配置代理（参考 `~/.zshrc` 中的 alias）。然后用 Python + yfinance 获取：
+   - 主代码：`currentPrice`、`trailingPE`、`forwardPE`、`priceToBook`、`dividendYield`、`returnOnEquity`、`marketCap`、`bookValue`、`trailingEps`、`beta`
+   - 同业对比：行业内 5-8 家可比公司同样字段
+3. **港 A 双上市判定**：如果标的同时有 A 股代码（`.SS` / `.SZ`）和 H 股代码（`.HK`），必须**同时**拉取双市场数据 + `HKDCNY=X` 汇率，并在分析中加入"A 股 vs H 股决策"章节
+
+### Step 3: 调用芒格 Skill
+
+使用 `munger-perspective` skill 完成框架分析。遵循已有研报的结构（参考 `成都银行投资审视：芒格框架分析.md` 或 `招商银行投资审视：芒格框架分析.md`）。
+
+### Step 4: 写入分析文档
+
+- 路径：`<标的文件夹>/analysis/<中文名>投资审视：芒格框架分析.md`
+  - 持仓标的示例：`成都银行（601838.SS）/analysis/成都银行投资审视：芒格框架分析.md`
+  - 观察标的示例：`_watchlist/招商银行（600036.SS）/analysis/招商银行投资审视：芒格框架分析.md`
+
+- **文档末尾必须**有 `## 决策记录` 章节，包含 yaml 代码块：
+
+  ````markdown
+  ---
+
+  ## 决策记录
+
+  ```yaml
+  action: 买入       # 7 选 1：买入 / 加仓 / 持有 / 观察 / 减仓 / 卖出 / 不感兴趣
+  market: A股        # 3 选 1：A股 / H股 / N/A
+  date: 2026-05-21   # 当天日期
+  summary: ≤50字一句话决策摘要
+  ```
+  ````
+
+  这个块是 `decisions.json` 自动更新的输入源。
+
+### Step 5: 更新 decisions.json
+
+写完文档后，必须更新 `$FAMILYFUND_DATA/Finance Reports/_meta/decisions.json`：
+
+调用 `src/research_library.py` 的 `update_decision()` 函数（或直接读写 JSON），它会自动：
+- 把现有的 `current` 归档到 `history` 数组（如果有）
+- 写入新的 `current` 决策
+- 仅追加，不可删除历史
+
+### Step 6: 更新 ticker_map.json（仅新标的）
+
+如果是首次分析的新标的（`ticker_map.json` 中没有该 folder 的条目），必须添加到 `_meta/ticker_map.json` 的 `持仓` 或 `观察` 下：
+
+```json
+"中文名（代码）": {
+  "portfolio_codes": ["持仓时使用的 Code 字段"],
+  "yf_symbol": "用于基本面分析的 yfinance symbol",
+  "full_name": "公司法定全名"
+}
+```
+
+观察中标的的 `portfolio_codes` 留空数组 `[]`。
+
+### Step 7: 完成提示
+
+告诉用户：
+- 分析文档已写入 `<完整路径>`
+- 决策已更新到 `decisions.json`
+- 到 Dashboard Research Tab 点 🔄 刷新研报库 即可看到（或 60 秒内自动刷新）
+
+### 港 A 双上市分析要点（双市场标的必看）
+
+参考 `招商银行投资审视：芒格框架分析.md` 第九节的格式，必须涵盖：
+
+1. **价差快照**：A 股价（CNY）、H 股价（HKD/换算CNY）、PB、PE、AH 价差百分比
+2. **股息税差异**：A 股长期持有 0% vs H 股港股通固定 20%
+3. **流动性对比**：日均成交额、买卖价差
+4. **港股通摩擦成本**：印花税 0.13% 等约 0.20% 单次买卖
+5. **汇率风险**：HKD/CNY 中长期走势
+6. **5 年综合年化回报对比**：基于 PB 修复假设
+7. **决策**：在 `decisions.json` 的 `market` 字段标注买哪个市场
+
+### 决策枚举速查
+
+| Action | 含义 |
+|--------|------|
+| 买入 | 当前未持有，建议建仓 |
+| 加仓 | 已持仓，建议增加 |
+| 持有 | 已持仓，维持不动 |
+| 观察 | 暂不操作，监控基本面 |
+| 减仓 | 已持仓，建议部分卖出 |
+| 卖出 | 已持仓，建议清仓 |
+| 不感兴趣 | 评估后排除（如 Too Hard 筐） |

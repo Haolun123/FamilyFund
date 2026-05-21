@@ -43,6 +43,7 @@ from backtest import run_backtest, run_all_targets, _TARGET_MIN_DATES
 from research_library import (
     get_reports_dir, load_ticker_map, list_tickers,
     list_ticker_files, read_analysis_md, get_report_path,
+    load_decisions, get_decision, get_decision_history, format_decision_badge,
 )
 
 # ─── Page Config ───
@@ -77,6 +78,10 @@ def _rl_list_files(reports_dir, folder_name):
 @st.cache_data(ttl=60)
 def _rl_read_md(reports_dir, folder_name, filename):
     return read_analysis_md(reports_dir, folder_name, filename)
+
+@st.cache_data(ttl=60)
+def _rl_load_decisions(reports_dir):
+    return load_decisions(reports_dir)
 
 
 @st.cache_data
@@ -4711,6 +4716,7 @@ with tab_research:
             _rl_list_tickers.clear()
             _rl_list_files.clear()
             _rl_read_md.clear()
+            _rl_load_decisions.clear()
             st.rerun()
 
         _rl_tickers = _rl_list_tickers(_rl_reports_dir)
@@ -4718,15 +4724,22 @@ with tab_research:
         # ── 布局：左 30% 标的列表 | 右 70% 文档区 ──
         _rl_col_left, _rl_col_right = st.columns([3, 7])
 
+        # 一次性加载决策映射，左/右列共用
+        _rl_decisions_data = _rl_load_decisions(_rl_reports_dir)
+
         with _rl_col_left:
             st.markdown("#### 🔴 持仓中")
             for _rl_folder in _rl_tickers.get('持仓', []):
-                if st.button(_rl_folder, key=f'rl_h_{_rl_folder}', use_container_width=True):
+                _rl_d = _rl_decisions_data.get(_rl_folder, {}).get('current')
+                _rl_label = f"{_rl_folder}　{format_decision_badge(_rl_d)}"
+                if st.button(_rl_label, key=f'rl_h_{_rl_folder}', use_container_width=True):
                     st.session_state['rl_selected'] = _rl_folder
 
             st.markdown("#### 👁 观察中")
             for _rl_folder in _rl_tickers.get('观察', []):
-                if st.button(_rl_folder, key=f'rl_w_{_rl_folder}', use_container_width=True):
+                _rl_d = _rl_decisions_data.get(_rl_folder, {}).get('current')
+                _rl_label = f"{_rl_folder}　{format_decision_badge(_rl_d)}"
+                if st.button(_rl_label, key=f'rl_w_{_rl_folder}', use_container_width=True):
                     st.session_state['rl_selected'] = _rl_folder
 
         with _rl_col_right:
@@ -4739,6 +4752,36 @@ with tab_research:
                 st.info("← 从左侧选择标的查看研报")
             else:
                 st.markdown(f"## {_rl_selected}")
+
+                # ── 决策横幅 ──
+                _rl_entry = _rl_decisions_data.get(_rl_selected, {})
+                _rl_cur = _rl_entry.get('current')
+                _rl_history = sorted(_rl_entry.get('history', []), key=lambda x: x.get('date', ''), reverse=True)
+
+                if _rl_cur:
+                    _rl_badge = format_decision_badge(_rl_cur)
+                    _rl_summary = _rl_cur.get('summary', '')
+                    _rl_date = _rl_cur.get('date', '')
+                    _rl_src = _rl_cur.get('source_doc', '')
+                    _rl_src_html = f"　·　来源：{_rl_src}" if _rl_src else ""
+                    st.markdown(
+                        f"""<div style='border:1px solid #ddd; border-radius:8px; padding:12px 16px; margin-bottom:12px; background:#fafafa;'>
+<div style='font-size:1.1em; font-weight:bold;'>{_rl_badge}　|　{_rl_date}</div>
+<div style='margin-top:6px; color:#444;'>{_rl_summary}</div>
+<div style='margin-top:4px; color:#888; font-size:0.85em;'>{_rl_src_html}</div>
+</div>""",
+                        unsafe_allow_html=True,
+                    )
+
+                    if _rl_history:
+                        with st.expander(f"📜 决策历史（{len(_rl_history)} 条）", expanded=False):
+                            for _h in _rl_history:
+                                st.markdown(
+                                    f"- **{_h.get('date', '')}** · {format_decision_badge(_h)} · {_h.get('summary', '')}"
+                                )
+                else:
+                    st.info(f"❓ 该标的尚未评估")
+
                 _rl_files = _rl_list_files(_rl_reports_dir, _rl_selected)
 
                 # ── 分析文档 ──

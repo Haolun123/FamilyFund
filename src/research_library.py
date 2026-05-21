@@ -150,3 +150,121 @@ def extract_ticker_from_folder(folder_name: str) -> str | None:
     """从文件夹名提取括号内的 ticker，如 '成都银行（601838.SS）' → '601838.SS'。"""
     m = re.search(r'[（(](.+?)[）)]', folder_name)
     return m.group(1) if m else None
+
+
+# ── 决策映射 ─────────────────────────────────────────────
+
+DECISION_ACTIONS = ["买入", "加仓", "持有", "观察", "减仓", "卖出", "不感兴趣"]
+DECISION_MARKETS = ["A股", "H股", "N/A"]
+SUMMARY_MAX_LEN = 50
+
+DECISION_COLORS = {
+    "买入":     "🟢",
+    "加仓":     "🟢",
+    "持有":     "🔵",
+    "观察":     "🟡",
+    "减仓":     "🟠",
+    "卖出":     "🔴",
+    "不感兴趣": "⚪",
+}
+
+
+def _decisions_path(reports_dir: str) -> str:
+    return os.path.join(reports_dir, '_meta', 'decisions.json')
+
+
+def load_decisions(reports_dir: str) -> dict:
+    """读取 _meta/decisions.json，缺失或损坏时返回 {}。
+
+    Returns:
+        {folder_name: {"current": {...}, "history": [...]}, ...}
+    """
+    path = _decisions_path(reports_dir)
+    try:
+        with open(path, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def get_decision(reports_dir: str, folder_name: str) -> dict | None:
+    """返回某标的的当前决策，未评估时返回 None。"""
+    data = load_decisions(reports_dir)
+    entry = data.get(folder_name)
+    if not entry:
+        return None
+    return entry.get('current')
+
+
+def get_decision_history(reports_dir: str, folder_name: str) -> list:
+    """返回某标的的历史决策列表（不含当前），按时间从近到远排序。"""
+    data = load_decisions(reports_dir)
+    entry = data.get(folder_name)
+    if not entry:
+        return []
+    history = entry.get('history', [])
+    # 按 date 降序（新→旧）
+    return sorted(history, key=lambda x: x.get('date', ''), reverse=True)
+
+
+def update_decision(
+    reports_dir: str,
+    folder_name: str,
+    action: str,
+    market: str,
+    date: str,
+    summary: str,
+    source_doc: str = '',
+) -> None:
+    """写入新决策。旧 current 自动归档到 history（仅追加，不可删除）。
+
+    Raises:
+        ValueError: 参数非法（action/market 不在枚举内，或 summary 超长）
+    """
+    if action not in DECISION_ACTIONS:
+        raise ValueError(f"action 必须是 {DECISION_ACTIONS} 之一，得到：{action}")
+    if market not in DECISION_MARKETS:
+        raise ValueError(f"market 必须是 {DECISION_MARKETS} 之一，得到：{market}")
+    if len(summary) > SUMMARY_MAX_LEN:
+        raise ValueError(f"summary 不能超过 {SUMMARY_MAX_LEN} 字，当前 {len(summary)} 字")
+
+    path = _decisions_path(reports_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = load_decisions(reports_dir)
+
+    new_decision = {
+        'action': action,
+        'market': market,
+        'date': date,
+        'summary': summary,
+        'source_doc': source_doc,
+    }
+
+    entry = data.get(folder_name, {'current': None, 'history': []})
+    # 旧 current 归档到 history（仅追加）
+    if entry.get('current'):
+        entry.setdefault('history', []).append(entry['current'])
+    entry['current'] = new_decision
+    data[folder_name] = entry
+
+    # 原子写入
+    tmp_path = path + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
+
+def format_decision_badge(decision: dict | None) -> str:
+    """返回简短决策标签字符串。
+
+    例：'🟢 买入·A股'、'🔵 持有'、'❓ 未评估'
+    """
+    if not decision:
+        return '❓ 未评估'
+    icon = DECISION_COLORS.get(decision.get('action', ''), '❓')
+    action = decision.get('action', '')
+    market = decision.get('market', 'N/A')
+    if market == 'N/A' or not market:
+        return f"{icon} {action}"
+    return f"{icon} {action}·{market}"
+
