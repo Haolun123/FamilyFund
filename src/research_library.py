@@ -215,6 +215,9 @@ def update_decision(
     date: str,
     summary: str,
     source_doc: str = '',
+    target_position: str = '',
+    add_trigger: str = '',
+    trim_trigger: str = '',
 ) -> None:
     """写入新决策。旧 current 自动归档到 history（仅追加，不可删除）。
 
@@ -238,6 +241,9 @@ def update_decision(
         'date': date,
         'summary': summary,
         'source_doc': source_doc,
+        'target_position': target_position,
+        'add_trigger': add_trigger,
+        'trim_trigger': trim_trigger,
     }
 
     entry = data.get(folder_name, {'current': None, 'history': []})
@@ -267,4 +273,115 @@ def format_decision_badge(decision: dict | None) -> str:
     if market == 'N/A' or not market:
         return f"{icon} {action}"
     return f"{icon} {action}·{market}"
+
+
+# ── 仓位汇总 ─────────────────────────────────────────────
+
+def _normalize_code(code: str) -> str:
+    """归一化代码用于跨数据源匹配。
+
+    portfolio.csv 用 '601838' / 'HK0700' / 'SAP.DE'
+    ticker_map.json 用 '601838.SS' / 'HK700' / 'SAP.DE'
+    归一化策略：转大写、去 .SS / .SZ / .HK 后缀；HK 港股代码去 HK 前缀和补齐 0
+    """
+    s = (code or '').upper().strip()
+    is_hk = False
+    for suf in ('.SS', '.SZ', '.HK'):
+        if s.endswith(suf):
+            if suf == '.HK':
+                is_hk = True
+            s = s[:-len(suf)]
+            break
+    if s.startswith('HK'):
+        is_hk = True
+        s = s[2:]
+    # 仅港股代码去开头 0（让 HK0700 / HK700 / 00700.HK 一致）
+    if is_hk:
+        s = s.lstrip('0')
+    return s
+
+
+def _compute_holdings_pct(raw_df) -> dict:
+    """从 portfolio.csv 算出每个 Code 当前市值占总资产的比例。
+
+    Args:
+        raw_df: nav_engine.load_portfolio() 返回的 DataFrame
+                需要列：Date, Code, Total_Value, Asset_Class
+
+    Returns:
+        {normalized_code: pct_float}, pct_float 为占比（0-1）
+    """
+    if raw_df is None or len(raw_df) == 0:
+        return {}
+    latest_date = raw_df['Date'].max()
+    latest = raw_df[raw_df['Date'] == latest_date]
+    total = latest['Total_Value'].sum()
+    if total <= 0:
+        return {}
+    result = {}
+    for _, row in latest.iterrows():
+        code = str(row.get('Code', ''))
+        if not code or row.get('Asset_Class') == 'Cash':
+            continue
+        norm = _normalize_code(code)
+        if not norm:
+            continue
+        result[norm] = result.get(norm, 0.0) + float(row['Total_Value']) / total
+    return result
+
+
+def get_position_summary(reports_dir: str, raw_df=None) -> list[dict]:
+    """返回所有标的的决策与仓位汇总，供 Dashboard 表格展示。
+
+    Args:
+        reports_dir: Finance Reports 目录
+        raw_df: portfolio.csv 加载后的 DataFrame（可选）。传入时会算"当前实际仓位"。
+
+    Returns:
+        list of dict，每条包含：
+          - folder: 文件夹名（标的）
+          - group: '持仓' | '观察'
+          - action / market / date / summary
+          - target_position: 建议仓位
+          - current_position: 当前实际仓位（小数，如 0.025）；无持仓为 None
+          - add_trigger / trim_trigger
+          - source_doc
+        顺序：先持仓后观察，组内按 ticker_map 顺序
+    """
+    tm = load_ticker_map(reports_dir)
+    decisions = load_decisions(reports_dir)
+    holdings = _compute_holdings_pct(raw_df) if raw_df is not None else {}
+
+    rows = []
+    for group in ('持仓', '观察'):
+        for folder, info in tm.get(group, {}).items():
+            d = decisions.get(folder, {}).get('current') or {}
+            # 当前实际仓位：portfolio_codes 中任一匹配则求和
+            current_pct = None
+            codes = info.get('portfolio_codes', [])
+            if codes and holdings:
+                pct = 0.0
+                matched = False
+                for c in codes:
+                    n = _normalize_code(c)
+                    if n in holdings:
+                        pct += holdings[n]
+                        matched = True
+                if matched:
+                    current_pct = pct
+            rows.append({
+                'folder': folder,
+                'group': group,
+                'action': d.get('action', ''),
+                'market': d.get('market', ''),
+                'date': d.get('date', ''),
+                'summary': d.get('summary', ''),
+                'target_position': d.get('target_position', ''),
+                'current_position': current_pct,
+                'add_trigger': d.get('add_trigger', ''),
+                'trim_trigger': d.get('trim_trigger', ''),
+                'source_doc': d.get('source_doc', ''),
+                'evaluated': bool(d),
+            })
+    return rows
 

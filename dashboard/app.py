@@ -44,6 +44,7 @@ from research_library import (
     get_reports_dir, load_ticker_map, list_tickers,
     list_ticker_files, read_analysis_md, get_report_path,
     load_decisions, get_decision, get_decision_history, format_decision_badge,
+    get_position_summary,
 )
 
 # ─── Page Config ───
@@ -4720,6 +4721,47 @@ with tab_research:
             st.rerun()
 
         _rl_tickers = _rl_list_tickers(_rl_reports_dir)
+
+        # ── 顶部：决策与仓位汇总表 ──
+        _rl_summary = get_position_summary(_rl_reports_dir, raw_df=raw_df)
+        with st.expander(f"📊 决策与仓位汇总（{len(_rl_summary)} 个标的）", expanded=True):
+            import pandas as _pd
+            _rl_table_rows = []
+            for _r in _rl_summary:
+                if not _r['evaluated']:
+                    _rl_decision_str = "❓ 未评估"
+                else:
+                    _rl_decision_str = format_decision_badge(_r)
+                _cur = _r.get('current_position')
+                _cur_str = f"{_cur*100:.2f}%" if _cur is not None else "—"
+                _rl_table_rows.append({
+                    "标的": _r['folder'],
+                    "分组": _r['group'],
+                    "决策": _rl_decision_str,
+                    "建议仓位": _r['target_position'] or "—",
+                    "当前仓位": _cur_str,
+                    "加仓触发": _r['add_trigger'] or "—",
+                    "减仓/止损触发": _r['trim_trigger'] or "—",
+                    "更新日期": _r['date'] or "—",
+                })
+            _rl_summary_df = _pd.DataFrame(_rl_table_rows)
+            st.dataframe(
+                _rl_summary_df,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "标的": st.column_config.TextColumn(width="medium"),
+                    "分组": st.column_config.TextColumn(width="small"),
+                    "决策": st.column_config.TextColumn(width="small"),
+                    "建议仓位": st.column_config.TextColumn(width="small"),
+                    "当前仓位": st.column_config.TextColumn(width="small"),
+                    "加仓触发": st.column_config.TextColumn(width="large"),
+                    "减仓/止损触发": st.column_config.TextColumn(width="large"),
+                    "更新日期": st.column_config.TextColumn(width="small"),
+                },
+            )
+            st.caption("ℹ️ 当前仓位 = 该标的占总资产（含现金）的比例；"
+                       "建议仓位、加仓/减仓触发条件来自最新研报的决策记录。")
 
         # ── 布局：左 30% 标的列表 | 右 70% 文档区 ──
         _rl_col_left, _rl_col_right = st.columns([3, 7])

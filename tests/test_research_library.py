@@ -369,3 +369,154 @@ def test_decisions_persist_to_disk(tmp_path):
     assert decisions_file.exists()
     data = json.loads(decisions_file.read_text(encoding='utf-8'))
     assert data["x"]["current"]["action"] == "买入"
+
+
+# ── 仓位汇总测试 ─────────────────────────────────────────
+
+from research_library import (
+    _normalize_code,
+    _compute_holdings_pct,
+    get_position_summary,
+)
+
+
+def test_normalize_code_strips_suffix():
+    assert _normalize_code("601838.SS") == "601838"
+    assert _normalize_code("002202.SZ") == "002202"
+    assert _normalize_code("00700.HK") == "700"
+
+
+def test_normalize_code_strips_hk_prefix():
+    """portfolio.csv 用 HK0700，ticker_map 用 HK700/00700.HK，归一化后应一致。"""
+    assert _normalize_code("HK0700") == _normalize_code("HK700") == _normalize_code("00700.HK")
+
+
+def test_normalize_code_handles_empty():
+    assert _normalize_code("") == ""
+    assert _normalize_code(None) == ""
+
+
+def test_normalize_code_keeps_letters():
+    """SAP.DE 这种带后缀但不是 .SS/.SZ/.HK，保留。"""
+    assert _normalize_code("SAP.DE") == "SAP.DE"
+
+
+def test_compute_holdings_pct_basic():
+    """两只持仓 + 一笔现金，权重应忽略现金、按市值占比。"""
+    import pandas as pd
+    df = pd.DataFrame([
+        {"Date": "2026-05-15", "Code": "601838", "Total_Value": 22464.0, "Asset_Class": "ETF_Stock"},
+        {"Date": "2026-05-15", "Code": "HK0700", "Total_Value": 39640.0, "Asset_Class": "ETF_Stock"},
+        {"Date": "2026-05-15", "Code": "CASH", "Total_Value": 127787.79, "Asset_Class": "Cash"},
+    ])
+    pct = _compute_holdings_pct(df)
+    # 应按总资产（含现金）算占比
+    total = 22464.0 + 39640.0 + 127787.79
+    assert pct["601838"] == pytest.approx(22464.0 / total)
+    assert pct["700"] == pytest.approx(39640.0 / total)
+    # 现金不计入
+    assert "CASH" not in pct
+
+
+def test_compute_holdings_pct_uses_latest_date():
+    """有多个日期时只取最新。"""
+    import pandas as pd
+    df = pd.DataFrame([
+        {"Date": "2026-05-08", "Code": "601838", "Total_Value": 100, "Asset_Class": "ETF_Stock"},
+        {"Date": "2026-05-15", "Code": "601838", "Total_Value": 200, "Asset_Class": "ETF_Stock"},
+    ])
+    pct = _compute_holdings_pct(df)
+    assert pct["601838"] == pytest.approx(1.0)  # 唯一持仓占 100%
+
+
+def test_compute_holdings_pct_empty_df():
+    import pandas as pd
+    assert _compute_holdings_pct(None) == {}
+    assert _compute_holdings_pct(pd.DataFrame()) == {}
+
+
+def _seed_summary_fixture(tmp_path):
+    """构建一个包含持仓+观察+未评估的小型 fixture。"""
+    meta = tmp_path / "_meta"
+    meta.mkdir()
+    (meta / "ticker_map.json").write_text(json.dumps({
+        "持仓": {
+            "成都银行（601838.SS）": {"portfolio_codes": ["601838.SS"], "yf_symbol": "601838.SS"},
+            "腾讯控股（00700.HK）": {"portfolio_codes": ["HK700"], "yf_symbol": "00700.HK"},
+        },
+        "观察": {
+            "招商银行（600036.SS）": {"portfolio_codes": [], "yf_symbol": "600036.SS"},
+            "未评估标的（XXX）": {"portfolio_codes": [], "yf_symbol": "XXX"},
+        },
+    }, ensure_ascii=False), encoding='utf-8')
+
+    # decisions.json：3 个标的有决策，1 个未评估
+    update_decision(str(tmp_path), "成都银行（601838.SS）", "持有", "A股",
+                    "2026-05-18", "PB0.85x", "成都银行.md",
+                    target_position="已持有", add_trigger="PB<0.7", trim_trigger="ROE<12%")
+    update_decision(str(tmp_path), "腾讯控股（00700.HK）", "买入", "H股",
+                    "2026-05-15", "Yes", "腾讯.md",
+                    target_position="5-8%", add_trigger="PE<15", trim_trigger="广告负")
+    update_decision(str(tmp_path), "招商银行（600036.SS）", "买入", "A股",
+                    "2026-05-21", "PB0.83x", "招行.md",
+                    target_position="3-5%", add_trigger="PB<0.75", trim_trigger="ROE<10%")
+
+
+def test_get_position_summary_includes_unevaluated(tmp_path):
+    """未评估标的也应在汇总中（evaluated=False）。"""
+    _seed_summary_fixture(tmp_path)
+    rows = get_position_summary(str(tmp_path))
+    folders = [r['folder'] for r in rows]
+    assert "未评估标的（XXX）" in folders
+    unevaluated = next(r for r in rows if r['folder'] == "未评估标的（XXX）")
+    assert unevaluated['evaluated'] is False
+    assert unevaluated['action'] == ''
+
+
+def test_get_position_summary_order(tmp_path):
+    """先持仓后观察，组内按 ticker_map 顺序。"""
+    _seed_summary_fixture(tmp_path)
+    rows = get_position_summary(str(tmp_path))
+    groups = [r['group'] for r in rows]
+    assert groups == ['持仓', '持仓', '观察', '观察']
+    assert rows[0]['folder'] == "成都银行（601838.SS）"
+    assert rows[1]['folder'] == "腾讯控股（00700.HK）"
+
+
+def test_get_position_summary_with_holdings(tmp_path):
+    """传入 raw_df 时算出 current_position。"""
+    import pandas as pd
+    _seed_summary_fixture(tmp_path)
+    df = pd.DataFrame([
+        {"Date": "2026-05-15", "Code": "601838", "Total_Value": 22464.0, "Asset_Class": "ETF_Stock"},
+        {"Date": "2026-05-15", "Code": "HK0700", "Total_Value": 39640.0, "Asset_Class": "ETF_Stock"},
+        {"Date": "2026-05-15", "Code": "CASH", "Total_Value": 127787.79, "Asset_Class": "Cash"},
+    ])
+    rows = get_position_summary(str(tmp_path), raw_df=df)
+    boc = next(r for r in rows if r['folder'] == "成都银行（601838.SS）")
+    txn = next(r for r in rows if r['folder'] == "腾讯控股（00700.HK）")
+    cmb = next(r for r in rows if r['folder'] == "招商银行（600036.SS）")
+    total = 22464.0 + 39640.0 + 127787.79
+    assert boc['current_position'] == pytest.approx(22464.0 / total)
+    # 腾讯：portfolio_codes=['HK700'] 应该匹配 portfolio.csv 的 HK0700
+    assert txn['current_position'] == pytest.approx(39640.0 / total)
+    # 招行 portfolio_codes=[]，应为 None
+    assert cmb['current_position'] is None
+
+
+def test_get_position_summary_no_df(tmp_path):
+    """不传 raw_df 时所有 current_position 为 None。"""
+    _seed_summary_fixture(tmp_path)
+    rows = get_position_summary(str(tmp_path))
+    for r in rows:
+        assert r['current_position'] is None
+
+
+def test_get_position_summary_target_position_field(tmp_path):
+    """target_position / add_trigger / trim_trigger 应正确返回。"""
+    _seed_summary_fixture(tmp_path)
+    rows = get_position_summary(str(tmp_path))
+    txn = next(r for r in rows if r['folder'] == "腾讯控股（00700.HK）")
+    assert txn['target_position'] == "5-8%"
+    assert txn['add_trigger'] == "PE<15"
+    assert txn['trim_trigger'] == "广告负"
