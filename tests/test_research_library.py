@@ -641,3 +641,123 @@ def test_pool_pct_none_when_not_in_pool(tmp_path):
     # current_cny 有值（已持仓），但 pool_pct 为 None（不在池内）
     assert sap['current_position_cny'] == pytest.approx(480000.0)
     assert sap['pool_pct'] is None
+
+
+# ── E1 + E2-A 测试 ────────────────────────────────────────
+
+from research_library import (
+    _pace_to_target_amount, get_pool_action_list, get_style_exposure,
+)
+
+
+def test_pace_to_target_amount_simple():
+    assert _pace_to_target_amount("5万") == (50000.0, 50000.0)
+    assert _pace_to_target_amount("7万") == (70000.0, 70000.0)
+
+
+def test_pace_to_target_amount_range():
+    assert _pace_to_target_amount("3-4万") == (30000.0, 40000.0)
+    assert _pace_to_target_amount("2-3万") == (20000.0, 30000.0)
+
+
+def test_pace_to_target_amount_unparseable():
+    assert _pace_to_target_amount("0") == (None, None)
+    assert _pace_to_target_amount("观察") == (None, None)
+    assert _pace_to_target_amount("ESPP 持续被动") == (None, None)
+    assert _pace_to_target_amount("") == (None, None)
+    assert _pace_to_target_amount(None) == (None, None)
+
+
+def _seed_action_fixture(tmp_path):
+    """3 个标的：核心已建仓不足、核心未建仓、不进池。"""
+    import pandas as pd
+    meta = tmp_path / "_meta"
+    meta.mkdir()
+    (meta / "ticker_map.json").write_text(json.dumps({
+        "持仓": {
+            "腾讯": {"portfolio_codes": ["HK700"], "yf_symbol": "00700.HK"},
+        },
+        "观察": {
+            "中海油": {"portfolio_codes": ["00883.HK"], "yf_symbol": "00883.HK"},
+            "阿里": {"portfolio_codes": [], "yf_symbol": "09988.HK"},
+        },
+    }, ensure_ascii=False), encoding='utf-8')
+    # 腾讯：核心 7 万，已 4 万（待加 3 万）
+    update_decision(str(tmp_path), "腾讯", "买入", "H股",
+                    "2026-05-22", "成长", "x.md",
+                    tier="核心", style="成长", target_position="7万",
+                    pace="不再加仓")
+    # 中海油：核心 5 万，未建仓
+    update_decision(str(tmp_path), "中海油", "买入", "H股",
+                    "2026-05-22", "高股息+周期", "x.md",
+                    tier="核心", style="高股息+周期", target_position="5万",
+                    pace="6 月分批")
+    # 阿里：不进池
+    update_decision(str(tmp_path), "阿里", "不感兴趣", "H股",
+                    "2026-05-22", "Too Hard", "x.md",
+                    tier="不进池", target_position="0")
+
+    return pd.DataFrame([
+        {"Date": "2026-05-22", "Code": "HK0700", "Total_Value": 40000.0, "Asset_Class": "ETF_Stock"},
+    ])
+
+
+def test_action_list_excludes_non_pool(tmp_path):
+    """不进池/观察/战略持仓不出现在行动清单。"""
+    df = _seed_action_fixture(tmp_path)
+    actions = get_pool_action_list(str(tmp_path), raw_df=df)
+    folders = [a['folder'] for a in actions]
+    assert "腾讯" in folders
+    assert "中海油" in folders
+    assert "阿里" not in folders
+
+
+def test_action_list_status(tmp_path):
+    """status 字段正确：待加仓 / 已达标 / 超配。"""
+    df = _seed_action_fixture(tmp_path)
+    actions = get_pool_action_list(str(tmp_path), raw_df=df)
+    txn = next(a for a in actions if a['folder'] == "腾讯")
+    cnooc = next(a for a in actions if a['folder'] == "中海油")
+    # 腾讯：4 万 < 7 万 → 待加仓
+    assert txn['status'] == "待加仓"
+    assert txn['gap_low'] == pytest.approx(30000.0)
+    # 中海油：0 < 5 万 → 待加仓
+    assert cnooc['status'] == "待加仓"
+    assert cnooc['gap_low'] == pytest.approx(50000.0)
+
+
+def test_action_list_status_overweight(tmp_path):
+    """当前持仓 > target × 1.1 → 超配。"""
+    import pandas as pd
+    meta = tmp_path / "_meta"
+    meta.mkdir()
+    (meta / "ticker_map.json").write_text(json.dumps({
+        "持仓": {"腾讯": {"portfolio_codes": ["HK700"], "yf_symbol": "00700.HK"}},
+        "观察": {},
+    }, ensure_ascii=False), encoding='utf-8')
+    update_decision(str(tmp_path), "腾讯", "买入", "H股",
+                    "2026-05-22", "成长", "x.md",
+                    tier="核心", target_position="7万")
+    df = pd.DataFrame([
+        {"Date": "2026-05-22", "Code": "HK0700", "Total_Value": 80000.0, "Asset_Class": "ETF_Stock"},
+    ])
+    actions = get_pool_action_list(str(tmp_path), raw_df=df)
+    txn = actions[0]
+    # 8 万 > 7 万 × 1.1 = 7.7 万 → 超配
+    assert txn['status'] == "超配"
+
+
+def test_style_exposure_aggregates(tmp_path):
+    """get_style_exposure 按 style 聚合。"""
+    df = _seed_action_fixture(tmp_path)
+    exp = get_style_exposure(str(tmp_path), raw_df=df)
+    # 腾讯 4 万（成长），中海油 0（高股息+周期）
+    assert exp['pool_by_style']['成长'] == pytest.approx(40000.0)
+    assert exp['pool_by_style']['高股息+周期'] == pytest.approx(0.0)
+    # 目标：成长 7 万，高股息+周期 5 万
+    assert exp['pool_by_style_target']['成长'] == pytest.approx(70000.0)
+    assert exp['pool_by_style_target']['高股息+周期'] == pytest.approx(50000.0)
+    # 总计
+    assert exp['total_pool_cny'] == pytest.approx(40000.0)
+    assert exp['total_target_amount'] == pytest.approx(120000.0)
+    assert exp['total_pool_target'] == pytest.approx(300000.0)

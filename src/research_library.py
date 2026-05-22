@@ -361,8 +361,141 @@ def _compute_holdings_value(raw_df) -> dict:
     return result
 
 
+def _pace_to_target_amount(target_position: str) -> tuple[float | None, float | None]:
+    """从 target_position 字符串解析目标金额（元）。
+
+    支持："5万" / "3-4万" / "7万" / "2-3万" / "0" / "ESPP 持续被动" / "观察"
+
+    Returns:
+        (low, high) 单位：元；不可解析返回 (None, None)
+    """
+    s = (target_position or '').strip()
+    if not s or s == '0' or s == '观察' or 'ESPP' in s:
+        return None, None
+    # 匹配 "5万" 或 "3-4万"
+    import re
+    m = re.match(r'^(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))?\s*万$', s)
+    if not m:
+        return None, None
+    low = float(m.group(1)) * 10000
+    high = float(m.group(2)) * 10000 if m.group(2) else low
+    return low, high
+
+
+def get_pool_action_list(reports_dir: str, raw_df=None) -> list[dict]:
+    """生成"待行动清单"——基于目标 vs 当前持仓的差异。
+
+    Returns:
+        list of dict：
+          - folder
+          - tier
+          - target_low / target_high (元)
+          - current_cny (元)
+          - gap_low / gap_high (元，正数=待加仓，负数=超配)
+          - pace
+          - status: "待加仓" / "已达标" / "超配" / "不进池"
+    """
+    rows = get_position_summary(reports_dir, raw_df=raw_df)
+    actions = []
+    for r in rows:
+        tier = r.get('tier', '')
+        if tier not in ('核心', '卫星'):
+            continue  # 不进池/观察/战略持仓不在行动清单
+        target_low, target_high = _pace_to_target_amount(r.get('target_position', ''))
+        if target_low is None:
+            continue
+        cur = r.get('current_position_cny') or 0
+        gap_low = target_low - cur
+        gap_high = target_high - cur
+
+        if cur > target_high * 1.1:  # 超配 > 10%
+            status = "超配"
+        elif cur >= target_low:
+            status = "已达标"
+        else:
+            status = "待加仓"
+
+        actions.append({
+            'folder': r['folder'],
+            'tier': tier,
+            'style': r.get('style', ''),
+            'target_low': target_low,
+            'target_high': target_high,
+            'current_cny': cur,
+            'gap_low': gap_low,
+            'gap_high': gap_high,
+            'pace': r.get('pace', ''),
+            'status': status,
+        })
+    return actions
+
+
+def get_style_exposure(reports_dir: str, raw_df=None) -> dict:
+    """聚合个股池内按风格的暴露（E2-A 轻量版）。
+
+    不穿透 ETF —— 红利低波 ETF 单独作为一个"高股息+低波"整体。
+
+    Returns:
+        {
+          'pool_by_style': {style: cny}，仅个股池内（tier ∈ 核心/卫星）
+          'pool_by_style_target': {style: target_cny}
+          'total_pool_cny': 当前池占用
+          'total_pool_target': 30 万
+        }
+    """
+    rows = get_position_summary(reports_dir, raw_df=raw_df)
+
+    pool_by_style = {}
+    pool_by_style_target = {}
+    total_cur = 0
+    total_target_low = 0
+
+    for r in rows:
+        tier = r.get('tier', '')
+        if tier not in ('核心', '卫星'):
+            continue
+        style = r.get('style', '混合') or '混合'
+        cur = r.get('current_position_cny') or 0
+        target_low, target_high = _pace_to_target_amount(r.get('target_position', ''))
+
+        pool_by_style[style] = pool_by_style.get(style, 0) + cur
+        if target_low is not None:
+            target_mid = (target_low + target_high) / 2
+            pool_by_style_target[style] = pool_by_style_target.get(style, 0) + target_mid
+            total_target_low += target_mid
+
+        total_cur += cur
+
+    return {
+        'pool_by_style': pool_by_style,
+        'pool_by_style_target': pool_by_style_target,
+        'total_pool_cny': total_cur,
+        'total_pool_target': STOCK_POOL_TOTAL_CNY,
+        'total_target_amount': total_target_low,
+    }
+    """从 portfolio.csv 算出每个 Code 当前市值（绝对值，元）。
+
+    Returns:
+        {normalized_code: value_cny}
+    """
+    if raw_df is None or len(raw_df) == 0:
+        return {}
+    latest_date = raw_df['Date'].max()
+    latest = raw_df[raw_df['Date'] == latest_date]
+    result = {}
+    for _, row in latest.iterrows():
+        code = str(row.get('Code', ''))
+        if not code or row.get('Asset_Class') == 'Cash':
+            continue
+        norm = _normalize_code(code)
+        if not norm:
+            continue
+        result[norm] = result.get(norm, 0.0) + float(row['Total_Value'])
+    return result
+
+
 # 个股池总额度（来自 P6 决策，2026-05-22 写死）
-STOCK_POOL_TOTAL_CNY = 300_000.0
+STOCK_POOL_TOTAL_CNY = 300_000.0  # P6: 个股池总额度（写死，2026-05-22）
 
 
 def get_position_summary(reports_dir: str, raw_df=None) -> list[dict]:

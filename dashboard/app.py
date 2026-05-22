@@ -44,7 +44,7 @@ from research_library import (
     get_reports_dir, load_ticker_map, list_tickers,
     list_ticker_files, read_analysis_md, get_report_path,
     load_decisions, get_decision, get_decision_history, format_decision_badge,
-    get_position_summary,
+    get_position_summary, get_pool_action_list, get_style_exposure,
 )
 
 # ─── Page Config ───
@@ -4802,6 +4802,123 @@ with tab_research:
                 "**档位**：核心仓 5-7 万 × 2-3 个 + 卫星仓 2-4 万 × 3-5 个；"
                 "**节奏**：基于位置分位的分批策略（详见 docs/OPEN_POINTS_PORTFOLIO_DESIGN.md）。"
             )
+
+        # ── E1：待行动清单 + 偏差柱状图 ──
+        _rl_actions = get_pool_action_list(_rl_reports_dir, raw_df=raw_df)
+        if _rl_actions:
+            with st.expander(f"🎯 待行动清单（{len(_rl_actions)} 个池内标的）", expanded=False):
+                # 偏差柱状图（横向，每个标的一条）
+                import plotly.graph_objects as _go
+                _names = [a['folder'] for a in _rl_actions]
+                _curs = [a['current_cny']/10000 for a in _rl_actions]
+                _targets_mid = [(a['target_low']+a['target_high'])/2/10000 for a in _rl_actions]
+                _gaps = [(a['gap_low']+a['gap_high'])/2/10000 for a in _rl_actions]
+
+                _fig = _go.Figure()
+                _fig.add_trace(_go.Bar(
+                    name='当前持仓', y=_names, x=_curs, orientation='h',
+                    marker_color='#1f77b4', text=[f"{v:.2f}万" for v in _curs],
+                    textposition='inside',
+                ))
+                _fig.add_trace(_go.Bar(
+                    name='差距（待加/超配）', y=_names, x=_gaps, orientation='h',
+                    marker_color=['#2ca02c' if g > 0 else '#d62728' for g in _gaps],
+                    text=[f"{v:+.2f}万" for v in _gaps],
+                    textposition='inside',
+                ))
+                _fig.update_layout(
+                    barmode='stack', height=max(280, len(_rl_actions)*55),
+                    xaxis_title='万元', yaxis_title='', showlegend=True,
+                    margin=dict(l=10, r=10, t=30, b=30),
+                    title='当前持仓 vs 目标 — 绿色=待加仓，红色=超配',
+                )
+                st.plotly_chart(_fig, use_container_width=True)
+
+                # 行动清单表
+                _action_rows = []
+                for a in _rl_actions:
+                    if a['target_low'] == a['target_high']:
+                        _tgt_str = f"{a['target_low']/10000:.0f}万"
+                    else:
+                        _tgt_str = f"{a['target_low']/10000:.0f}-{a['target_high']/10000:.0f}万"
+                    if a['gap_low'] == a['gap_high']:
+                        _gap_str = f"{a['gap_low']/10000:+.2f}万"
+                    else:
+                        _gap_str = f"{a['gap_low']/10000:+.2f} ~ {a['gap_high']/10000:+.2f}万"
+                    _status_emoji = {'待加仓': '🟢', '已达标': '✅', '超配': '⚠️'}.get(a['status'], '')
+                    _action_rows.append({
+                        '标的': a['folder'],
+                        '档位': a['tier'],
+                        '目标': _tgt_str,
+                        '当前': f"{a['current_cny']/10000:.2f}万",
+                        '差距': _gap_str,
+                        '状态': f"{_status_emoji} {a['status']}",
+                        '节奏': a['pace'],
+                    })
+                _action_df = _pd.DataFrame(_action_rows)
+                st.dataframe(
+                    _action_df, hide_index=True, use_container_width=True,
+                    column_config={
+                        '标的': st.column_config.TextColumn(width="medium"),
+                        '档位': st.column_config.TextColumn(width="small"),
+                        '目标': st.column_config.TextColumn(width="small"),
+                        '当前': st.column_config.TextColumn(width="small"),
+                        '差距': st.column_config.TextColumn(width="medium"),
+                        '状态': st.column_config.TextColumn(width="small"),
+                        '节奏': st.column_config.TextColumn(width="large"),
+                    },
+                )
+
+        # ── E2-A：风格暴露聚合 ──
+        _rl_style_exp = get_style_exposure(_rl_reports_dir, raw_df=raw_df)
+        if _rl_style_exp['pool_by_style_target']:
+            with st.expander("🎨 风格暴露（个股池内，不穿透 ETF）", expanded=False):
+                # 当前 vs 目标 对比柱状图
+                _styles_all = sorted(set(
+                    list(_rl_style_exp['pool_by_style'].keys()) +
+                    list(_rl_style_exp['pool_by_style_target'].keys())
+                ))
+                _cur_v = [_rl_style_exp['pool_by_style'].get(s, 0) / 10000 for s in _styles_all]
+                _tgt_v = [_rl_style_exp['pool_by_style_target'].get(s, 0) / 10000 for s in _styles_all]
+
+                import plotly.graph_objects as _go
+                _fig2 = _go.Figure()
+                _fig2.add_trace(_go.Bar(
+                    name='当前', x=_styles_all, y=_cur_v,
+                    marker_color='#1f77b4', text=[f"{v:.1f}万" for v in _cur_v],
+                ))
+                _fig2.add_trace(_go.Bar(
+                    name='目标', x=_styles_all, y=_tgt_v,
+                    marker_color='#ff7f0e', text=[f"{v:.1f}万" for v in _tgt_v],
+                ))
+                _fig2.update_layout(
+                    barmode='group', height=380, xaxis_title='风格', yaxis_title='万元',
+                    margin=dict(l=10, r=10, t=30, b=30),
+                    title='个股池风格暴露 — 当前 vs 目标',
+                )
+                st.plotly_chart(_fig2, use_container_width=True)
+
+                # 风格预警（按总资产 5% 阈值，A5 软约束）
+                _total_assets = raw_df[raw_df['Date'] == raw_df['Date'].max()]['Total_Value'].sum()
+                _warn_threshold = _total_assets * 0.05
+                _warnings = []
+                for s, v in _rl_style_exp['pool_by_style_target'].items():
+                    if v > _warn_threshold:
+                        _warnings.append(
+                            f"⚠️ **{s}** 目标暴露 ¥{v/10000:.1f}万 "
+                            f"({v/_total_assets*100:.1f}% 总资产) > 5% 阈值"
+                        )
+                if _warnings:
+                    for w in _warnings:
+                        st.warning(w)
+                else:
+                    st.success("✅ 所有风格暴露均在 5% 总资产阈值内")
+
+                st.caption(
+                    "ℹ️ **轻量版（E2-A）**：仅按 decisions.json 的 style 字段聚合个股池内暴露。"
+                    "红利低波 ETF 等风格 ETF 不在此视图内（需 ETF 穿透分析，未来可扩展为 E2-B）。"
+                    "**预警阈值**：单一风格目标暴露 > 5% 总资产 → ⚠️"
+                )
 
         # ── 布局：左 30% 标的列表 | 右 70% 文档区 ──
         _rl_col_left, _rl_col_right = st.columns([3, 7])
