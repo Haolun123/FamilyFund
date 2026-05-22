@@ -82,3 +82,43 @@ class TestFetchLatestPrices:
         assert 'GD040219' in results
         assert results['CASH']['status'] == 'ok'
         assert results['GD040219']['status'] == 'manual'
+
+
+class TestHongKongStock:
+    """港股拉价：返回 HKD 原始股价 + currency='HKD' + fx_rate (HKD/CNY)。"""
+
+    def test_hk_returns_currency_and_fx_rate(self):
+        from price_fetcher import _route
+        try:
+            r = _route('HK0700')
+        except Exception:
+            pytest.skip('network not available')
+        if r['status'] != 'ok':
+            pytest.skip(f"HK0700 拉取未成功: {r.get('msg')}")
+        # 港股必须返回 currency='HKD' 和 fx_rate
+        assert r.get('currency') == 'HKD'
+        assert r.get('fx_rate') is not None
+        # HKD/CNY 历史区间约 0.85-0.95
+        assert 0.80 < r['fx_rate'] < 1.0
+        # 港币股价应在合理区间（腾讯历史 200-700 港币）
+        assert 100 < r['price'] < 1000
+
+    def test_hk_full_format_code(self):
+        """0700.HK 直接传入也支持。"""
+        from price_fetcher import _route
+        try:
+            r = _route('0700.HK')
+        except Exception:
+            pytest.skip('network not available')
+        if r['status'] == 'ok':
+            assert r.get('currency') == 'HKD'
+            assert r.get('fx_rate') is not None
+
+    def test_non_hk_no_currency_field(self):
+        """非港股不应返回 currency / fx_rate（保持向后兼容）。"""
+        from price_fetcher import _route
+        r = _route('CASH')
+        assert r['status'] == 'ok'
+        # CASH 不应有 currency / fx_rate（保持简单）
+        assert r.get('currency') is None
+        assert r.get('fx_rate') is None

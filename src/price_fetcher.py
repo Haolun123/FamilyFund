@@ -102,6 +102,46 @@ def _fetch_gold_cny() -> dict:
         return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)}
 
 
+def _fetch_hk_with_fx(symbol: str, label: str = '') -> dict:
+    """港股：拉港币股价 + HKD/CNY 汇率，让 dashboard 写入 Currency=HKD 模式。
+
+    返回:
+        {
+            'price':    float (HKD 原始股价),
+            'currency': 'HKD',
+            'fx_rate':  float (HKD/CNY),
+            'date':     str,
+            'status':   'ok' | 'error',
+            'msg':      str,
+        }
+    """
+    try:
+        from market_monitor import _fetch_yfinance
+        from fx_service import get_exchange_rate
+        series = _fetch_yfinance(symbol, period='5d')
+        if series is None or series.empty:
+            return {'price': None, 'date': None, 'status': 'error', 'msg': f'{symbol} 无数据'}
+        price_hkd = float(series.iloc[-1])
+        nav_date = str(series.index[-1])[:10]
+        try:
+            hkd_cny = float(get_exchange_rate('HKD', 'CNY'))
+        except Exception as fx_err:
+            return {
+                'price': None, 'date': None, 'status': 'error',
+                'msg': f'{symbol} 汇率获取失败: {fx_err}',
+            }
+        return {
+            'price':    price_hkd,
+            'currency': 'HKD',
+            'fx_rate':  hkd_cny,
+            'date':     nav_date,
+            'status':   'ok',
+            'msg':      f'{label or symbol} (HKD × {hkd_cny:.4f})',
+        }
+    except Exception as e:
+        return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)}
+
+
 # ── 路由 ──────────────────────────────────────────────────
 
 def _route(code: str) -> dict:
@@ -126,7 +166,11 @@ def _route(code: str) -> dict:
     if re.match(r'^HK\d+$', code, re.IGNORECASE):
         hk_num = code[2:].lstrip('0') or '0'
         hk_sym = hk_num.zfill(4) + '.HK'
-        return _fetch_yf(hk_sym, f'港股 {hk_sym}')
+        return _fetch_hk_with_fx(hk_sym, f'港股 {hk_sym}')
+
+    # 港股（XXXX.HK 格式直接传入，如 0700.HK / 00883.HK）
+    if re.match(r'^\d+\.HK$', code, re.IGNORECASE):
+        return _fetch_hk_with_fx(code, f'港股 {code}')
 
     # SAP：价格用法兰克福 SAP.DE（EUR），基本面另走 yf_symbols.json 中的 SAP ADR
     if code == 'SAP.DE':

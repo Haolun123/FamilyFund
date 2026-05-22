@@ -1145,6 +1145,10 @@ with tab_update:
                 continue
             if res['status'] == 'ok' and res['price'] is not None:
                 _template.at[i, 'Current_Price'] = res['price']
+                # 港股等带外币的资产：同步更新 Currency / Exchange_Rate
+                if res.get('currency') and res.get('fx_rate'):
+                    _template.at[i, 'Currency'] = res['currency']
+                    _template.at[i, 'Exchange_Rate'] = res['fx_rate']
                 _ok += 1
             elif res['status'] == 'manual':
                 _manual += 1
