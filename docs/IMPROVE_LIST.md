@@ -47,6 +47,7 @@
 | 4 | **储蓄率追踪** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
 | 5 | **定投管理模块** | `DESIGN_DCA_MANAGER.md` | ✅ 已完成 |
 | 6 | **PDF 导出全面切换为 HTML**（Portfolio/Quarterly/10th Man）| — | ✅ 已完成 |
+| 7 | **仓位管理与组合架构落地**（Domain D + E + F5）| `OPEN_POINTS_PORTFOLIO_DESIGN.md` | 设计 2026-05-22 完成 |
 
 ### P3 — 需前置数据积累
 
