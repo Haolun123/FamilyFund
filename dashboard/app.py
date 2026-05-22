@@ -1377,6 +1377,20 @@ with tab_update:
         asset_label_to_name = {_asset_label(r): r['Name'] for _, r in asset_rows.iterrows()}
         asset_label_to_name['新增标的'] = '新增标的'
 
+        # 标签 → 原始货币（用于 Price 字段币种标签）
+        # 优先看持仓表 Currency 字段；若为 CNY 但 Code 形如港股，强制识别为 HKD
+        import re as _re_ccy
+        def _detect_ccy(row):
+            ccy = str(row.get('Currency', 'CNY')).strip().upper() or 'CNY'
+            code = str(row.get('Code', '')).strip()
+            # Code 形如 HK0700 / 0700.HK 强制为 HKD（覆盖历史 Currency=CNY 的情况）
+            if _re_ccy.match(r'^HK\d+$', code, _re_ccy.IGNORECASE) or \
+               _re_ccy.match(r'^\d+\.HK$', code, _re_ccy.IGNORECASE):
+                return 'HKD'
+            return ccy
+        asset_label_to_ccy = {_asset_label(r): _detect_ccy(r) for _, r in asset_rows.iterrows()}
+        asset_label_to_ccy['新增标的'] = 'CNY'
+
         entries = st.session_state['rebalance_entries']
         to_remove = []
         type_labels = {'买入': '🟢 买入', '卖出': '🔴 卖出', '外部入金': '🔵 外部入金', '外部取出': '🟠 外部取出'}
@@ -1408,7 +1422,11 @@ with tab_update:
                 entry['amount'] = st.number_input(
                     "买入/卖出总金额 (CNY)", value=float(entry['amount']), min_value=0.0, step=100.0,
                     format="%.2f", key=f"rb_amt_{idx}",
-                    help="本次操作的总金额（人民币），买入填支付金额，卖出填到账金额",
+                    help=(
+                        "本次操作的人民币总金额（券商成交金额，不含手续费）。"
+                        "买入填券商显示的成交金额，卖出填到账金额（扣费前）。"
+                        "手续费在右下框单独填写，会与本金额合并写入 NCF。"
+                    ),
                 )
             with c4:
                 st.markdown("　")  # label 占位
@@ -1417,20 +1435,38 @@ with tab_update:
 
             # 买入/卖出：展示成交价和手续费（可选，用于 transaction.csv 记录）
             if entry['type'] in ('买入', '卖出'):
+                # 检测当前所选标的的原始货币
+                _entry_ccy = asset_label_to_ccy.get(entry.get('asset_label', ''), 'CNY')
+
                 p_col, f_col = st.columns(2)
                 with p_col:
+                    _price_label = f"成交单价（{_entry_ccy}，可选）" if _entry_ccy != 'CNY' \
+                        else "申购/赎回确认净值（CNY，可选）"
+                    _price_help = (
+                        f"原始货币（{_entry_ccy}）单价。"
+                        f"对于港股请填港币股价（如 449.6 HKD/股）。"
+                        f"主金额栏请填券商显示的人民币结算金额。"
+                    ) if _entry_ccy != 'CNY' else \
+                    "基金净值或黄金单价（原始货币），从基金平台交易记录查询。不填则用快照价格估算。"
                     entry['price'] = st.number_input(
-                        "申购/赎回确认净值（单价，可选）",
+                        _price_label,
                         value=float(entry.get('price', 0.0)), min_value=0.0, format="%.4f",
                         key=f"rb_price_{idx}",
-                        help="基金净值或黄金单价（原始货币），从基金平台交易记录查询。不填则用快照价格估算。",
+                        help=_price_help,
                     )
                 with f_col:
                     entry['fee'] = st.number_input(
                         "手续费 CNY（可选，默认0）",
                         value=float(entry.get('fee', 0.0)), min_value=0.0, format="%.2f",
                         key=f"rb_fee_{idx}",
-                        help="已被扣除的手续费，不含在 Amount_CNY 中",
+                        help="券商显示的交易费用（已计入 NCF 投资成本，Cash 同步扣减）",
+                    )
+
+                # 港股提示：让用户知道主金额栏要填券商人民币结算金额
+                if _entry_ccy == 'HKD' and entry.get('amount', 0) == 0:
+                    st.caption(
+                        f"💡 港股提示：主金额栏请填**券商显示的人民币成交金额**（已含汇率换算）。"
+                        f"成交单价填港币原始价。手续费已含在 NCF 投资成本中。"
                     )
 
             # 新增标的子表单
@@ -1462,8 +1498,10 @@ with tab_update:
         if entries:
             st.divider()
 
-            total_buy  = sum(e['amount'] for e in entries if e['type'] == '买入')
-            total_sell = sum(e['amount'] for e in entries if e['type'] == '卖出')
+            # 买入/卖出含费成本（NCF 与 Cash 都按"成交金额 + 手续费"扣减）
+            # 卖出时手续费从到手金额里扣，所以 Cash 增加 = (成交金额 - 手续费)
+            total_buy  = sum(e['amount'] + e.get('fee', 0.0) for e in entries if e['type'] == '买入')
+            total_sell = sum(e['amount'] - e.get('fee', 0.0) for e in entries if e['type'] == '卖出')
             ext_in     = sum(e['amount'] for e in entries if e['type'] == '外部入金')
             ext_out    = sum(e['amount'] for e in entries if e['type'] == '外部取出')
             cash_delta   = total_sell - total_buy + ext_in - ext_out
@@ -1515,6 +1553,8 @@ with tab_update:
                     st.warning("未找到 Cash 行，请手动更新")
 
                 # 写入各资产 NCF（已有持仓）
+                # NCF 含费：买入 = +(amount + fee)；卖出 = -(amount - fee)
+                # 含义：NCF 反映"为这笔投资真实付出/收回的现金"
                 for e in entries:
                     if e['type'] not in ('买入', '卖出') or not e['asset_name'] or e['is_new']:
                         continue
@@ -1524,10 +1564,14 @@ with tab_update:
                         continue
                     if mask.sum() > 1:
                         st.warning(f"「{e['asset_name']}」有 {mask.sum()} 条匹配行，NCF 写入到第一条，请手动核查其余行")
-                    ncf_sign = +1 if e['type'] == '买入' else -1
+                    fee = e.get('fee', 0.0) or 0.0
+                    if e['type'] == '买入':
+                        ncf_delta = e['amount'] + fee  # 买入：含费成本
+                    else:
+                        ncf_delta = -(e['amount'] - fee)  # 卖出：扣费后到手（负号 = 流出资产）
                     idx_row = template[mask].index[0]
                     template.at[idx_row, 'Net_Cash_Flow'] = round(
-                        (template.at[idx_row, 'Net_Cash_Flow'] or 0) + ncf_sign * e['amount'], 2
+                        (template.at[idx_row, 'Net_Cash_Flow'] or 0) + ncf_delta, 2
                     )
 
                 # 追加新标的行
@@ -1541,7 +1585,11 @@ with tab_update:
                         continue
                     if na['Name'] in template['Name'].values:
                         st.warning(f"「{na['Name']}」已存在于持仓表，建议改用「买入」选择现有资产")
-                    ncf_sign = +1 if e['type'] == '买入' else -1
+                    fee = e.get('fee', 0.0) or 0.0
+                    if e['type'] == '买入':
+                        ncf_val = e['amount'] + fee
+                    else:
+                        ncf_val = -(e['amount'] - fee)
                     new_rows.append({
                         'Asset_Class':   na.get('Asset_Class', ''),
                         'Platform':      na.get('Platform', ''),
@@ -1552,7 +1600,7 @@ with tab_update:
                         'Shares':        0.0,
                         'Current_Price': 0.0,
                         'Total_Value':   0.0,
-                        'Net_Cash_Flow': round(ncf_sign * e['amount'], 2),
+                        'Net_Cash_Flow': round(ncf_val, 2),
                     })
                 if new_rows:
                     template = pd.concat([template, pd.DataFrame(new_rows)], ignore_index=True)
