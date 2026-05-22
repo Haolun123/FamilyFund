@@ -154,7 +154,7 @@ def extract_ticker_from_folder(folder_name: str) -> str | None:
 
 # ── 决策映射 ─────────────────────────────────────────────
 
-DECISION_ACTIONS = ["买入", "加仓", "持有", "观察", "减仓", "卖出", "不感兴趣"]
+DECISION_ACTIONS = ["买入", "加仓", "持有", "观察", "减仓", "卖出", "不感兴趣", "不进池"]
 DECISION_MARKETS = ["A股", "H股", "N/A"]
 SUMMARY_MAX_LEN = 50
 
@@ -166,6 +166,7 @@ DECISION_COLORS = {
     "减仓":     "🟠",
     "卖出":     "🔴",
     "不感兴趣": "⚪",
+    "不进池":   "⚫",
 }
 
 
@@ -218,6 +219,10 @@ def update_decision(
     target_position: str = '',
     add_trigger: str = '',
     trim_trigger: str = '',
+    tier: str = '',
+    style: str = '',
+    pace: str = '',
+    position_signal: str = '',
 ) -> None:
     """写入新决策。旧 current 自动归档到 history（仅追加，不可删除）。
 
@@ -241,7 +246,11 @@ def update_decision(
         'date': date,
         'summary': summary,
         'source_doc': source_doc,
+        'tier': tier,
+        'style': style,
         'target_position': target_position,
+        'pace': pace,
+        'position_signal': position_signal,
         'add_trigger': add_trigger,
         'trim_trigger': trim_trigger,
     }
@@ -330,6 +339,32 @@ def _compute_holdings_pct(raw_df) -> dict:
     return result
 
 
+def _compute_holdings_value(raw_df) -> dict:
+    """从 portfolio.csv 算出每个 Code 当前市值（绝对值，元）。
+
+    Returns:
+        {normalized_code: value_cny}
+    """
+    if raw_df is None or len(raw_df) == 0:
+        return {}
+    latest_date = raw_df['Date'].max()
+    latest = raw_df[raw_df['Date'] == latest_date]
+    result = {}
+    for _, row in latest.iterrows():
+        code = str(row.get('Code', ''))
+        if not code or row.get('Asset_Class') == 'Cash':
+            continue
+        norm = _normalize_code(code)
+        if not norm:
+            continue
+        result[norm] = result.get(norm, 0.0) + float(row['Total_Value'])
+    return result
+
+
+# 个股池总额度（来自 P6 决策，2026-05-22 写死）
+STOCK_POOL_TOTAL_CNY = 300_000.0
+
+
 def get_position_summary(reports_dir: str, raw_df=None) -> list[dict]:
     """返回所有标的的决策与仓位汇总，供 Dashboard 表格展示。
 
@@ -342,33 +377,52 @@ def get_position_summary(reports_dir: str, raw_df=None) -> list[dict]:
           - folder: 文件夹名（标的）
           - group: '持仓' | '观察'
           - action / market / date / summary
-          - target_position: 建议仓位
-          - current_position: 当前实际仓位（小数，如 0.025）；无持仓为 None
+          - tier: 核心 / 卫星 / 不进池 / 观察 / 战略持仓 / ...
+          - style: 高股息 / 成长 / 周期 / 防御 / 混合
+          - target_position: 建议仓位（绝对金额，如 "5万"）
+          - pace: 节奏（如 "6 月分批"）
+          - position_signal: 触发信号（如 "PB 历史分位 + 油价"）
+          - current_position_pct: 当前实际仓位（占总资产比例，0-1）；无持仓为 None
+          - current_position_cny: 当前实际市值（元）；无持仓为 None
+          - pool_pct: 占个股池比例（current_cny / 30 万）；不在池内或无持仓为 None
           - add_trigger / trim_trigger
           - source_doc
         顺序：先持仓后观察，组内按 ticker_map 顺序
     """
     tm = load_ticker_map(reports_dir)
     decisions = load_decisions(reports_dir)
-    holdings = _compute_holdings_pct(raw_df) if raw_df is not None else {}
+    holdings_pct = _compute_holdings_pct(raw_df) if raw_df is not None else {}
+    holdings_value = _compute_holdings_value(raw_df) if raw_df is not None else {}
 
     rows = []
     for group in ('持仓', '观察'):
         for folder, info in tm.get(group, {}).items():
             d = decisions.get(folder, {}).get('current') or {}
+            tier = d.get('tier', '')
+
             # 当前实际仓位：portfolio_codes 中任一匹配则求和
             current_pct = None
+            current_cny = None
             codes = info.get('portfolio_codes', [])
-            if codes and holdings:
+            if codes:
                 pct = 0.0
+                cny = 0.0
                 matched = False
                 for c in codes:
                     n = _normalize_code(c)
-                    if n in holdings:
-                        pct += holdings[n]
+                    if n in holdings_pct:
+                        pct += holdings_pct[n]
+                        cny += holdings_value.get(n, 0.0)
                         matched = True
                 if matched:
                     current_pct = pct
+                    current_cny = cny
+
+            # 占个股池比例（仅当 tier 是 核心/卫星 + 已持仓）
+            pool_pct = None
+            if current_cny is not None and tier in ('核心', '卫星'):
+                pool_pct = current_cny / STOCK_POOL_TOTAL_CNY
+
             rows.append({
                 'folder': folder,
                 'group': group,
@@ -376,8 +430,15 @@ def get_position_summary(reports_dir: str, raw_df=None) -> list[dict]:
                 'market': d.get('market', ''),
                 'date': d.get('date', ''),
                 'summary': d.get('summary', ''),
+                'tier': tier,
+                'style': d.get('style', ''),
                 'target_position': d.get('target_position', ''),
-                'current_position': current_pct,
+                'pace': d.get('pace', ''),
+                'position_signal': d.get('position_signal', ''),
+                'current_position': current_pct,  # 保留向后兼容
+                'current_position_pct': current_pct,
+                'current_position_cny': current_cny,
+                'pool_pct': pool_pct,
                 'add_trigger': d.get('add_trigger', ''),
                 'trim_trigger': d.get('trim_trigger', ''),
                 'source_doc': d.get('source_doc', ''),

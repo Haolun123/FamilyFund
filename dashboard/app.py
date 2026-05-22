@@ -4724,7 +4724,23 @@ with tab_research:
 
         # ── 顶部：决策与仓位汇总表 ──
         _rl_summary = get_position_summary(_rl_reports_dir, raw_df=raw_df)
-        with st.expander(f"📊 决策与仓位汇总（{len(_rl_summary)} 个标的）", expanded=True):
+
+        # 个股池占用统计（仅 tier ∈ {核心, 卫星} 的已持仓）
+        _pool_used_cny = sum(
+            (r['current_position_cny'] or 0) for r in _rl_summary
+            if r.get('tier') in ('核心', '卫星') and r.get('current_position_cny')
+        )
+        _pool_target_cny = 300_000.0  # P6
+        _pool_remaining = _pool_target_cny - _pool_used_cny
+
+        # 池占用进度条头
+        st.markdown(
+            f"### 📊 个股池占用：**¥{_pool_used_cny:,.0f}** / ¥{_pool_target_cny:,.0f}　"
+            f"（{_pool_used_cny/_pool_target_cny*100:.1f}%，剩余弹药 ¥{_pool_remaining:,.0f}）"
+        )
+        st.progress(min(_pool_used_cny / _pool_target_cny, 1.0))
+
+        with st.expander(f"📋 决策与仓位汇总表（{len(_rl_summary)} 个标的）", expanded=True):
             import pandas as _pd
             _rl_table_rows = []
             for _r in _rl_summary:
@@ -4732,14 +4748,30 @@ with tab_research:
                     _rl_decision_str = "❓ 未评估"
                 else:
                     _rl_decision_str = format_decision_badge(_r)
-                _cur = _r.get('current_position')
-                _cur_str = f"{_cur*100:.2f}%" if _cur is not None else "—"
+                _cur_pct = _r.get('current_position_pct')
+                _cur_cny = _r.get('current_position_cny')
+                _pool_pct = _r.get('pool_pct')
+
+                if _cur_cny is not None:
+                    _cur_str = f"¥{_cur_cny/10000:.1f}万"
+                else:
+                    _cur_str = "—"
+
+                if _pool_pct is not None:
+                    _pool_str = f"{_pool_pct*100:.1f}%"
+                else:
+                    _pool_str = "—"
+
                 _rl_table_rows.append({
                     "标的": _r['folder'],
                     "分组": _r['group'],
+                    "档位": _r.get('tier', '') or "—",
+                    "风格": _r.get('style', '') or "—",
                     "决策": _rl_decision_str,
-                    "建议仓位": _r['target_position'] or "—",
-                    "当前仓位": _cur_str,
+                    "目标仓位": _r['target_position'] or "—",
+                    "当前持仓": _cur_str,
+                    "占池比": _pool_str,
+                    "节奏": _r.get('pace', '') or "—",
                     "加仓触发": _r['add_trigger'] or "—",
                     "减仓/止损触发": _r['trim_trigger'] or "—",
                     "更新日期": _r['date'] or "—",
@@ -4752,16 +4784,24 @@ with tab_research:
                 column_config={
                     "标的": st.column_config.TextColumn(width="medium"),
                     "分组": st.column_config.TextColumn(width="small"),
+                    "档位": st.column_config.TextColumn(width="small"),
+                    "风格": st.column_config.TextColumn(width="small"),
                     "决策": st.column_config.TextColumn(width="small"),
-                    "建议仓位": st.column_config.TextColumn(width="small"),
-                    "当前仓位": st.column_config.TextColumn(width="small"),
+                    "目标仓位": st.column_config.TextColumn(width="small"),
+                    "当前持仓": st.column_config.TextColumn(width="small"),
+                    "占池比": st.column_config.TextColumn(width="small"),
+                    "节奏": st.column_config.TextColumn(width="medium"),
                     "加仓触发": st.column_config.TextColumn(width="large"),
                     "减仓/止损触发": st.column_config.TextColumn(width="large"),
                     "更新日期": st.column_config.TextColumn(width="small"),
                 },
             )
-            st.caption("ℹ️ 当前仓位 = 该标的占总资产（含现金）的比例；"
-                       "建议仓位、加仓/减仓触发条件来自最新研报的决策记录。")
+            st.caption(
+                "ℹ️ **目标仓位**为绝对金额（万元）；"
+                "**占池比** = 当前持仓 / 个股池总额度（30 万）；"
+                "**档位**：核心仓 5-7 万 × 2-3 个 + 卫星仓 2-4 万 × 3-5 个；"
+                "**节奏**：基于位置分位的分批策略（详见 docs/OPEN_POINTS_PORTFOLIO_DESIGN.md）。"
+            )
 
         # ── 布局：左 30% 标的列表 | 右 70% 文档区 ──
         _rl_col_left, _rl_col_right = st.columns([3, 7])

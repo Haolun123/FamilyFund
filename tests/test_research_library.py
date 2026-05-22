@@ -520,3 +520,124 @@ def test_get_position_summary_target_position_field(tmp_path):
     assert txn['target_position'] == "5-8%"
     assert txn['add_trigger'] == "PE<15"
     assert txn['trim_trigger'] == "广告负"
+
+
+# ── 扩展字段（tier/style/pace/...）+ "不进池" action ─────────
+
+
+def test_decision_action_includes_pool_exclusion():
+    """'不进池' 应在 DECISION_ACTIONS 枚举内。"""
+    assert "不进池" in DECISION_ACTIONS
+
+
+def test_decision_color_for_pool_exclusion():
+    decision = {"action": "不进池", "market": "A股", "date": "2026-05-22",
+                "summary": "x", "source_doc": ""}
+    badge = format_decision_badge(decision)
+    assert badge.startswith("⚫")
+
+
+def test_update_decision_with_extended_fields(tmp_path):
+    """update_decision 接受 tier/style/pace/position_signal 字段。"""
+    update_decision(
+        str(tmp_path), "x", "买入", "A股", "2026-05-22", "s", "doc.md",
+        target_position="5万", add_trigger="add", trim_trigger="trim",
+        tier="核心", style="高股息+周期", pace="6 月分批",
+        position_signal="PB 历史分位 + 油价",
+    )
+    cur = get_decision(str(tmp_path), "x")
+    assert cur['tier'] == "核心"
+    assert cur['style'] == "高股息+周期"
+    assert cur['pace'] == "6 月分批"
+    assert cur['position_signal'] == "PB 历史分位 + 油价"
+
+
+def test_update_decision_pool_exclusion_action(tmp_path):
+    """'不进池' 是合法 action。"""
+    update_decision(str(tmp_path), "招行", "不进池", "A股",
+                    "2026-05-22", "与成都银行同行业，名额留给非银行", "x.md",
+                    tier="不进池", target_position="0")
+    cur = get_decision(str(tmp_path), "招行")
+    assert cur['action'] == "不进池"
+    assert cur['tier'] == "不进池"
+
+
+def test_position_summary_returns_extended_fields(tmp_path):
+    """get_position_summary 返回 tier/style/pace/position_signal。"""
+    meta = tmp_path / "_meta"
+    meta.mkdir()
+    (meta / "ticker_map.json").write_text(json.dumps({
+        "持仓": {"成都银行（601838.SS）": {"portfolio_codes": ["601838.SS"], "yf_symbol": "601838.SS"}},
+        "观察": {},
+    }, ensure_ascii=False), encoding='utf-8')
+    update_decision(
+        str(tmp_path), "成都银行（601838.SS）", "持有", "A股",
+        "2026-05-22", "PB 0.85", "成都.md",
+        target_position="4万", tier="卫星", style="高股息",
+        pace="3-4 月分批", position_signal="PB 历史分位",
+    )
+    rows = get_position_summary(str(tmp_path))
+    boc = rows[0]
+    assert boc['tier'] == "卫星"
+    assert boc['style'] == "高股息"
+    assert boc['pace'] == "3-4 月分批"
+    assert boc['position_signal'] == "PB 历史分位"
+    assert boc['target_position'] == "4万"
+
+
+def test_pool_pct_calculated_for_core_satellite(tmp_path):
+    """tier ∈ {核心, 卫星} 且已持仓时，pool_pct 应有值。"""
+    import pandas as pd
+    meta = tmp_path / "_meta"
+    meta.mkdir()
+    (meta / "ticker_map.json").write_text(json.dumps({
+        "持仓": {
+            "腾讯（HK00700）": {"portfolio_codes": ["HK700"], "yf_symbol": "00700.HK"},
+            "招行（A）": {"portfolio_codes": ["600036.SS"], "yf_symbol": "600036.SS"},
+        },
+        "观察": {},
+    }, ensure_ascii=False), encoding='utf-8')
+    # 腾讯 = 核心仓
+    update_decision(str(tmp_path), "腾讯（HK00700）", "买入", "H股",
+                    "2026-05-22", "成长", "x.md",
+                    tier="核心", target_position="7万")
+    # 招行 = 不进池
+    update_decision(str(tmp_path), "招行（A）", "不进池", "A股",
+                    "2026-05-22", "不进池", "x.md",
+                    tier="不进池", target_position="0")
+
+    df = pd.DataFrame([
+        {"Date": "2026-05-15", "Code": "HK0700", "Total_Value": 80000.0, "Asset_Class": "ETF_Stock"},
+        {"Date": "2026-05-15", "Code": "600036", "Total_Value": 0.0, "Asset_Class": "ETF_Stock"},
+    ])
+    rows = get_position_summary(str(tmp_path), raw_df=df)
+    txn = next(r for r in rows if r['folder'] == "腾讯（HK00700）")
+    cmb = next(r for r in rows if r['folder'] == "招行（A）")
+
+    # 腾讯：核心仓 + 持仓 8 万 → pool_pct = 8/30 = 0.267
+    assert txn['pool_pct'] == pytest.approx(80000.0 / 300000.0)
+    assert txn['current_position_cny'] == pytest.approx(80000.0)
+    # 招行：不进池 → pool_pct 为 None（即使 portfolio_codes 匹配但市值 0）
+    assert cmb['pool_pct'] is None
+
+
+def test_pool_pct_none_when_not_in_pool(tmp_path):
+    """tier 不是 核心/卫星 时 pool_pct 应为 None。"""
+    import pandas as pd
+    meta = tmp_path / "_meta"
+    meta.mkdir()
+    (meta / "ticker_map.json").write_text(json.dumps({
+        "持仓": {"SAP": {"portfolio_codes": ["SAP.DE"], "yf_symbol": "SAP"}},
+        "观察": {},
+    }, ensure_ascii=False), encoding='utf-8')
+    update_decision(str(tmp_path), "SAP", "持有", "N/A",
+                    "2026-05-22", "战略", "x.md",
+                    tier="战略持仓（不计入个股池）", target_position="ESPP 持续")
+    df = pd.DataFrame([
+        {"Date": "2026-05-15", "Code": "SAP.DE", "Total_Value": 480000.0, "Asset_Class": "Company_Stock"},
+    ])
+    rows = get_position_summary(str(tmp_path), raw_df=df)
+    sap = rows[0]
+    # current_cny 有值（已持仓），但 pool_pct 为 None（不在池内）
+    assert sap['current_position_cny'] == pytest.approx(480000.0)
+    assert sap['pool_pct'] is None
