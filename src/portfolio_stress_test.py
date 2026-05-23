@@ -144,77 +144,64 @@ def fetch_proxy_series(asset_class: str, start: str = '2005-01-01') -> pd.Series
     return None
 
 
-# ── 组合回测 ──
-
-def _normalize_to_returns(series: pd.Series) -> pd.Series:
-    """价格 → 日收益率。"""
-    return series.pct_change().dropna()
-
-
-def run_stress_test(weights: dict, start: str = '2005-01-01',
-                    data_dir: str = None, force_refresh: bool = False) -> dict:
-    """组合历史压力测试。
+def fetch_all_proxies(asset_classes: list = None, start: str = '2005-01-01') -> dict:
+    """批量拉所有非 fixed_yield 资产类的代理价格序列。
 
     Args:
-        weights: {asset_class: weight}, 权重和 = 1
-        start: 起始日（默认 2005-01-01）
-        data_dir: 缓存目录
-        force_refresh: 强制重拉
+        asset_classes: 想拉的类别列表（None = 全部 PROXY_MAP）
+        start: 起始日
 
     Returns:
-        {
-            'portfolio_nav': pd.Series,         # 组合每日累计净值
-            'cumulative_return': float,          # 总累计 %
-            'years': float,                      # 年限
-            'cagr': float,                       # 年化复利 %
-            'max_drawdown': float,               # 最大回撤 %（任意时点）
-            'yearly_returns': dict,              # {year: return_pct}
-            'best_year': (year, return_pct),
-            'worst_year': (year, return_pct),
-            'rolling_1y_min': float,             # 滚动 1Y 最差
-            'rolling_1y_max': float,
-            'rolling_3y_min': float,
-            'rolling_3y_max': float,
-            'rolling_1y_quantiles': dict,        # P10/P50/P90 滚动 1Y
-            'data_start': str, 'data_end': str,
-            'proxies_used': dict,                # {asset_class: proxy_name}
-        }
+        {asset_class: pd.Series}（仅成功的）
     """
-    # 1. 拉所有非 fixed_yield 序列
+    if asset_classes is None:
+        asset_classes = list(PROXY_MAP.keys())
     fetched = {}
-    for ac, w in weights.items():
-        if w <= 0:
-            continue
+    for ac in asset_classes:
         cfg = PROXY_MAP.get(ac)
-        if not cfg:
+        if not cfg or cfg['type'] == 'fixed_yield':
             continue
-        if cfg['type'] != 'fixed_yield':
-            s = fetch_proxy_series(ac, start)
-            if s is not None and len(s) > 0:
-                fetched[ac] = s
-
-    if not fetched:
-        # 全是 fixed_yield 类型（无外部数据），生成人造日期序列
-        end_date = pd.Timestamp.today().normalize()
-        common_idx = pd.date_range(start, end_date, freq='B')
-    else:
-        # 2. 求公共日期范围
-        common_idx = None
-        for s in fetched.values():
+        s = fetch_proxy_series(ac, start)
+        if s is not None and len(s) > 0:
             # 去时区
             if s.index.tz is not None:
                 s.index = s.index.tz_localize(None)
-            common_idx = s.index if common_idx is None else common_idx.intersection(s.index)
-        if common_idx is None or len(common_idx) < 252:
-            return {'error': f'公共日期不足 1 年（{len(common_idx) if common_idx is not None else 0} 天）'}
+            fetched[ac] = s
+    return fetched
 
-    # 3. 各代理对齐到公共日期，转日收益
+
+def _build_daily_returns(fetched: dict, start: str) -> pd.DataFrame | None:
+    """从已拉的价格序列构建公共日期 DataFrame 的日收益。"""
+    if not fetched:
+        # 无外部数据，构造人造日期
+        end_date = pd.Timestamp.today().normalize()
+        idx = pd.date_range(start, end_date, freq='B')
+        return pd.DataFrame(index=idx)
+
+    common_idx = None
+    for s in fetched.values():
+        common_idx = s.index if common_idx is None else common_idx.intersection(s.index)
+    if common_idx is None or len(common_idx) < 252:
+        return None
+
     daily_returns = pd.DataFrame(index=common_idx)
     for ac, s in fetched.items():
         s_aligned = s.reindex(common_idx).ffill()
         daily_returns[ac] = s_aligned.pct_change().fillna(0)
+    return daily_returns
 
-    # 4. fixed_yield 类型的资产：直接用日复利
+
+def compute_portfolio_metrics(daily_returns: pd.DataFrame, weights: dict) -> dict:
+    """从日收益 DataFrame + 权重 dict 算组合指标（不拉数据，纯计算）。
+
+    fixed_yield 类型直接添加日收益列。
+    """
+    if daily_returns is None or len(daily_returns) == 0:
+        return {'error': '日收益数据为空'}
+
+    dr = daily_returns.copy()
+
+    # fixed_yield 类型：直接日复利
     for ac, w in weights.items():
         if w <= 0:
             continue
@@ -222,30 +209,32 @@ def run_stress_test(weights: dict, start: str = '2005-01-01',
         if cfg and cfg['type'] == 'fixed_yield':
             rate = cfg['rate']
             daily_r = (1 + rate) ** (1 / 252) - 1
-            daily_returns[ac] = daily_r
+            dr[ac] = daily_r
 
-    # 5. 加权日收益
+    # 加权
     w_series = pd.Series(weights)
-    # 只保留有数据的列
-    cols = [c for c in daily_returns.columns if c in w_series.index]
-    w_filtered = w_series[cols]
-    w_normalized = w_filtered / w_filtered.sum()  # 重新归一化（防止某类无数据）
-    portfolio_daily = (daily_returns[cols] * w_normalized).sum(axis=1)
+    cols = [c for c in dr.columns if c in w_series.index and w_series[c] > 0]
+    if not cols:
+        return {'error': '所有权重为 0 或无对应数据'}
 
-    # 6. 净值序列
+    w_filtered = w_series[cols]
+    w_normalized = w_filtered / w_filtered.sum()
+    portfolio_daily = (dr[cols] * w_normalized).sum(axis=1)
+
+    # 净值
     nav = (1 + portfolio_daily).cumprod()
 
-    # 7. 累计 / CAGR
+    # 累计 / CAGR
     total_return = nav.iloc[-1] - 1
     years = len(nav) / 252
     cagr = (nav.iloc[-1]) ** (1 / years) - 1 if years > 0 else 0
 
-    # 8. 最大回撤
+    # 最大回撤
     peak = nav.cummax()
     dd = (nav - peak) / peak
     max_dd = float(dd.min())
 
-    # 9. 年度回报
+    # 年度回报
     nav_year_end = nav.resample('YE').last()
     yearly_returns = {}
     for i in range(1, len(nav_year_end)):
@@ -260,11 +249,9 @@ def run_stress_test(weights: dict, start: str = '2005-01-01',
     else:
         worst_year = best_year = (None, 0)
 
-    # 10. 滚动窗口
+    # 滚动窗口
     rolling_1y = nav.pct_change(252).dropna()
     rolling_3y_cagr = (nav / nav.shift(252 * 3)).dropna() ** (1 / 3) - 1
-
-    # 滚动 1Y 最大回撤（每个 252 天窗口的最大回撤）
     rolling_1y_min = float(rolling_1y.min()) if len(rolling_1y) > 0 else 0
     rolling_1y_max = float(rolling_1y.max()) if len(rolling_1y) > 0 else 0
     rolling_3y_min = float(rolling_3y_cagr.min()) if len(rolling_3y_cagr) > 0 else 0
@@ -290,11 +277,51 @@ def run_stress_test(weights: dict, start: str = '2005-01-01',
         } if len(rolling_1y) > 0 else None,
         'data_start':              str(nav.index[0].date()),
         'data_end':                str(nav.index[-1].date()),
-        'proxies_used':            {ac: PROXY_MAP[ac]['name'] for ac in fetched.keys()},
         'normalized_weights':      w_normalized.to_dict(),
-        'missing_assets':          [ac for ac in weights if ac not in cols and weights[ac] > 0
-                                    and PROXY_MAP.get(ac, {}).get('type') != 'fixed_yield'],
     }
+
+
+# ── 组合回测 ──
+
+def _normalize_to_returns(series: pd.Series) -> pd.Series:
+    """价格 → 日收益率。"""
+    return series.pct_change().dropna()
+
+
+def run_stress_test(weights: dict, start: str = '2005-01-01',
+                    data_dir: str = None, force_refresh: bool = False) -> dict:
+    """组合历史压力测试（向后兼容包装器）。
+
+    新代码建议用 fetch_all_proxies + compute_portfolio_metrics 分步调用。
+
+    Args:
+        weights: {asset_class: weight}, 权重和 = 1
+        start: 起始日（默认 2005-01-01）
+
+    Returns:
+        组合压力测试结果（含 portfolio_nav, cagr, max_drawdown 等）
+    """
+    # 1. 拉所有非 fixed_yield 序列
+    classes_with_weight = [ac for ac, w in weights.items() if w > 0]
+    fetched = fetch_all_proxies(asset_classes=classes_with_weight, start=start)
+
+    # 2. 构建日收益 DataFrame
+    daily_returns = _build_daily_returns(fetched, start)
+    if daily_returns is None:
+        return {'error': '公共日期不足 1 年'}
+
+    # 3. 算组合
+    result = compute_portfolio_metrics(daily_returns, weights)
+    if 'error' in result:
+        return result
+
+    # 4. 加 metadata（向后兼容）
+    result['proxies_used'] = {ac: PROXY_MAP[ac]['name'] for ac in fetched.keys()}
+    result['missing_assets'] = [
+        ac for ac in weights if ac not in result.get('normalized_weights', {})
+        and weights[ac] > 0 and PROXY_MAP.get(ac, {}).get('type') != 'fixed_yield'
+    ]
+    return result
 
 
 def get_current_weights(raw_df) -> dict:
