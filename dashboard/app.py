@@ -4783,7 +4783,7 @@ with tab_research:
             (r['current_position_cny'] or 0) for r in _rl_summary
             if r.get('tier') in ('核心', '卫星') and r.get('current_position_cny')
         )
-        _pool_target_cny = 300_000.0  # P6
+        _pool_target_cny = 350_000.0  # P6 (2026-05-23 调整：30万→35万)
         _pool_remaining = _pool_target_cny - _pool_used_cny
 
         # 池占用进度条头
@@ -4920,7 +4920,7 @@ with tab_research:
             )
             st.caption(
                 "ℹ️ **目标仓位**为绝对金额（万元）；"
-                "**占池比** = 当前持仓 / 个股池总额度（30 万）；"
+                "**占池比** = 当前持仓 / 个股池总额度（35 万）；"
                 "**档位**：核心仓 5-7 万 × 2-3 个 + 卫星仓 2-4 万 × 3-5 个；"
                 "**分位颜色**：🟢≤30% 机会；🟡≥70% 偏高；🔴≥90% 极高；"
                 "**详细位置/触发条件/芒格信号** → 在左下选标的，右侧顶部信号面板查看；"

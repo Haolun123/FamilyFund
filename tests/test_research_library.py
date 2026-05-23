@@ -614,8 +614,8 @@ def test_pool_pct_calculated_for_core_satellite(tmp_path):
     txn = next(r for r in rows if r['folder'] == "腾讯（HK00700）")
     cmb = next(r for r in rows if r['folder'] == "招行（A）")
 
-    # 腾讯：核心仓 + 持仓 8 万 → pool_pct = 8/30 = 0.267
-    assert txn['pool_pct'] == pytest.approx(80000.0 / 300000.0)
+    # 腾讯：核心仓 + 持仓 8 万 → pool_pct = 8/35 = 0.229
+    assert txn['pool_pct'] == pytest.approx(80000.0 / 350000.0)
     assert txn['current_position_cny'] == pytest.approx(80000.0)
     # 招行：不进池 → pool_pct 为 None（即使 portfolio_codes 匹配但市值 0）
     assert cmb['pool_pct'] is None
@@ -760,4 +760,4 @@ def test_style_exposure_aggregates(tmp_path):
     # 总计
     assert exp['total_pool_cny'] == pytest.approx(40000.0)
     assert exp['total_target_amount'] == pytest.approx(120000.0)
-    assert exp['total_pool_target'] == pytest.approx(300000.0)
+    assert exp['total_pool_target'] == pytest.approx(350000.0)

@@ -495,7 +495,7 @@ def get_style_exposure(reports_dir: str, raw_df=None) -> dict:
 
 
 # 个股池总额度（来自 P6 决策，2026-05-22 写死）
-STOCK_POOL_TOTAL_CNY = 300_000.0  # P6: 个股池总额度（写死，2026-05-22）
+STOCK_POOL_TOTAL_CNY = 350_000.0  # P6: 个股池总额度（写死，2026-05-22 设 30 万；2026-05-23 调整为 35 万——7 个标的进池后 30 万显得局促）
 
 
 def get_position_summary(reports_dir: str, raw_df=None) -> list[dict]:
