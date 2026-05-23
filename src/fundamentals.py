@@ -185,56 +185,173 @@ def remove_yf_symbol(data_dir: str, code: str):
     save_yf_symbols(data_dir, data)
 
 
-# ── PE 历史分位 ────────────────────────────────────────────
+# ── 历史快照：PE / PB / ROE 等全字段 ────────────────────────
 
-def append_pe_snapshot(data_dir: str, yf_symbols: dict):
-    """拉取各 YF Symbol 的当日 PE，追加到 pe_history_us.json（幂等）。
+def _watch_symbols_path(data_dir: str) -> str:
+    return os.path.join(data_dir, 'watch_symbols.json')
 
-    只处理美股/ADR 和港股（非 .SS/.SZ），A股 用 akshare 实时拉取。
+
+def load_watch_symbols(data_dir: str) -> dict:
+    """读 watch_symbols.json（与 yf_symbols 互补，存宽基 ETF 等需采集历史但不在持仓中的标的）。
+
+    Returns:
+        {'watch': {symbol: {...}}, ...}; 文件不存在返回空 watch
+    """
+    p = _watch_symbols_path(data_dir)
+    if not os.path.exists(p):
+        return {'watch': {}}
+    try:
+        with open(p, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {'watch': {}}
+
+
+def _collect_yf_symbols_for_history(data_dir: str) -> list[str]:
+    """合并 yf_symbols + watch_symbols，去重，排除 A 股（.SS/.SZ 走 akshare 实时）。
+
+    Returns:
+        list of yf_symbol 字符串
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+
+    yf_data = load_yf_symbols(data_dir)
+    for code, entry in yf_data.items():
+        if code.startswith('_'):
+            continue
+        sym = entry.get('yf_symbol') if isinstance(entry, dict) else str(entry)
+        if not sym or sym in seen:
+            continue
+        if any(sym.endswith(s) for s in ['.SS', '.SZ']):
+            continue
+        seen.add(sym)
+        result.append(sym)
+
+    watch_data = load_watch_symbols(data_dir).get('watch', {})
+    for sym, _meta in watch_data.items():
+        if not sym or sym in seen:
+            continue
+        if any(sym.endswith(s) for s in ['.SS', '.SZ']):
+            continue
+        seen.add(sym)
+        result.append(sym)
+
+    return result
+
+
+def append_fundamentals_snapshot(data_dir: str) -> dict:
+    """拉取所有监控 symbol 的当日全部基本面字段，追加到 fundamentals_history.json（幂等）。
+
+    采集范围：
+    - yf_symbols.json 的持仓个股（不含 A 股）
+    - watch_symbols.json 的宽基 ETF / ADR
+
+    数据结构：
+        {
+            symbol: [
+                {'date': 'YYYY-MM-DD', 'pe': float, 'pb': float, 'roe': float, ...},
+                ...
+            ]
+        }
+        字段名为 FIELDS 中的简洁键（trailingPE → pe, priceToBook → pb 等）
+
+    Args:
+        data_dir: $FAMILYFUND_DATA 目录
+
+    Returns:
+        {'updated': int, 'skipped_today': int, 'errors': int}
     """
     import yfinance as yf
     from datetime import date as _date
 
-    p = os.path.join(data_dir, 'pe_history_us.json')
-    history = {}
+    p = os.path.join(data_dir, 'fundamentals_history.json')
+    history: dict[str, list] = {}
     if os.path.exists(p):
         with open(p, encoding='utf-8') as f:
             history = json.load(f)
 
     today = _date.today().isoformat()
-    dirty = False
+    symbols = _collect_yf_symbols_for_history(data_dir)
+    stats = {'updated': 0, 'skipped_today': 0, 'errors': 0}
 
-    for code, entry in yf_symbols.items():
-        if code.startswith('_'):
-            continue
-        symbol = entry.get('yf_symbol') if isinstance(entry, dict) else str(entry)
-        if not symbol:
-            continue
-        # A股排除
-        if any(symbol.endswith(s) for s in ['.SS', '.SZ']):
-            continue
+    # FIELDS → 历史记录中的简短键名
+    FIELD_TO_KEY = {
+        'currentPrice':    'price',
+        'trailingPE':      'pe',
+        'forwardPE':       'forward_pe',
+        'priceToBook':     'pb',
+        'returnOnEquity':  'roe',
+        'dividendYield':   'div_yield',
+        'trailingEps':     'eps',
+        'forwardEps':      'forward_eps',
+        'revenueGrowth':   'rev_growth',
+        'earningsGrowth':  'earn_growth',
+        'marketCap':       'mkt_cap',
+    }
 
+    for symbol in symbols:
         existing = history.get(symbol, [])
         if existing and existing[-1].get('date') == today:
+            stats['skipped_today'] += 1
             continue
-
         try:
             info = yf.Ticker(symbol).info
-            pe = info.get('trailingPE')
-            if pe and float(pe) > 0:
-                history.setdefault(symbol, []).append({
-                    'date': today,
-                    'pe':   round(float(pe), 2),
-                })
-                dirty = True
+            entry = {'date': today}
+            for raw_field, short_key in FIELD_TO_KEY.items():
+                v = info.get(raw_field)
+                if v is None:
+                    continue
+                try:
+                    entry[short_key] = round(float(v), 6)
+                except (TypeError, ValueError):
+                    pass
+            # 至少有一个字段成功才追加
+            if len(entry) > 1:
+                history.setdefault(symbol, []).append(entry)
+                stats['updated'] += 1
+            else:
+                stats['errors'] += 1
         except Exception:
-            pass
+            stats['errors'] += 1
 
-    if dirty:
+    if stats['updated'] > 0:
         tmp = p + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
         os.replace(tmp, p)
+
+    return stats
+
+
+def append_pe_snapshot(data_dir: str, yf_symbols: dict = None):
+    """[DEPRECATED 2026-05-23] 已被 append_fundamentals_snapshot 取代（采集全部基本面字段）。
+
+    此函数保留向后兼容：现在内部调用新函数，忽略 yf_symbols 参数（新函数自动从文件加载）。
+    """
+    return append_fundamentals_snapshot(data_dir)
+
+
+def get_fundamentals_history(data_dir: str, symbol: str = None) -> dict | list:
+    """读取 fundamentals_history.json。
+
+    Args:
+        symbol: None 时返回完整 dict {symbol: [...]}; 指定时返回该 symbol 的列表
+
+    Returns:
+        dict 或 list；symbol 不存在返回空列表
+    """
+    p = os.path.join(data_dir, 'fundamentals_history.json')
+    if not os.path.exists(p):
+        return {} if symbol is None else []
+    try:
+        with open(p, encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        return {} if symbol is None else []
+    if symbol is None:
+        return data
+    return data.get(symbol, [])
 
 
 def get_pe_percentile_from_snapshot(data_dir: str, yf_symbol: str, current_pe: float | None) -> dict | None:

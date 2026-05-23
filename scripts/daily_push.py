@@ -22,7 +22,7 @@ logging.basicConfig(
 
 from market_monitor import get_market_data
 from notifier import send_market_summary, _is_trading_day, _send_webhook
-from fundamentals import load_yf_symbols, append_pe_snapshot
+from fundamentals import append_fundamentals_snapshot
 from market_monitor import append_vol_snapshot
 
 import argparse
@@ -45,15 +45,13 @@ def main():
     logging.info("拉取市场数据 (force_refresh=True)...")
     market_data = get_market_data(force_refresh=True)
 
-    # PE 快照（美股/ADR，存 EC2 本地，积累历史分位数据）
+    # 基本面快照（PE/PB/ROE 等全字段；持仓个股 + watch_symbols.json 宽基 ETF；A股排除）
     _data_dir = os.environ.get('FAMILYFUND_DATA', os.path.expanduser('~/data'))
     try:
-        yf_symbols = load_yf_symbols(_data_dir)
-        stock_symbols = {k: v for k, v in yf_symbols.items() if not k.startswith('_')}
-        append_pe_snapshot(_data_dir, stock_symbols)
-        logging.info("PE 快照已更新")
+        stats = append_fundamentals_snapshot(_data_dir)
+        logging.info(f"基本面快照已更新: {stats}")
     except Exception as e:
-        logging.warning(f"PE 快照更新失败（不影响推送）: {e}")
+        logging.warning(f"基本面快照更新失败（不影响推送）: {e}")
 
     # QVIX 历史快照（积累动态分位数据）
     try:
