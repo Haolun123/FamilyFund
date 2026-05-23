@@ -142,6 +142,50 @@ def get_fundamentals(data_dir: str, code: str, force_refresh: bool = False) -> d
     return None
 
 
+def get_fundamentals_by_yf_symbol(data_dir: str, yf_symbol: str,
+                                  force_refresh: bool = False) -> dict | None:
+    """通过 yf_symbol 直接获取基本面（带当日缓存）。
+
+    与 get_fundamentals 的区别：不需要先在 yf_symbols.json 注册 code，
+    可以传任意 yf_symbol（如 ticker_map.json 里的）。
+    缓存仍写入 yf_symbols.json _cache 字段。
+
+    适用场景：Research Tab 芒格面板需要 A 股 ROE/增长率等，
+    但 ticker_map 已经有 yf_symbol 了，不需要再走 code 中介。
+
+    Args:
+        yf_symbol: yfinance 代码（如 '600309.SS', '0700.HK', 'SAP'）
+        force_refresh: True 时绕过缓存
+
+    Returns:
+        基本面字典或 None
+    """
+    if not yf_symbol:
+        return None
+
+    data = load_yf_symbols(data_dir)
+    today = date.today().isoformat()
+    cache = data.get('_cache', {})
+    cached = cache.get(yf_symbol, {})
+
+    if not force_refresh and cached.get('updated') == today:
+        result = {k: v for k, v in cached.items() if k != 'updated'}
+        return result if result else None
+
+    fresh = fetch_fundamentals(yf_symbol)
+    if fresh:
+        fresh['updated'] = today
+        if '_cache' not in data:
+            data['_cache'] = {}
+        data['_cache'][yf_symbol] = fresh
+        save_yf_symbols(data_dir, data)
+        return {k: v for k, v in fresh.items() if k != 'updated'}
+
+    if cached:
+        return {k: v for k, v in cached.items() if k != 'updated'}
+    return None
+
+
 def get_all_fundamentals(data_dir: str, codes: list, force_refresh: bool = False) -> dict:
     """批量获取基本面数据。返回 {code: fundamentals_dict}，无数据的 code 不出现在结果中。"""
     result = {}

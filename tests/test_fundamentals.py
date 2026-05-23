@@ -136,7 +136,48 @@ from fundamentals import (
     _collect_yf_symbols_for_history,
     append_fundamentals_snapshot,
     get_fundamentals_history,
+    get_fundamentals_by_yf_symbol,
 )
+
+
+class TestGetFundamentalsByYfSymbol:
+    """通过 yf_symbol 直接获取（A 股 fundamentals 接入芒格面板用）。"""
+
+    def test_returns_none_when_empty_symbol(self, tmp_dir):
+        assert get_fundamentals_by_yf_symbol(tmp_dir, '') is None
+        assert get_fundamentals_by_yf_symbol(tmp_dir, None) is None
+
+    def test_uses_cache_within_today(self, tmp_dir, monkeypatch):
+        """同一天有 _cache 数据时直接返回，不调用 yfinance。"""
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        # 写一份 yf_symbols.json 含 _cache
+        path = os.path.join(tmp_dir, 'yf_symbols.json')
+        data = {
+            '600309': {'yf_symbol': '600309.SS', 'show_fundamentals': True},
+            '_cache': {
+                '600309.SS': {
+                    'trailingPE': 18.5,
+                    'priceToBook': 2.19,
+                    'returnOnEquity': 0.13,
+                    'updated': today,
+                }
+            }
+        }
+        with open(path, 'w') as f:
+            json.dump(data, f)
+
+        # mock yfinance（如果调用就报错）
+        def _should_not_call(*args, **kwargs):
+            raise RuntimeError("不应调用 yfinance（应走缓存）")
+        monkeypatch.setattr('yfinance.Ticker', _should_not_call)
+
+        result = get_fundamentals_by_yf_symbol(tmp_dir, '600309.SS')
+        assert result is not None
+        assert result['returnOnEquity'] == 0.13
+        assert result['trailingPE'] == 18.5
+        # updated 字段应被剥离
+        assert 'updated' not in result
 
 
 class TestWatchSymbols:

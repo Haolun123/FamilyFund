@@ -5402,29 +5402,47 @@ with tab_research:
                         _val_block = '—'
 
                     _qual_lines = []
-                    # ROE / 增长率从 fundamentals_history 读最新（如果有）
+                    # ROE / 增长率：优先 fundamentals_history（港股+SAP+宽基 ETF），
+                    # fallback 到 yf_symbols.json _cache（A 股从 yfinance 实时拉，每日缓存）
                     try:
-                        from fundamentals import get_fundamentals_history
+                        from fundamentals import (
+                            get_fundamentals_history,
+                            get_fundamentals_by_yf_symbol,
+                            FIELDS as _FUND_FIELDS,
+                        )
                         _fund_data_dir = os.path.dirname(csv_path)
-                        _hist = get_fundamentals_history(_fund_data_dir, _rl_sel_summary.get('yf_symbol', ''))
+                        _yf_sym_for_fund = _rl_sel_summary.get('yf_symbol', '')
+                        _hist = get_fundamentals_history(_fund_data_dir, _yf_sym_for_fund)
+
+                        # 字段名映射（history 用简短键，_cache 用 yfinance 原始键）
+                        _roe = _rev_g = _earn_g = _div = None
                         if _hist:
                             _latest = _hist[-1]
-                            _roe = _latest.get('roe')
+                            _roe   = _latest.get('roe')
                             _rev_g = _latest.get('rev_growth')
                             _earn_g = _latest.get('earn_growth')
-                            _div = _latest.get('div_yield')
-                            if _roe is not None:
-                                _emoji = '⭐' if _roe >= 0.15 else '⚪' if _roe >= 0.08 else '⚠️'
-                                _qual_lines.append(f"ROE: <b>{_roe*100:.1f}%</b> {_emoji}")
-                            if _rev_g is not None:
-                                _qual_lines.append(f"营收增长: <b>{_rev_g*100:+.1f}%</b>")
-                            if _earn_g is not None:
-                                _qual_lines.append(f"利润增长: <b>{_earn_g*100:+.1f}%</b>")
-                            if _div is not None:
-                                _qual_lines.append(f"股息率: <b>{_div:.2f}%</b>")
+                            _div   = _latest.get('div_yield')
+                        else:
+                            # fallback：从 yf_symbols.json _cache 读（含 A 股）
+                            _cache_data = get_fundamentals_by_yf_symbol(_fund_data_dir, _yf_sym_for_fund) or {}
+                            _roe   = _cache_data.get('returnOnEquity')
+                            _rev_g = _cache_data.get('revenueGrowth')
+                            _earn_g = _cache_data.get('earningsGrowth')
+                            _div   = _cache_data.get('dividendYield')
+
+                        if _roe is not None:
+                            _emoji = '⭐' if _roe >= 0.15 else '⚪' if _roe >= 0.08 else '⚠️'
+                            _qual_lines.append(f"ROE: <b>{_roe*100:.1f}%</b> {_emoji}")
+                        if _rev_g is not None:
+                            _qual_lines.append(f"营收增长: <b>{_rev_g*100:+.1f}%</b>")
+                        if _earn_g is not None:
+                            _qual_lines.append(f"利润增长: <b>{_earn_g*100:+.1f}%</b>")
+                        if _div is not None:
+                            # yfinance dividendYield 已经是 %（如 1.2 表示 1.2%），fundamentals_history 也存为 %
+                            _qual_lines.append(f"股息率: <b>{_div:.2f}%</b>")
                     except Exception:
                         pass
-                    _qual_block = '<br>'.join(_qual_lines) if _qual_lines else '—（fundamentals_history 待积累）'
+                    _qual_block = '<br>'.join(_qual_lines) if _qual_lines else '—（无基本面数据）'
 
                     # 决策状态区
                     _dec_lines = []
