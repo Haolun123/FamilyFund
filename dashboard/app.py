@@ -46,6 +46,7 @@ from research_library import (
     load_decisions, get_decision, get_decision_history, format_decision_badge,
     get_position_summary, get_pool_action_list, get_style_exposure,
 )
+from position_percentile import get_position_data
 
 # ─── Page Config ───
 
@@ -4814,6 +4815,35 @@ with tab_research:
                 else:
                     _pool_str = "—"
 
+                # 拉取位置数据（PB/PE 5 年分位 / 价格分位）— 缓存 7 天
+                _pos = None
+                _yf_sym = _r.get('yf_symbol', '')
+                if _yf_sym:
+                    try:
+                        _pos = get_position_data(_yf_sym, force_refresh=False)
+                    except Exception:
+                        _pos = None
+
+                # 格式化位置列
+                if _pos is None:
+                    _pe_str, _pb_str, _pos_str = "—", "—", "—"
+                elif _pos['market'] == 'A':
+                    _pe = _pos.get('current_pe_ttm')
+                    _pb = _pos.get('current_pb')
+                    _pe_pct = _pos.get('pe_pct_5y')
+                    _pb_pct = _pos.get('pb_pct_5y')
+                    _pe_str = f"{_pe:.1f} ({_pe_pct:.0f}%)" if _pe and _pe_pct is not None else "—"
+                    _pb_str = f"{_pb:.2f} ({_pb_pct:.0f}%)" if _pb and _pb_pct is not None else "—"
+                    _pos_str = ""  # A 股用 PE/PB 分位足够
+                else:  # HK
+                    _pe = _pos.get('current_pe_ttm')
+                    _pb = _pos.get('current_pb')
+                    _price_pct = _pos.get('price_pct_5y')
+                    _from_high = _pos.get('pct_from_high')
+                    _pe_str = f"{_pe:.1f}" if _pe else "—"
+                    _pb_str = f"{_pb:.2f}" if _pb else "—"
+                    _pos_str = f"{_price_pct:.0f}% (距高 {_from_high:.0f}%)" if _price_pct is not None and _from_high is not None else "—"
+
                 _rl_table_rows.append({
                     "标的": _r['folder'],
                     "分组": _r['group'],
@@ -4823,6 +4853,9 @@ with tab_research:
                     "目标仓位": _r['target_position'] or "—",
                     "当前持仓": _cur_str,
                     "占池比": _pool_str,
+                    "PE (分位)": _pe_str,
+                    "PB (分位)": _pb_str,
+                    "价格位置": _pos_str if _pos_str else "—",
                     "节奏": _r.get('pace', '') or "—",
                     "加仓触发": _r['add_trigger'] or "—",
                     "减仓/止损触发": _r['trim_trigger'] or "—",
@@ -4842,6 +4875,9 @@ with tab_research:
                     "目标仓位": st.column_config.TextColumn(width="small"),
                     "当前持仓": st.column_config.TextColumn(width="small"),
                     "占池比": st.column_config.TextColumn(width="small"),
+                    "PE (分位)": st.column_config.TextColumn(width="small", help="A 股：当前 PE(TTM) + 5 年分位；港股：仅当前 PE"),
+                    "PB (分位)": st.column_config.TextColumn(width="small", help="A 股：当前 PB + 5 年分位；港股：仅当前 PB"),
+                    "价格位置": st.column_config.TextColumn(width="small", help="港股：5 年价格分位 + 距 52 周高距离（PB 历史不可得，价格分位代理）"),
                     "节奏": st.column_config.TextColumn(width="medium"),
                     "加仓触发": st.column_config.TextColumn(width="large"),
                     "减仓/止损触发": st.column_config.TextColumn(width="large"),
@@ -4852,7 +4888,9 @@ with tab_research:
                 "ℹ️ **目标仓位**为绝对金额（万元）；"
                 "**占池比** = 当前持仓 / 个股池总额度（30 万）；"
                 "**档位**：核心仓 5-7 万 × 2-3 个 + 卫星仓 2-4 万 × 3-5 个；"
-                "**节奏**：基于位置分位的分批策略（详见 docs/OPEN_POINTS_PORTFOLIO_DESIGN.md）。"
+                "**节奏**：基于位置分位的分批策略（详见 docs/OPEN_POINTS_PORTFOLIO_DESIGN.md）；"
+                "**PE/PB 分位**：A 股完整 5 年分位；港股仅当前值 + 5 年价格分位代理（财务历史不可得）；"
+                "**数据缓存 7 天**，强制刷新见 src/position_percentile.py"
             )
 
         # ── E1：待行动清单 + 偏差柱状图 ──

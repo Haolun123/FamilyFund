@@ -572,6 +572,7 @@ def get_position_summary(reports_dir: str, raw_df=None) -> list[dict]:
                 'current_position_pct': current_pct,
                 'current_position_cny': current_cny,
                 'pool_pct': pool_pct,
+                'yf_symbol': info.get('yf_symbol', ''),
                 'add_trigger': d.get('add_trigger', ''),
                 'trim_trigger': d.get('trim_trigger', ''),
                 'source_doc': d.get('source_doc', ''),
