@@ -5083,14 +5083,14 @@ with tab_research:
 
                 if _rl_cur:
                     _rl_badge = format_decision_badge(_rl_cur)
-                    _rl_summary = _rl_cur.get('summary', '')
+                    _rl_summary_text = _rl_cur.get('summary', '')
                     _rl_date = _rl_cur.get('date', '')
                     _rl_src = _rl_cur.get('source_doc', '')
                     _rl_src_html = f"　·　来源：{_rl_src}" if _rl_src else ""
                     st.markdown(
                         f"""<div style='border:1px solid #ddd; border-radius:8px; padding:12px 16px; margin-bottom:12px; background:#fafafa;'>
 <div style='font-size:1.1em; font-weight:bold;'>{_rl_badge}　|　{_rl_date}</div>
-<div style='margin-top:6px; color:#444;'>{_rl_summary}</div>
+<div style='margin-top:6px; color:#444;'>{_rl_summary_text}</div>
 <div style='margin-top:4px; color:#888; font-size:0.85em;'>{_rl_src_html}</div>
 </div>""",
                         unsafe_allow_html=True,
