@@ -938,6 +938,161 @@ with tab_dashboard:
         rb_df = pd.DataFrame(table_data)
         st.dataframe(rb_df, use_container_width=True, hide_index=True)
 
+    # ─── Section 7: 组合历史压力测试 ───
+    st.divider()
+    st.subheader("🧪 组合历史压力测试")
+    st.caption(
+        "用当前 Asset_Class 权重套到历史数据回测：「如果 2008/2015/2020 年就用这个配置，会经历多大回撤？」"
+        "—— 心理校准用，不是预测未来。"
+    )
+
+    with st.expander("📊 跑历史压力测试（2005-至今）", expanded=False):
+        from portfolio_stress_test import run_stress_test, get_current_weights, PROXY_MAP
+
+        _stress_weights = get_current_weights(raw_df)
+        if not _stress_weights:
+            st.warning("无法读取当前权重")
+        else:
+            # 显示权重
+            st.markdown("**当前 Asset_Class 权重：**")
+            _wcols = st.columns(4)
+            _w_items = sorted(_stress_weights.items(), key=lambda x: -x[1])
+            for _i, (_ac, _w) in enumerate(_w_items):
+                with _wcols[_i % 4]:
+                    st.metric(_ac, f"{_w*100:.1f}%")
+
+            # 跑回测按钮（带 cache）
+            if 'stress_result' not in st.session_state or st.button("🔄 重新跑回测（30 秒）", key='stress_rerun'):
+                with st.spinner("拉取 21 年历史数据并回测..."):
+                    try:
+                        _stress_result = run_stress_test(_stress_weights, start='2005-01-01')
+                        st.session_state['stress_result'] = _stress_result
+                    except Exception as _e:
+                        st.error(f"回测失败: {_e}")
+                        st.session_state['stress_result'] = {'error': str(_e)}
+
+            _result = st.session_state.get('stress_result', {})
+            if 'error' in _result:
+                st.error(_result['error'])
+            elif _result:
+                # ── KPI 行 ──
+                _kc1, _kc2, _kc3, _kc4 = st.columns(4)
+                with _kc1:
+                    st.metric("年化 CAGR", f"{_result['cagr']*100:+.2f}%",
+                              help=f"{_result['data_start']} ~ {_result['data_end']}（{_result['years']:.1f} 年）")
+                with _kc2:
+                    st.metric("最大回撤", f"{_result['max_drawdown']*100:.2f}%",
+                              help="历史任意时点的最大回撤（peak-to-trough）")
+                with _kc3:
+                    _wy = _result.get('worst_year', (None, 0))
+                    st.metric("最差单年", f"{_wy[1]*100:+.2f}%",
+                              help=f"年份 {_wy[0]}")
+                with _kc4:
+                    _by = _result.get('best_year', (None, 0))
+                    st.metric("最佳单年", f"{_by[1]*100:+.2f}%",
+                              help=f"年份 {_by[0]}")
+
+                # ── 滚动窗口 ──
+                _kc5, _kc6, _kc7, _kc8 = st.columns(4)
+                with _kc5:
+                    st.metric("滚动 1Y 最差", f"{_result['rolling_1y_min']*100:+.1f}%")
+                with _kc6:
+                    st.metric("滚动 1Y 最佳", f"{_result['rolling_1y_max']*100:+.1f}%")
+                with _kc7:
+                    st.metric("滚动 3Y CAGR 最差", f"{_result['rolling_3y_min']*100:+.1f}%",
+                              help="任意 3 年窗口的年化复利最差值")
+                with _kc8:
+                    st.metric("滚动 3Y CAGR 最佳", f"{_result['rolling_3y_max']*100:+.1f}%")
+
+                # ── 净值曲线 ──
+                import plotly.graph_objects as _go
+                _nav = _result['portfolio_nav']
+                _fig = _go.Figure()
+                _fig.add_trace(_go.Scatter(
+                    x=_nav.index, y=_nav.values,
+                    mode='lines', name='组合净值',
+                    line=dict(color='#1f77b4', width=2),
+                ))
+                # 标注 3 个关键年份
+                for _annot_year in [2008, 2015, 2020, 2022]:
+                    _mask = _nav.index.year == _annot_year
+                    if _mask.any():
+                        _val = _nav[_mask].iloc[0]
+                        _fig.add_annotation(
+                            x=_nav[_mask].index[0], y=_val,
+                            text=str(_annot_year),
+                            showarrow=True, arrowhead=2,
+                            ax=0, ay=-30,
+                        )
+                _fig.update_layout(
+                    title=f'组合净值曲线（起点 1.0）— 累计 {_result["cumulative_return"]*100:+.0f}%',
+                    height=350, margin=dict(l=10, r=10, t=40, b=30),
+                    xaxis_title='', yaxis_title='净值',
+                )
+                st.plotly_chart(_fig, use_container_width=True)
+
+                # ── 年度回报柱状图 ──
+                _yr = _result.get('yearly_returns', {})
+                if _yr:
+                    _yr_df = pd.DataFrame(
+                        sorted(_yr.items()), columns=['年份', '年回报']
+                    )
+                    _yr_df['年回报%'] = _yr_df['年回报'] * 100
+                    _colors = ['#2ca02c' if r >= 0 else '#d62728' for r in _yr_df['年回报']]
+                    _fig2 = _go.Figure()
+                    _fig2.add_trace(_go.Bar(
+                        x=_yr_df['年份'], y=_yr_df['年回报%'],
+                        marker_color=_colors,
+                        text=[f"{r:+.1f}%" for r in _yr_df['年回报%']],
+                        textposition='outside',
+                    ))
+                    _fig2.update_layout(
+                        title='年度回报', height=320,
+                        margin=dict(l=10, r=10, t=40, b=30),
+                        xaxis_title='', yaxis_title='%',
+                    )
+                    st.plotly_chart(_fig2, use_container_width=True)
+
+                # ── 滚动 1Y 分位 ──
+                _q = _result.get('rolling_1y_quantiles')
+                if _q:
+                    st.markdown("**滚动 1 年回报分布：**")
+                    _qc1, _qc2, _qc3 = st.columns(3)
+                    with _qc1:
+                        st.metric("P10（最差 10%）", f"{_q['p10']*100:+.1f}%",
+                                  help="任意 1 年窗口里，10% 的窗口表现差于此值")
+                    with _qc2:
+                        st.metric("P50（中位）", f"{_q['p50']*100:+.1f}%")
+                    with _qc3:
+                        st.metric("P90（最佳 10%）", f"{_q['p90']*100:+.1f}%")
+
+                # ── 数据来源说明 ──
+                with st.expander("📋 代理数据说明", expanded=False):
+                    _proxy_rows = []
+                    for _ac, _name in _result.get('proxies_used', {}).items():
+                        _proxy_rows.append({'Asset_Class': _ac, '历史代理': _name})
+                    # fixed_yield 类型
+                    for _ac in ['Fixed_Income', 'Cash']:
+                        if _ac in _stress_weights and _stress_weights[_ac] > 0:
+                            _cfg = PROXY_MAP.get(_ac, {})
+                            _proxy_rows.append({
+                                'Asset_Class': _ac,
+                                '历史代理': f"{_cfg.get('name', '')}（固定 {_cfg.get('rate',0)*100:.1f}%/年）",
+                            })
+                    if _proxy_rows:
+                        st.dataframe(pd.DataFrame(_proxy_rows), hide_index=True, use_container_width=True)
+                    if _result.get('missing_assets'):
+                        st.warning(f"以下类别代理拉取失败，已从权重剔除：{_result['missing_assets']}")
+                    st.caption(
+                        "**简化假设**：固定收益用 4%/年（10Y国债+1.5%）作代理；现金用 1.5%。"
+                        "实际历史回报会有差异（理财收益率近年下行），仅作粗略参考。"
+                    )
+
+                st.caption(
+                    "ℹ️ **不是预测**：历史回测告诉你「如果 2005-2026 年就用这个配置」会怎样。"
+                    "未来不会复制历史。但极端值（如 2008 -8%）仍是有意义的「压力测试基线」。"
+                )
+
 # ═══════════════════════════════════════════════════════════
 # Tab 2: Weekly Update
 # ═══════════════════════════════════════════════════════════
