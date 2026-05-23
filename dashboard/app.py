@@ -4842,7 +4842,24 @@ with tab_research:
                     _from_high = _pos.get('pct_from_high')
                     _pe_str = f"{_pe:.1f}" if _pe else "—"
                     _pb_str = f"{_pb:.2f}" if _pb else "—"
+                    # 价格位置：短期 5y 分位 + 距 52 周高
                     _pos_str = f"{_price_pct:.0f}% (距高 {_from_high:.0f}%)" if _price_pct is not None and _from_high is not None else "—"
+                    # 长期参考（eniu）：当前 PB vs 历史中位的偏离
+                    _eniu_pb_med = _pos.get('eniu_pb_median')
+                    _eniu_pb_min = _pos.get('eniu_pb_min')
+                    _eniu_pb_max = _pos.get('eniu_pb_max')
+                    if _pb and _eniu_pb_med:
+                        _vs_med = (_pb / _eniu_pb_med - 1) * 100
+                        _eniu_data_end = _pos.get('eniu_data_end', '')[:7]  # 'YYYY-MM'
+                        _long_ref = f"{_eniu_pb_min:.1f}-{_eniu_pb_max:.1f} (中位 {_eniu_pb_med:.1f}, vs {_vs_med:+.0f}%) [eniu→{_eniu_data_end}]"
+                    else:
+                        _long_ref = "—"
+
+                # A 股 _long_ref 默认为 "—"（eniu 不覆盖 A 股）
+                if _pos is None or _pos.get('market') == 'A':
+                    _long_ref_for_table = "—"
+                else:
+                    _long_ref_for_table = _long_ref if 'eniu_pb_median' in (_pos or {}) and _pos.get('eniu_pb_median') else "—"
 
                 _rl_table_rows.append({
                     "标的": _r['folder'],
@@ -4856,6 +4873,7 @@ with tab_research:
                     "PE (分位)": _pe_str,
                     "PB (分位)": _pb_str,
                     "价格位置": _pos_str if _pos_str else "—",
+                    "长期参考 PB (eniu)": _long_ref_for_table,
                     "节奏": _r.get('pace', '') or "—",
                     "加仓触发": _r['add_trigger'] or "—",
                     "减仓/止损触发": _r['trim_trigger'] or "—",
@@ -4877,7 +4895,8 @@ with tab_research:
                     "占池比": st.column_config.TextColumn(width="small"),
                     "PE (分位)": st.column_config.TextColumn(width="small", help="A 股：当前 PE(TTM) + 5 年分位；港股：仅当前 PE"),
                     "PB (分位)": st.column_config.TextColumn(width="small", help="A 股：当前 PB + 5 年分位；港股：仅当前 PB"),
-                    "价格位置": st.column_config.TextColumn(width="small", help="港股：5 年价格分位 + 距 52 周高距离（PB 历史不可得，价格分位代理）"),
+                    "价格位置": st.column_config.TextColumn(width="small", help="港股：5 年价格分位 + 距 52 周高距离（短期位置代理）"),
+                    "长期参考 PB (eniu)": st.column_config.TextColumn(width="medium", help="港股 eniu 长期 PB 区间-中位数 + 当前 vs 中位偏离%。eniu 数据停在 2022-07，仅作长周期估值参考。"),
                     "节奏": st.column_config.TextColumn(width="medium"),
                     "加仓触发": st.column_config.TextColumn(width="large"),
                     "减仓/止损触发": st.column_config.TextColumn(width="large"),
@@ -4889,7 +4908,9 @@ with tab_research:
                 "**占池比** = 当前持仓 / 个股池总额度（30 万）；"
                 "**档位**：核心仓 5-7 万 × 2-3 个 + 卫星仓 2-4 万 × 3-5 个；"
                 "**节奏**：基于位置分位的分批策略（详见 docs/OPEN_POINTS_PORTFOLIO_DESIGN.md）；"
-                "**PE/PB 分位**：A 股完整 5 年分位；港股仅当前值 + 5 年价格分位代理（财务历史不可得）；"
+                "**PE/PB 分位**：A 股完整 5 年分位；港股仅当前值 + 5 年价格分位代理（短期）；"
+                "**长期参考 PB (eniu)**：港股 eniu 长期 PB 区间和中位数，当前 vs 中位偏离%。"
+                "eniu 数据停在 2022-07-13（长周期估值参考，不作精确分位）；"
                 "**数据缓存 7 天**，强制刷新见 src/position_percentile.py"
             )
 

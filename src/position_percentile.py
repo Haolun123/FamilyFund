@@ -133,11 +133,68 @@ def _fetch_a_share(symbol: str) -> dict | None:
 
 # ── 港股：yfinance 当前 + 价格分位代理 ──────────────────────
 
+def _fetch_eniu_reference(symbol: str) -> dict:
+    """从 eniu.com 拉港股 PE/PB 历史，返回长期参考统计（不算分位）。
+
+    eniu 数据更新已停在 2022-07-13，作为"长期估值参考"使用，不作精确分位。
+
+    Args:
+        symbol: '0700.HK' / '00700.HK' 等格式
+
+    Returns:
+        {
+            'eniu_pe_min': float, 'eniu_pe_max': float, 'eniu_pe_median': float,
+            'eniu_pb_min': float, 'eniu_pb_max': float, 'eniu_pb_median': float,
+            'eniu_data_start': 'YYYY-MM-DD', 'eniu_data_end': 'YYYY-MM-DD',
+        }
+        失败时返回 {}（不阻断主流程）
+    """
+    try:
+        import akshare as ak
+        # eniu 用 'hk00700' 格式（hk 前缀 + 5 位数字代码）
+        m = re.match(r'^(\d+)(?:\.HK)?$', symbol, re.IGNORECASE)
+        if not m:
+            return {}
+        num = m.group(1).lstrip('0') or '0'
+        eniu_code = 'hk' + num.zfill(5)
+
+        out = {}
+        try:
+            pb = ak.stock_hk_indicator_eniu(symbol=eniu_code, indicator='市净率')
+            if pb is not None and len(pb) > 0 and 'pb' in pb.columns:
+                out['eniu_pb_min'] = round(float(pb['pb'].min()), 2)
+                out['eniu_pb_max'] = round(float(pb['pb'].max()), 2)
+                out['eniu_pb_median'] = round(float(pb['pb'].median()), 2)
+                out['eniu_data_start'] = str(pb['date'].iloc[0])[:10]
+                out['eniu_data_end'] = str(pb['date'].iloc[-1])[:10]
+        except Exception:
+            pass
+
+        try:
+            pe = ak.stock_hk_indicator_eniu(symbol=eniu_code, indicator='市盈率')
+            if pe is not None and len(pe) > 0 and 'pe' in pe.columns:
+                # 过滤负 PE
+                pe_pos = pe[pe['pe'] > 0]
+                if len(pe_pos) > 0:
+                    out['eniu_pe_min'] = round(float(pe_pos['pe'].min()), 2)
+                    out['eniu_pe_max'] = round(float(pe_pos['pe'].max()), 2)
+                    out['eniu_pe_median'] = round(float(pe_pos['pe'].median()), 2)
+        except Exception:
+            pass
+
+        return out
+    except Exception:
+        return {}
+
+
 def _fetch_hk_share(symbol: str) -> dict | None:
     """港股位置数据。
 
-    PB/PE 历史（5 年）港股没有现成接口（akshare eniu 网络不通；yfinance 财务数据仅最近 4 季度）。
-    退化方案：当前 PE/PB（yfinance info）+ 价格 5 年分位（作为位置代理）+ 52 周高低。
+    数据组合：
+    - 当前 PE/PB（yfinance info）
+    - 价格 5 年分位（作为短期位置代理；yfinance 5y history）
+    - eniu 长期 PE/PB 区间和中位数（不算分位，作为"历史估值参考轴"）
+      注：eniu 数据更新停在 2022-07，仅用于看"当前值是历史的什么位置"
 
     Args:
         symbol: yfinance 港股代码（如 '0700.HK', '00883.HK'）
@@ -181,15 +238,18 @@ def _fetch_hk_share(symbol: str) -> dict | None:
         pct_from_high = (cur_price / year_high - 1) * 100 if year_high else None
         pct_from_low = (cur_price / year_low - 1) * 100 if year_low else None
 
-        return {
+        # eniu 长期参考（PE/PB 区间 + 中位数，不算分位）
+        eniu_ref = _fetch_eniu_reference(symbol)
+
+        result = {
             'symbol': symbol,
             'yf_code': yf_code,
             'market': 'HK',
             'current_pe_ttm': cur_pe,
             'current_pb': cur_pb,
-            'pe_pct_5y': None,   # 港股不可得
-            'pb_pct_5y': None,   # 港股不可得（财务历史不足）
-            'price_pct_5y': price_pct,  # 价格分位代理
+            'pe_pct_5y': None,   # 港股不可得（不做伪精确分位）
+            'pb_pct_5y': None,
+            'price_pct_5y': price_pct,  # 价格分位代理（短期位置）
             'price_min_5y': price_min,
             'price_max_5y': price_max,
             'current_price': cur_price,
@@ -200,8 +260,11 @@ def _fetch_hk_share(symbol: str) -> dict | None:
             'data_start': hist.index[0].strftime('%Y-%m-%d'),
             'data_end': hist.index[-1].strftime('%Y-%m-%d'),
             'updated': datetime.now().isoformat(),
-            'note': '港股 PE/PB 历史不可得，价格 5 年分位作为位置代理',
+            'note': '港股 PE/PB 5 年分位不可得；价格 5y 分位作短期位置；eniu 长期 PE/PB 区间作估值参考（数据停在 2022-07）',
         }
+        # 合并 eniu 字段（如果拉到）
+        result.update(eniu_ref)
+        return result
     except Exception as e:
         print(f'[position_percentile] 港股 {symbol} 拉取失败: {e}')
         return None

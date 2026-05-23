@@ -148,3 +148,47 @@ class TestGetPositionData:
         assert r is not None
         assert r['current_pb'] == 2.19
         assert r['pb_pct_5y'] == 14.96
+
+
+class TestEniuReference:
+    """eniu 长期 PB/PE 参考（依赖网络 + akshare）。"""
+
+    def test_eniu_reference_returns_pb_stats(self):
+        try:
+            from position_percentile import _fetch_eniu_reference
+            r = _fetch_eniu_reference('00700.HK')
+        except Exception:
+            pytest.skip('akshare/eniu 不可用')
+        if not r or 'eniu_pb_min' not in r:
+            pytest.skip('eniu 数据未拉到（网络/源已下线）')
+        # 腾讯 18 年 PB 区间应包含合理范围
+        assert r['eniu_pb_min'] > 0
+        assert r['eniu_pb_max'] > r['eniu_pb_min']
+        assert r['eniu_pb_min'] <= r['eniu_pb_median'] <= r['eniu_pb_max']
+        # 数据应停在 2022-07 左右（eniu 已 stale）
+        assert r['eniu_data_end'].startswith('2022')
+
+    def test_eniu_reference_handles_empty_symbol(self):
+        from position_percentile import _fetch_eniu_reference
+        r = _fetch_eniu_reference('')
+        # 空 symbol 不会 crash，返回空 dict
+        assert isinstance(r, dict)
+
+
+class TestHKWithEniuIntegration:
+    """_fetch_hk_share 应该返回 eniu 字段（如果可用）。"""
+
+    def test_hk_share_includes_eniu_fields(self):
+        try:
+            from position_percentile import _fetch_hk_share
+            r = _fetch_hk_share('00700.HK')
+        except Exception:
+            pytest.skip('yfinance/akshare 不可用')
+        if r is None:
+            pytest.skip('yfinance 拉取失败')
+        # 即使 eniu 失败，主流程也应该返回（含 yfinance 数据）
+        assert r['market'] == 'HK'
+        # eniu 字段如果存在则应有合理值
+        if 'eniu_pb_median' in r:
+            assert r['eniu_pb_median'] > 0
+            assert r['eniu_data_end'] is not None
