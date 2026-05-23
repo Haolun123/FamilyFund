@@ -4827,6 +4827,8 @@ with tab_research:
                 # 格式化位置列
                 if _pos is None:
                     _pe_str, _pb_str, _pos_str = "—", "—", "—"
+                    _pe_pct_val, _pb_pct_val = None, None
+                    _long_ref_vs_med = None
                 elif _pos['market'] == 'A':
                     _pe = _pos.get('current_pe_ttm')
                     _pb = _pos.get('current_pb')
@@ -4835,6 +4837,8 @@ with tab_research:
                     _pe_str = f"{_pe:.1f} ({_pe_pct:.0f}%)" if _pe and _pe_pct is not None else "—"
                     _pb_str = f"{_pb:.2f} ({_pb_pct:.0f}%)" if _pb and _pb_pct is not None else "—"
                     _pos_str = ""  # A 股用 PE/PB 分位足够
+                    _pe_pct_val, _pb_pct_val = _pe_pct, _pb_pct
+                    _long_ref_vs_med = None  # A 股不用 eniu
                 else:  # HK
                     _pe = _pos.get('current_pe_ttm')
                     _pb = _pos.get('current_pb')
@@ -4842,76 +4846,85 @@ with tab_research:
                     _from_high = _pos.get('pct_from_high')
                     _pe_str = f"{_pe:.1f}" if _pe else "—"
                     _pb_str = f"{_pb:.2f}" if _pb else "—"
-                    # 价格位置：短期 5y 分位 + 距 52 周高
                     _pos_str = f"{_price_pct:.0f}% (距高 {_from_high:.0f}%)" if _price_pct is not None and _from_high is not None else "—"
-                    # 长期参考（eniu）：当前 PB vs 历史中位的偏离
+                    # 长期参考偏离值（用于颜色高亮）
                     _eniu_pb_med = _pos.get('eniu_pb_median')
-                    _eniu_pb_min = _pos.get('eniu_pb_min')
-                    _eniu_pb_max = _pos.get('eniu_pb_max')
                     if _pb and _eniu_pb_med:
-                        _vs_med = (_pb / _eniu_pb_med - 1) * 100
-                        _eniu_data_end = _pos.get('eniu_data_end', '')[:7]  # 'YYYY-MM'
-                        _long_ref = f"{_eniu_pb_min:.1f}-{_eniu_pb_max:.1f} (中位 {_eniu_pb_med:.1f}, vs {_vs_med:+.0f}%) [eniu→{_eniu_data_end}]"
+                        _long_ref_vs_med = (_pb / _eniu_pb_med - 1) * 100
                     else:
-                        _long_ref = "—"
-
-                # A 股 _long_ref 默认为 "—"（eniu 不覆盖 A 股）
-                if _pos is None or _pos.get('market') == 'A':
-                    _long_ref_for_table = "—"
-                else:
-                    _long_ref_for_table = _long_ref if 'eniu_pb_median' in (_pos or {}) and _pos.get('eniu_pb_median') else "—"
+                        _long_ref_vs_med = None
+                    _pe_pct_val = _price_pct  # 港股用价格分位代理
+                    _pb_pct_val = _price_pct
 
                 _rl_table_rows.append({
                     "标的": _r['folder'],
-                    "分组": _r['group'],
                     "档位": _r.get('tier', '') or "—",
-                    "风格": _r.get('style', '') or "—",
                     "决策": _rl_decision_str,
                     "目标仓位": _r['target_position'] or "—",
                     "当前持仓": _cur_str,
                     "占池比": _pool_str,
                     "PE (分位)": _pe_str,
                     "PB (分位)": _pb_str,
-                    "价格位置": _pos_str if _pos_str else "—",
-                    "长期参考 PB (eniu)": _long_ref_for_table,
-                    "节奏": _r.get('pace', '') or "—",
-                    "加仓触发": _r['add_trigger'] or "—",
-                    "减仓/止损触发": _r['trim_trigger'] or "—",
-                    "更新日期": _r['date'] or "—",
+                    # 隐藏字段（用于 styler 颜色判断；数据帧不显示但 styler 能用）
+                    "_pe_pct": _pe_pct_val,
+                    "_pb_pct": _pb_pct_val,
+                    "_long_vs_med": _long_ref_vs_med,
                 })
             _rl_summary_df = _pd.DataFrame(_rl_table_rows)
+
+            # 极端值高亮：基于隐藏列 _pe_pct / _pb_pct / _long_vs_med
+            def _color_pct(row):
+                """根据分位返回每个单元格的样式列表（与 row 列对齐）。"""
+                styles = [''] * len(row)
+                cols = list(row.index)
+                # PE 分位
+                pp = row.get('_pe_pct')
+                if pp is not None and 'PE (分位)' in cols:
+                    idx = cols.index('PE (分位)')
+                    if pp >= 90:
+                        styles[idx] = 'background-color: #ffcdd2'  # 红
+                    elif pp >= 70:
+                        styles[idx] = 'background-color: #fff9c4'  # 黄
+                    elif pp <= 30:
+                        styles[idx] = 'background-color: #c8e6c9'  # 绿
+                pp = row.get('_pb_pct')
+                if pp is not None and 'PB (分位)' in cols:
+                    idx = cols.index('PB (分位)')
+                    if pp >= 90:
+                        styles[idx] = 'background-color: #ffcdd2'
+                    elif pp >= 70:
+                        styles[idx] = 'background-color: #fff9c4'
+                    elif pp <= 30:
+                        styles[idx] = 'background-color: #c8e6c9'
+                return styles
+
+            # 隐藏 _xxx 列再渲染
+            _display_df = _rl_summary_df.drop(columns=[c for c in _rl_summary_df.columns if c.startswith('_')])
+            _styled = _rl_summary_df.style.apply(_color_pct, axis=1).hide(
+                axis='columns', subset=[c for c in _rl_summary_df.columns if c.startswith('_')]
+            )
             st.dataframe(
-                _rl_summary_df,
+                _styled,
                 hide_index=True,
                 use_container_width=True,
                 column_config={
                     "标的": st.column_config.TextColumn(width="medium"),
-                    "分组": st.column_config.TextColumn(width="small"),
                     "档位": st.column_config.TextColumn(width="small"),
-                    "风格": st.column_config.TextColumn(width="small"),
                     "决策": st.column_config.TextColumn(width="small"),
                     "目标仓位": st.column_config.TextColumn(width="small"),
                     "当前持仓": st.column_config.TextColumn(width="small"),
                     "占池比": st.column_config.TextColumn(width="small"),
-                    "PE (分位)": st.column_config.TextColumn(width="small", help="A 股：当前 PE(TTM) + 5 年分位；港股：仅当前 PE"),
-                    "PB (分位)": st.column_config.TextColumn(width="small", help="A 股：当前 PB + 5 年分位；港股：仅当前 PB"),
-                    "价格位置": st.column_config.TextColumn(width="small", help="港股：5 年价格分位 + 距 52 周高距离（短期位置代理）"),
-                    "长期参考 PB (eniu)": st.column_config.TextColumn(width="medium", help="港股 eniu 长期 PB 区间-中位数 + 当前 vs 中位偏离%。eniu 数据停在 2022-07，仅作长周期估值参考。"),
-                    "节奏": st.column_config.TextColumn(width="medium"),
-                    "加仓触发": st.column_config.TextColumn(width="large"),
-                    "减仓/止损触发": st.column_config.TextColumn(width="large"),
-                    "更新日期": st.column_config.TextColumn(width="small"),
+                    "PE (分位)": st.column_config.TextColumn(width="small", help="A 股：当前 PE(TTM) + 5 年分位（颜色：🔴≥90% 🟡≥70% 🟢≤30%）；港股：仅当前 PE"),
+                    "PB (分位)": st.column_config.TextColumn(width="small", help="A 股：当前 PB + 5 年分位（颜色规则同上）；港股：仅当前 PB（详细位置见右侧芒格信号面板）"),
                 },
             )
             st.caption(
                 "ℹ️ **目标仓位**为绝对金额（万元）；"
                 "**占池比** = 当前持仓 / 个股池总额度（30 万）；"
                 "**档位**：核心仓 5-7 万 × 2-3 个 + 卫星仓 2-4 万 × 3-5 个；"
-                "**节奏**：基于位置分位的分批策略（详见 docs/OPEN_POINTS_PORTFOLIO_DESIGN.md）；"
-                "**PE/PB 分位**：A 股完整 5 年分位；港股仅当前值 + 5 年价格分位代理（短期）；"
-                "**长期参考 PB (eniu)**：港股 eniu 长期 PB 区间和中位数，当前 vs 中位偏离%。"
-                "eniu 数据停在 2022-07-13（长周期估值参考，不作精确分位）；"
-                "**数据缓存 7 天**，强制刷新见 src/position_percentile.py"
+                "**分位颜色**：🟢≤30% 机会；🟡≥70% 偏高；🔴≥90% 极高；"
+                "**详细位置/触发条件/芒格信号** → 在左下选标的，右侧顶部信号面板查看；"
+                "**数据缓存 7 天**。"
             )
 
         # ── E1：待行动清单 + 偏差柱状图 ──
@@ -5091,6 +5104,159 @@ with tab_research:
                                 )
                 else:
                     st.info(f"❓ 该标的尚未评估")
+
+                # ── 🦉 芒格信号面板（4 区） ──
+                _rl_sel_summary = next(
+                    (s for s in _rl_summary if s['folder'] == _rl_selected),
+                    None,
+                )
+                _rl_sel_pos = None
+                if _rl_sel_summary and _rl_sel_summary.get('yf_symbol'):
+                    try:
+                        _rl_sel_pos = get_position_data(
+                            _rl_sel_summary['yf_symbol'], force_refresh=False
+                        )
+                    except Exception:
+                        _rl_sel_pos = None
+
+                if _rl_sel_summary and (_rl_sel_pos or _rl_sel_summary.get('evaluated')):
+                    _d = _rl_cur or {}
+                    _p = _rl_sel_pos or {}
+                    _market = _p.get('market', '?')
+
+                    # 估值区
+                    _val_pe = _p.get('current_pe_ttm')
+                    _val_pb = _p.get('current_pb')
+
+                    # 多维位置区
+                    if _market == 'A':
+                        _pe_pct = _p.get('pe_pct_5y')
+                        _pb_pct = _p.get('pb_pct_5y')
+                        _pos_lines = []
+                        if _pe_pct is not None:
+                            _emoji = '🔴' if _pe_pct >= 90 else '🟡' if _pe_pct >= 70 else '🟢' if _pe_pct <= 30 else '⚪'
+                            _pos_lines.append(f"PE 5y 分位: <b>{_pe_pct:.0f}%</b> {_emoji}")
+                        if _pb_pct is not None:
+                            _emoji = '🔴' if _pb_pct >= 90 else '🟡' if _pb_pct >= 70 else '🟢' if _pb_pct <= 30 else '⚪'
+                            _pos_lines.append(f"PB 5y 分位: <b>{_pb_pct:.0f}%</b> {_emoji}")
+                        _pos_block = '<br>'.join(_pos_lines) if _pos_lines else '—'
+                    elif _market == 'HK':
+                        _pos_lines = []
+                        _ppct = _p.get('price_pct_5y')
+                        _fhi = _p.get('pct_from_high')
+                        if _ppct is not None:
+                            _emoji = '🔴' if _ppct >= 90 else '🟡' if _ppct >= 70 else '🟢' if _ppct <= 30 else '⚪'
+                            _pos_lines.append(f"价格 5y 分位: <b>{_ppct:.0f}%</b> {_emoji}")
+                        if _fhi is not None:
+                            _pos_lines.append(f"距 52w 高: <b>{_fhi:+.0f}%</b>")
+                        # 长期 eniu
+                        _emed = _p.get('eniu_pb_median')
+                        _emin = _p.get('eniu_pb_min')
+                        _emax = _p.get('eniu_pb_max')
+                        _eend = _p.get('eniu_data_end', '')[:7]
+                        if _val_pb and _emed:
+                            _vs = (_val_pb / _emed - 1) * 100
+                            _emoji = '🔴' if _vs >= 50 else '🟡' if _vs >= 20 else '🟢' if _vs <= -20 else '⚪'
+                            _pos_lines.append(
+                                f"长期 PB vs 中位: <b>{_vs:+.0f}%</b> {_emoji}<br>"
+                                f"<span style='color:#888;font-size:0.85em'>eniu {_emin:.1f}-{_emax:.1f} (中位 {_emed:.1f}) → {_eend}</span>"
+                            )
+                        _pos_block = '<br>'.join(_pos_lines) if _pos_lines else '—'
+                    else:
+                        _pos_block = '—（未识别市场）'
+
+                    # 质量信号区
+                    _val_lines = []
+                    if _val_pe is not None:
+                        _val_lines.append(f"PE: <b>{_val_pe:.1f}</b>")
+                    if _val_pb is not None:
+                        _val_lines.append(f"PB: <b>{_val_pb:.2f}</b>")
+                    if _val_lines:
+                        _val_block = '<br>'.join(_val_lines)
+                    else:
+                        _val_block = '—'
+
+                    _qual_lines = []
+                    # ROE / 增长率从 fundamentals_history 读最新（如果有）
+                    try:
+                        from fundamentals import get_fundamentals_history
+                        _fund_data_dir = os.path.dirname(csv_path)
+                        _hist = get_fundamentals_history(_fund_data_dir, _rl_sel_summary.get('yf_symbol', ''))
+                        if _hist:
+                            _latest = _hist[-1]
+                            _roe = _latest.get('roe')
+                            _rev_g = _latest.get('rev_growth')
+                            _earn_g = _latest.get('earn_growth')
+                            _div = _latest.get('div_yield')
+                            if _roe is not None:
+                                _emoji = '⭐' if _roe >= 0.15 else '⚪' if _roe >= 0.08 else '⚠️'
+                                _qual_lines.append(f"ROE: <b>{_roe*100:.1f}%</b> {_emoji}")
+                            if _rev_g is not None:
+                                _qual_lines.append(f"营收增长: <b>{_rev_g*100:+.1f}%</b>")
+                            if _earn_g is not None:
+                                _qual_lines.append(f"利润增长: <b>{_earn_g*100:+.1f}%</b>")
+                            if _div is not None:
+                                _qual_lines.append(f"股息率: <b>{_div:.2f}%</b>")
+                    except Exception:
+                        pass
+                    _qual_block = '<br>'.join(_qual_lines) if _qual_lines else '—（fundamentals_history 待积累）'
+
+                    # 决策状态区
+                    _dec_lines = []
+                    _tier = _d.get('tier', '')
+                    _style = _d.get('style', '')
+                    _pace = _d.get('pace', '')
+                    _add = _d.get('add_trigger', '')
+                    _trim = _d.get('trim_trigger', '')
+                    _target = _d.get('target_position', '')
+                    _cur_cny = _rl_sel_summary.get('current_position_cny')
+                    _pool_pct = _rl_sel_summary.get('pool_pct')
+
+                    if _tier:
+                        _dec_lines.append(f"档位: <b>{_tier}</b>")
+                    if _style:
+                        _dec_lines.append(f"风格: {_style}")
+                    if _target:
+                        _hold_str = f"已 ¥{_cur_cny/10000:.1f}万" if _cur_cny else "未建仓"
+                        _pool_str = f" ({_pool_pct*100:.0f}% 池)" if _pool_pct else ""
+                        _dec_lines.append(f"目标: <b>{_target}</b> · {_hold_str}{_pool_str}")
+                    if _pace:
+                        _dec_lines.append(f"节奏: {_pace}")
+                    if _add and _add != '—':
+                        _dec_lines.append(f"<span style='color:#2e7d32'>⬆ 加仓: {_add}</span>")
+                    if _trim and _trim != '—':
+                        _dec_lines.append(f"<span style='color:#c62828'>⬇ 减仓: {_trim}</span>")
+                    _dec_block = '<br>'.join(_dec_lines) if _dec_lines else '—'
+
+                    # 渲染 4 区面板
+                    st.markdown(
+                        f"""<div style='border:1px solid #ccc; border-radius:8px; padding:0; margin:12px 0; overflow:hidden;'>
+<div style='background:#1f4e8c; color:white; padding:8px 16px; font-weight:bold;'>🦉 芒格信号面板（{_market} 股）</div>
+<table style='width:100%; border-collapse:collapse;'>
+<tr>
+  <td style='width:50%; padding:12px 16px; border-right:1px solid #eee; border-bottom:1px solid #eee; vertical-align:top;'>
+    <div style='font-size:0.85em; color:#666; margin-bottom:6px;'>📊 估值</div>
+    <div style='line-height:1.6;'>{_val_block}</div>
+  </td>
+  <td style='width:50%; padding:12px 16px; border-bottom:1px solid #eee; vertical-align:top;'>
+    <div style='font-size:0.85em; color:#666; margin-bottom:6px;'>📈 多维位置</div>
+    <div style='line-height:1.6;'>{_pos_block}</div>
+  </td>
+</tr>
+<tr>
+  <td style='padding:12px 16px; border-right:1px solid #eee; vertical-align:top;'>
+    <div style='font-size:0.85em; color:#666; margin-bottom:6px;'>💎 质量信号</div>
+    <div style='line-height:1.6;'>{_qual_block}</div>
+  </td>
+  <td style='padding:12px 16px; vertical-align:top;'>
+    <div style='font-size:0.85em; color:#666; margin-bottom:6px;'>🎯 决策状态</div>
+    <div style='line-height:1.6;'>{_dec_block}</div>
+  </td>
+</tr>
+</table>
+</div>""",
+                        unsafe_allow_html=True,
+                    )
 
                 _rl_files = _rl_list_files(_rl_reports_dir, _rl_selected)
 
