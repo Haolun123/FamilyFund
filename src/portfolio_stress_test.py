@@ -308,3 +308,107 @@ def get_current_weights(raw_df) -> dict:
     if total <= 0:
         return {}
     return (by_class / total).to_dict()
+
+
+def compute_target_weights(raw_df, reports_dir: str,
+                           smart_beta_target_cny: float = 150_000.0) -> dict:
+    """计算「调仓完成后」的目标 Asset_Class 权重。
+
+    逻辑：
+    - 个股池目标合计：从 decisions.json 的 target_position 字段（核心+卫星 tier）求和
+    - Smart Beta（红利低波 ETF）目标：smart_beta_target_cny（C1' 决策默认 15 万）
+    - ETF_Stock 类目标 = 个股池目标 + Smart Beta 目标
+    - 资金来源：Fixed_Income 类（从 FI 抽出资金给 ETF_Stock）
+    - 其他类（Gold/US_Blend/US_Growth/CN_Index/Cash/Company_Stock）保持当前金额不变
+
+    Args:
+        raw_df: portfolio.csv DataFrame
+        reports_dir: Finance Reports 目录
+        smart_beta_target_cny: 红利低波 ETF 目标金额（默认 15 万，P10 决策）
+
+    Returns:
+        {asset_class: weight}, 权重和 = 1
+    """
+    if raw_df is None or len(raw_df) == 0:
+        return {}
+
+    # 1. 当前各类总市值
+    latest_date = raw_df['Date'].max()
+    latest = raw_df[raw_df['Date'] == latest_date]
+    current_value_by_class = latest.groupby('Asset_Class')['Total_Value'].sum().to_dict()
+    total = sum(current_value_by_class.values())
+    if total <= 0:
+        return {}
+
+    # 2. 算个股池目标合计（从 decisions.json）
+    try:
+        from research_library import get_position_summary
+        from research_library import _pace_to_target_amount
+        summary = get_position_summary(reports_dir, raw_df=raw_df)
+        pool_target_cny = 0
+        for r in summary:
+            tier = r.get('tier', '')
+            if tier not in ('核心', '卫星'):
+                continue
+            target_str = r.get('target_position', '')
+            low, high = _pace_to_target_amount(target_str)
+            if low is not None:
+                # 用区间中点
+                pool_target_cny += (low + high) / 2
+    except Exception:
+        pool_target_cny = 0
+
+    # 3. ETF_Stock 类目标 = 个股池 + Smart Beta
+    etf_stock_target = pool_target_cny + smart_beta_target_cny
+
+    # 4. 算资金缺口：ETF_Stock 增加多少 → 从 Fixed_Income 抽多少
+    etf_stock_current = current_value_by_class.get('ETF_Stock', 0)
+    fi_current = current_value_by_class.get('Fixed_Income', 0)
+    delta = etf_stock_target - etf_stock_current
+
+    # 5. 构造目标值
+    target_value_by_class = dict(current_value_by_class)
+    target_value_by_class['ETF_Stock'] = etf_stock_target
+    target_value_by_class['Fixed_Income'] = max(0, fi_current - delta)
+
+    # 6. 归一化为权重
+    target_total = sum(target_value_by_class.values())
+    return {k: v / target_total for k, v in target_value_by_class.items()}
+
+
+def compare_portfolios(current_weights: dict, target_weights: dict,
+                       start: str = '2005-01-01') -> dict:
+    """对比当前 vs 目标组合的压力测试。
+
+    Returns:
+        {
+            'current': stress_test_result,
+            'target':  stress_test_result,
+            'diff': {
+                'cagr_pp': float,           # CAGR 百分点差
+                'mdd_pp': float,            # 最大回撤百分点差（正=变差）
+                'worst_year_pp': float,
+                'p10_1y_pp': float,
+            }
+        }
+    """
+    cur_result = run_stress_test(current_weights, start=start)
+    tgt_result = run_stress_test(target_weights, start=start)
+
+    diff = {}
+    if 'error' not in cur_result and 'error' not in tgt_result:
+        diff = {
+            'cagr_pp':       (tgt_result['cagr'] - cur_result['cagr']) * 100,
+            'mdd_pp':        (tgt_result['max_drawdown'] - cur_result['max_drawdown']) * 100,
+            'worst_year_pp': (tgt_result['worst_year'][1] - cur_result['worst_year'][1]) * 100,
+        }
+        cur_p10 = cur_result.get('rolling_1y_quantiles', {}).get('p10')
+        tgt_p10 = tgt_result.get('rolling_1y_quantiles', {}).get('p10')
+        if cur_p10 is not None and tgt_p10 is not None:
+            diff['p10_1y_pp'] = (tgt_p10 - cur_p10) * 100
+
+    return {
+        'current': cur_result,
+        'target':  tgt_result,
+        'diff':    diff,
+    }
