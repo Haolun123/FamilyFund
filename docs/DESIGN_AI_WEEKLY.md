@@ -1,4 +1,4 @@
-# DESIGN: AI 周度评估
+# DESIGN: AI 周度评估（AI Weekly）
 
 > **状态**：✅ 已实现（`src/ai_weekly.py` + Dashboard Tab1）
 > **日期**：2026-04-25（实现 2026-04-30）

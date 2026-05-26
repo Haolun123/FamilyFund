@@ -1,4 +1,4 @@
-# 研报库 Tab — 设计文档
+# DESIGN: 研报库 Tab（Research Library）
 
 > **版本**: v0.1
 > **创建日期**: 2026-05-18

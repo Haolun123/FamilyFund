@@ -221,7 +221,7 @@ ff-pull
 3. **数据完整性校验**：ff-pull 后自动检查 fundamentals_history.json 是否新增了今日记录
 
 不做：
-- ❌ Git push 数据到 GitHub（仓库膨胀，收益边际，详见 OPEN_POINTS_PORTFOLIO_DESIGN.md 的讨论）
+- ❌ Git push 数据到 GitHub（仓库膨胀，收益边际，详见 DESIGN_PORTFOLIO_ARCHITECTURE.md 的讨论）
 - ❌ 双向同步 / EC2 写 iCloud（EC2 没法挂 iCloud；多写者会冲突）
 
 ---

@@ -1,5 +1,8 @@
-# Design: PDF Report Generation
+# DESIGN: PDF 报告生成（PDF Report）
 
+> **状态**：✅ 已实现
+> **最后更新**：2026-04-17
+>
 > 从 Dashboard 一键导出家庭基金 PDF 报告
 
 ## 1. Motivation

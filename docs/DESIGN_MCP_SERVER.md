@@ -1,4 +1,4 @@
-# DESIGN: FamilyFund MCP Server
+# DESIGN: FamilyFund MCP Server（MCP Server）
 
 > **状态**：待实现（P2）
 > **日期**：2026-05-14

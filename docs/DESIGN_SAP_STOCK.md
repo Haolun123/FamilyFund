@@ -1,4 +1,7 @@
-# SAP Stock Options — Design Document
+# DESIGN: SAP 股票管理（SAP Stock Options）
+
+> **状态**：✅ 已实现（含分红口径对齐业界标准）
+> **最后更新**：2026-05-16
 
 ## Overview
 

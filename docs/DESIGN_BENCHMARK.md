@@ -1,5 +1,8 @@
-# Benchmarking Analysis for FamilyFund
+# DESIGN: 基准对比（Benchmark）
 
+> **状态**：✅ 已实现
+> **最后更新**：2026-04-25
+>
 > 评估基准指数与宏观经济指标在家庭基金中的适用性
 
 ## 1. Market Benchmarks（市场基准）

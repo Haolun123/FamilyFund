@@ -1,4 +1,4 @@
-# Design Doc: 市场温度计 (Market Monitor)
+# DESIGN: 市场温度计（Market Monitor）
 
 **状态**: Approved  
 **日期**: 2026-04-14  

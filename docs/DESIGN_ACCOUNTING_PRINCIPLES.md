@@ -1,4 +1,4 @@
-# FamilyFund 家庭记账原则
+# DESIGN: 家庭记账原则（Accounting Principles）
 
 > **版本**: v1.1
 > **日期**: 2026-04-27

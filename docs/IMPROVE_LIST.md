@@ -1,5 +1,7 @@
 # FamilyFund 功能改进清单
 
+> **最后更新**：2026-05-26
+>
 > 本文件只做状态跟踪和优先级排序。详细设计见各 `DESIGN_XXX.md` 文件。
 
 ---
@@ -47,7 +49,7 @@
 | 4 | **储蓄率追踪** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
 | 5 | **定投管理模块** | `DESIGN_DCA_MANAGER.md` | ✅ 已完成 |
 | 6 | **PDF 导出全面切换为 HTML**（Portfolio/Quarterly/10th Man）| — | ✅ 已完成 |
-| 7 | **仓位管理与组合架构落地**（Domain D + E + F5）| `OPEN_POINTS_PORTFOLIO_DESIGN.md` | 设计 2026-05-22 完成 |
+| 7 | **仓位管理与组合架构落地**（Domain D + E + F5）| `DESIGN_PORTFOLIO_ARCHITECTURE.md` | 设计 2026-05-22 完成 |
 | 8 | **短信解析 UX 改进**（防止"以为漏加 → 手动补 → 实际重复加"）| 见下方"已知问题"详述 | 真实出错过（2026-05-22 周南方纳指漏 1 笔交易隐藏在此问题下未被发现）|
 
 ### P3 — 需前置数据积累

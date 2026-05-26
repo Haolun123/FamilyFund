@@ -368,7 +368,7 @@ portfolio.csv
 | add_trigger | str | 加仓触发条件 |
 | trim_trigger | str | 减仓/止损触发条件 |
 
-详细决策原则（P1-P12）见 `docs/OPEN_POINTS_PORTFOLIO_DESIGN.md`。其中 **P12（2026-05-23 加）**：用户可承受 -25% 回撤；FI 不一步到位降到 target 10%，而是 5 年渐进到 ~30%（每周定投 ~5000 元 × 52 × 5 = 130 万 + 个股池 22 万 + 红利低波 3 万 = ~155 万从 FI 抽到股票）。
+详细决策原则（P1-P12）见 `docs/DESIGN_PORTFOLIO_ARCHITECTURE.md`。其中 **P12（2026-05-23 加）**：用户可承受 -25% 回撤；FI 不一步到位降到 target 10%，而是 5 年渐进到 ~30%（每周定投 ~5000 元 × 52 × 5 = 130 万 + 个股池 22 万 + 红利低波 3 万 = ~155 万从 FI 抽到股票）。
 
 ### 个股池架构（2026-05-22 决策，详见 OPEN_POINTS）
 
