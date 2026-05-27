@@ -232,7 +232,7 @@ portfolio.csv
 
 **真实出过事的案例（2026-05-22 周）：** 南方纳指 100 I 漏 1 笔 480 元短信 → transaction 漏 1 行 → portfolio NCF 漏 480 → 用户手动补 Shares 误打误撞凑齐份额，但 NCF 累计漏 480 → 5/23 用 transaction 反向对账才发现。
 
-**修复方向**（IMPROVE_LIST P2-#8）：UI 加 diff 高亮、应用后弹确认、保存前自检 NCF vs transaction 一致性。
+**修复方向**（IMPROVE_LIST P2-#3）：UI 加 diff 高亮、应用后弹确认、保存前自检 NCF vs transaction 一致性。
 
 ---
 

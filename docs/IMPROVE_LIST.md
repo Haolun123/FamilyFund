@@ -1,6 +1,6 @@
 # FamilyFund 功能改进清单
 
-> **最后更新**：2026-05-26
+> **最后更新**：2026-05-27
 >
 > 本文件只做状态跟踪和优先级排序。详细设计见各 `DESIGN_XXX.md` 文件。
 
@@ -34,6 +34,13 @@
 | 定投管理模块（DCA Manager）| `src/dca_manager.py` + `dashboard/app.py` Tab5 底部，见 `DESIGN_DCA_MANAGER.md` |
 | 第十人系统（Anti-Fragile Allocation Red Teamer）| `src/tenth_man.py` + `dashboard/app.py` Tab8，见 `DESIGN_TENTH_MAN.md` |
 | 弹药池与现金流压力测试 | `dashboard/app.py` Tab5 DCA下方，见 `DESIGN_AMMO_POOL.md` |
+| Weekly Update 自动化（净值刷新 + 短信解析）| 见 `DESIGN_AUTO_WEEKLY.md` |
+| 财务独立测算 + 储蓄率追踪 | 见 `DESIGN_ANALYTICS.md` |
+| HTML/PDF 报告全面切换 | Portfolio / Quarterly / 10th Man |
+| 仓位管理与组合架构（P1-P12）| 见 `DESIGN_PORTFOLIO_ARCHITECTURE.md`,2026-05-22 完成 |
+| F4 PB/PE 历史分位（A 股 akshare + 港股 eniu 长期参考）| `src/position_percentile.py`,2026-05-23 |
+| 组合压力测试 + What-If 动态目标 | Tab1 Section7,2026-05-23 |
+| 芒格信号面板（4 区 2x2:估值 / 多维位置 / 质量 / 决策）| Research Tab,2026-05-23 |
 
 ---
 
@@ -43,23 +50,24 @@
 
 | # | 功能 | 设计文档 | 前置条件 |
 |---|------|---------|---------|
-| 1 | **鲨鱼记账解析 + 季度现金流分析** | `DESIGN_CASHFLOW.md` | 2026Q2 数据 |
-| 2 | **Weekly Update 自动化**（净值一键刷新 + 短信解析录入）| `DESIGN_AUTO_WEEKLY.md` | ✅ 已完成 |
-| 3 | **财务独立测算** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
-| 4 | **储蓄率追踪** | `DESIGN_ANALYTICS.md` | ✅ 已完成 |
-| 5 | **定投管理模块** | `DESIGN_DCA_MANAGER.md` | ✅ 已完成 |
-| 6 | **PDF 导出全面切换为 HTML**（Portfolio/Quarterly/10th Man）| — | ✅ 已完成 |
-| 7 | **仓位管理与组合架构落地**（Domain D + E + F5）| `DESIGN_PORTFOLIO_ARCHITECTURE.md` | 设计 2026-05-22 完成 |
-| 8 | **短信解析 UX 改进**（防止"以为漏加 → 手动补 → 实际重复加"）| 见下方"已知问题"详述 | 真实出错过（2026-05-22 周南方纳指漏 1 笔交易隐藏在此问题下未被发现）|
+| 1 | **鲨鱼记账解析 + 季度现金流分析** | `DESIGN_CASHFLOW.md` | Q2 数据(2026-07 启动) |
+| 2 | **F5 商品价格抓取**(Brent + 黄金 + 铜 + WTI + 铁矿石)| `DESIGN_PORTFOLIO_ARCHITECTURE.md` F5 节 | 中海油接近建仓窗口(Brent < 60 + PB < 1.0)时再做,当前不需要 |
+| 3 | **短信解析 UX 改进**(防"幽灵漏加")| 见下方"已知隐患"详述 | 当前靠对账纪律兜底,可缓行 |
 
 ### P3 — 需前置数据积累
 
 | # | 功能 | 设计文档 | 前置条件 |
 |---|------|---------|---------|
-| 5 | **调仓决策质量复盘** | `DESIGN_ANALYTICS.md` | transaction.csv 积累 3-6 个月；天天基金接口已验证可用 |
-| 6 | **人生阶段规划** | `DESIGN_LIFE_STAGES.md` | ✅ 已完成 |
-| 7 | **FIFO 已实现盈亏** | — | transaction.csv 积累 3-6 个月 |
-| 8 | **现金分红处理方案 C** | `DESIGN_DIVIDEND.md` | 见设计文档 |
+| 1 | **调仓决策质量复盘** | `DESIGN_ANALYTICS.md` | transaction.csv 积累 3-6 个月 |
+| 2 | **FIFO 已实现盈亏** | — | transaction.csv 积累 3-6 个月 |
+| 3 | **现金分红方案 C** | `DESIGN_DIVIDEND.md` | 见设计文档 |
+
+### 元层面待办(非紧急)
+
+| # | 项 | 触发点 |
+|---|----|-------|
+| 1 | 能力圈定义填充 | 用户主动提议时(`memory/user_capability_circle.md` stub)|
+| 2 | Memory → GitHub 私有 repo 迁移 | 2026 Q3-Q4 启动,公司 Mac 2026 年底换机前完成 |
 
 ---
 
@@ -69,7 +77,7 @@
 - **SAP Tab 默认价格硬编码** — `sap_price_cache.json` 存于 iCloud，缓存为空的场景在正常使用路径中不存在
 - **`load_data()` 缓存散落** — `st.cache_data.clear()` 散落各处，现有 workaround 够用
 
-## ⚠️ 隐患（已识别，待修复，对应 P2-#8）
+## ⚠️ 隐患（已识别，待修复，对应 P2-#3）
 
 ### 短信解析的"幽灵漏加"陷阱
 
