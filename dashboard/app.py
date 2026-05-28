@@ -3053,6 +3053,7 @@ with tab_market:
     # ═══════════════════════════════════════════════════════════
 
     st.divider()
+    _data_dir = os.path.dirname(csv_path)
     with st.expander("🔀 AH 股溢价监测", expanded=False):
         from ah_monitor import (
             load_ah_config, get_ah_data,
