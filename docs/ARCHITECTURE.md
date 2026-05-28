@@ -659,7 +659,7 @@ graph LR
 | 1 | **Portfolio** | NAV走势+基准叠加 / 资产配置 / 持仓明细 / 风险集中度 / 货币敞口 / 盈亏分析 / 收益归因 / 再平衡建议 |
 | 2 | **Ledger** | Weekly Update（调仓辅助器+快照录入）+ 历史快照管理 |
 | 3 | **SAP** | Own/Move SAP 成本核算，ESPP/RSU 盈亏分析 |
-| 4 | **Market** | 乖离率 / VIX+QVIX / PE×VIX矩阵 / A股矩阵 / 黄金矩阵 / 个股基本面（PE历史分位）/ AH溢价 / DCA定投计划 |
+| 4 | **Market** | 乖离率 / VIX+QVIX / PE×VIX矩阵 / A股矩阵 / 黄金矩阵 / AH溢价 / DCA定投计划 / 弹药池 |
 | 5 | **Backtest** | 固定 vs 矩阵策略回测，5标的，XIRR+每元成本+MDD对比 |
 | 6 | **Quarterly** | 季度资产负债表 / 净资产瀑布图 / 结构对比 / PDF导出 |
 | 7 | **Planning** | 人生阶段支出曲线 / 财务独立测算（FI进度+敏感性）/ 储蓄率追踪 |

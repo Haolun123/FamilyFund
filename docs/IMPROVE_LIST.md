@@ -17,7 +17,7 @@
 | 市场温度计 + 定投矩阵（5标的）| `src/market_monitor.py` Tab5 |
 | 美债10Y收益率展示 | `src/market_monitor.py` Tab5 |
 | 黄金 MA200乖离率×VIX 矩阵 | `src/market_monitor.py` Tab5 |
-| 个股基本面面板（持仓个股动态拉取，yfinance） | `src/fundamentals.py` Tab5 |
+| 个股基本面面板(芒格信号面板,持仓个股动态拉取,yfinance + akshare 双源)| `src/fundamentals.py` Research Tab(2026-05-28 从 Market Tab 迁出)|
 | AH 股溢价监测（溢价率 + 1年分位数，动态增删标的）| `src/ah_monitor.py` Tab5，见 `DESIGN_AH_MONITOR.md` |
 | 每日企业微信推送 | `src/notifier.py` + `scripts/daily_push.py` |
 | NCF 全资产写入调仓辅助器 | `dashboard/app.py` Tab2 |
@@ -113,6 +113,7 @@
 
 ## 设计决策记录
 
+- **删除 Market Tab 个股基本面面板**（2026-05-28）：功能已被 Research Tab 芒格信号面板完全覆盖（4 区 2x2:估值/多维位置/质量信号/决策状态),保留 Market Tab 会造成"两个面板看同一个数据"的心智压力。删除后 Market Tab 纯粹化为"宽基 + 宏观"语义,Research Tab 是"个股研究"的唯一归属。`yf_symbols.json` 的 `show_fundamentals` 字段保留(Research Tab 也用)。删除 ~179 行代码。
 - **Tab5 折叠重构**（2026-05-07）：个股基本面、AH溢价、DCA均用 `expander` 默认收起，解决页面过长问题。语义仍在 Market Monitor，但按需展开。
 - **AH 溢价数据源选 yfinance 而非 akshare**（2026-05-07）：`stock_zh_ah_spot_em()` 依赖东方财富，公司网络下超时。yfinance 直接拉 `.SS`/`.HK` ticker 可用，历史分位数自建每日快照存入 `ah_config.json`。`run_backtest()` 加 `end_date` 参数用于分析特定市场周期（如排除黄金单边牛市）；加 `cash_rate_annual` 参数（默认2%）计算矩阵策略少投差额的货币基金复利，使固定 vs 矩阵在同等总预算下公平对比。综合价值 = 矩阵市值 + 货币基金余额。
 - **DCA Manager 以周为最小颗粒度**（2026-05-06）：市场信号（PE/VIX）是低频信号，日内拆单抢 QDII 额度属于执行层细节，系统只管"本周投多少"，不管"哪天分几次执行"。
