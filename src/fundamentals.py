@@ -91,11 +91,35 @@ def get_show_fundamentals(data: dict, code: str) -> bool:
     return True
 
 
+def _normalize_yf_symbol(yf_symbol: str) -> str:
+    """归一化 yfinance 代码。
+
+    港股 yfinance 要求 4 位:`00700.HK` 会被识别为已退市,需要 `0700.HK`。
+    本项目的 ticker_map 历史上既有 4 位也有 5 位混用,这里统一归一。
+
+    其他市场(.SS / .SZ / 美股)不动。
+    """
+    if not yf_symbol:
+        return yf_symbol
+    s = yf_symbol.strip()
+    if s.upper().endswith('.HK'):
+        # 提取 .HK 前的数字部分
+        prefix = s[:-3]
+        if prefix.isdigit():
+            # 去前导 0,但保留至少 4 位(0700.HK 不能变成 700.HK)
+            stripped = prefix.lstrip('0') or '0'
+            if len(stripped) < 4:
+                stripped = stripped.zfill(4)
+            return f'{stripped}.HK'
+    return s
+
+
 def fetch_fundamentals(yf_symbol: str) -> dict | None:
     """从 yfinance 拉取基本面数据。失败返回 None。"""
     try:
         import yfinance as yf
-        info = yf.Ticker(yf_symbol).info
+        normalized = _normalize_yf_symbol(yf_symbol)
+        info = yf.Ticker(normalized).info
         result = {}
         for field in FIELDS:
             v = info.get(field)
@@ -162,6 +186,9 @@ def get_fundamentals_by_yf_symbol(data_dir: str, yf_symbol: str,
     """
     if not yf_symbol:
         return None
+
+    # 港股归一化(00700.HK → 0700.HK,统一 cache key)
+    yf_symbol = _normalize_yf_symbol(yf_symbol)
 
     data = load_yf_symbols(data_dir)
     today = date.today().isoformat()
@@ -402,7 +429,9 @@ def get_fundamentals_history(data_dir: str, symbol: str = None) -> dict | list:
         return {} if symbol is None else []
     if symbol is None:
         return data
-    return data.get(symbol, [])
+    # 港股归一化:5 位代码兼容 4 位存储(如 00700.HK → 0700.HK)
+    normalized = _normalize_yf_symbol(symbol)
+    return data.get(normalized, []) or data.get(symbol, [])
 
 
 def get_pe_percentile_from_snapshot(data_dir: str, yf_symbol: str, current_pe: float | None) -> dict | None:
