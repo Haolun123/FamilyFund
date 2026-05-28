@@ -5157,16 +5157,23 @@ with tab_research:
                     (s for s in _rl_summary if s['folder'] == _rl_selected),
                     None,
                 )
+                _rl_panel_refresh = st.session_state.pop('_rl_panel_refresh', False)
                 _rl_sel_pos = None
                 if _rl_sel_summary and _rl_sel_summary.get('yf_symbol'):
                     try:
                         _rl_sel_pos = get_position_data(
-                            _rl_sel_summary['yf_symbol'], force_refresh=False
+                            _rl_sel_summary['yf_symbol'], force_refresh=_rl_panel_refresh
                         )
                     except Exception:
                         _rl_sel_pos = None
 
                 if _rl_sel_summary and (_rl_sel_pos or _rl_sel_summary.get('evaluated')):
+                    # 刷新按钮(强制重拉 yfinance,绕过 7 天缓存)
+                    _rl_btn_col1, _rl_btn_col2 = st.columns([8, 1])
+                    with _rl_btn_col2:
+                        if st.button('🔄', key=f'rl_panel_refresh_{_rl_selected}', help='强制刷新当前股价 / PE / PB(绕过 7 天缓存)'):
+                            st.session_state['_rl_panel_refresh'] = True
+                            st.rerun()
                     _d = _rl_cur or {}
                     _p = _rl_sel_pos or {}
                     _market = _p.get('market', '?')
@@ -5174,6 +5181,22 @@ with tab_research:
                     # 估值区
                     _val_pe = _p.get('current_pe_ttm')
                     _val_pb = _p.get('current_pb')
+                    _val_price = _p.get('current_price')
+                    _val_currency = _p.get('currency') or ('CNY' if _market == 'A' else 'HKD' if _market == 'HK' else '')
+
+                    # 补充 Forward PE / Forward EPS / EPS TTM(从 yf_symbols.json _cache 读,刷新由顶部按钮触发)
+                    _val_fwd_pe = _val_fwd_eps = _val_eps_ttm = None
+                    try:
+                        from fundamentals import get_fundamentals_by_yf_symbol as _gfb
+                        _yf_sym_for_val = _rl_sel_summary.get('yf_symbol', '')
+                        if _yf_sym_for_val:
+                            _val_cache = _gfb(os.path.dirname(csv_path), _yf_sym_for_val,
+                                              force_refresh=_rl_panel_refresh) or {}
+                            _val_fwd_pe = _val_cache.get('forwardPE')
+                            _val_fwd_eps = _val_cache.get('forwardEps')
+                            _val_eps_ttm = _val_cache.get('trailingEps')
+                    except Exception:
+                        pass
 
                     # 多维位置区
                     if _market == 'A':
@@ -5214,10 +5237,18 @@ with tab_research:
 
                     # 质量信号区
                     _val_lines = []
+                    if _val_price is not None:
+                        _val_lines.append(f"当前价: <b>{_val_price:.2f} {_val_currency}</b>")
                     if _val_pe is not None:
                         _val_lines.append(f"PE: <b>{_val_pe:.1f}</b>")
+                    if _val_fwd_pe is not None:
+                        _val_lines.append(f"Forward PE: <b>{_val_fwd_pe:.1f}</b>")
                     if _val_pb is not None:
                         _val_lines.append(f"PB: <b>{_val_pb:.2f}</b>")
+                    if _val_eps_ttm is not None:
+                        _val_lines.append(f"EPS (TTM): <b>{_val_eps_ttm:.2f}</b>")
+                    if _val_fwd_eps is not None:
+                        _val_lines.append(f"Forward EPS: <b>{_val_fwd_eps:.2f}</b>")
                     if _val_lines:
                         _val_block = '<br>'.join(_val_lines)
                     else:
