@@ -168,7 +168,14 @@ def get_fundamentals_by_yf_symbol(data_dir: str, yf_symbol: str,
     cache = data.get('_cache', {})
     cached = cache.get(yf_symbol, {})
 
-    if not force_refresh and cached.get('updated') == today:
+    # 缓存命中条件:今日已写 + 关键字段非 None(防止脏缓存让前端永远显示空白)
+    _is_cache_valid = (
+        cached.get('updated') == today
+        and cached.get('currentPrice') is not None
+        and cached.get('trailingPE') is not None
+    )
+
+    if not force_refresh and _is_cache_valid:
         result = {k: v for k, v in cached.items() if k != 'updated'}
         return result if result else None
 

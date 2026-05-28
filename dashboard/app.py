@@ -5178,25 +5178,27 @@ with tab_research:
                     _p = _rl_sel_pos or {}
                     _market = _p.get('market', '?')
 
-                    # 估值区
-                    _val_pe = _p.get('current_pe_ttm')
-                    _val_pb = _p.get('current_pb')
-                    _val_price = _p.get('current_price')
-                    _val_currency = _p.get('currency') or ('CNY' if _market == 'A' else 'HKD' if _market == 'HK' else '')
-
-                    # 补充 Forward PE / Forward EPS / EPS TTM(从 yf_symbols.json _cache 读,刷新由顶部按钮触发)
+                    # 估值区 — 全部统一从 fundamentals._cache 拉(yfinance,覆盖所有市场)
+                    _val_price = _val_pe = _val_pb = None
                     _val_fwd_pe = _val_fwd_eps = _val_eps_ttm = None
+                    _val_currency = ''
                     try:
                         from fundamentals import get_fundamentals_by_yf_symbol as _gfb
                         _yf_sym_for_val = _rl_sel_summary.get('yf_symbol', '')
                         if _yf_sym_for_val:
                             _val_cache = _gfb(os.path.dirname(csv_path), _yf_sym_for_val,
                                               force_refresh=_rl_panel_refresh) or {}
+                            _val_price = _val_cache.get('currentPrice')
+                            _val_pe = _val_cache.get('trailingPE')
+                            _val_pb = _val_cache.get('priceToBook')
                             _val_fwd_pe = _val_cache.get('forwardPE')
                             _val_fwd_eps = _val_cache.get('forwardEps')
                             _val_eps_ttm = _val_cache.get('trailingEps')
                     except Exception:
                         pass
+
+                    # 货币兜底(yfinance info 偶尔不返回 currency)
+                    _val_currency = ('CNY' if _market == 'A' else 'HKD' if _market == 'HK' else 'USD')
 
                     # 多维位置区
                     if _market == 'A':

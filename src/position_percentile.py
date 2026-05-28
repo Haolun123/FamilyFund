@@ -107,6 +107,7 @@ def _fetch_a_share(symbol: str) -> dict | None:
 
         cur_pe = float(df['PE(TTM)'].iloc[-1]) if pd.notna(df['PE(TTM)'].iloc[-1]) else None
         cur_pb = float(df['市净率'].iloc[-1]) if pd.notna(df['市净率'].iloc[-1]) else None
+        cur_price = float(df['当日收盘价'].iloc[-1]) if pd.notna(df['当日收盘价'].iloc[-1]) else None
 
         pe_pct = float((df_5y_pe['PE(TTM)'] <= cur_pe).mean() * 100) if cur_pe and len(df_5y_pe) > 0 else None
         pb_pct = float((df_5y_pb['市净率'] <= cur_pb).mean() * 100) if cur_pb and len(df_5y_pb) > 0 else None
@@ -116,6 +117,8 @@ def _fetch_a_share(symbol: str) -> dict | None:
             'market': 'A',
             'current_pe_ttm': cur_pe,
             'current_pb': cur_pb,
+            'current_price': cur_price,
+            'currency': 'CNY',
             'pe_pct_5y': pe_pct,
             'pb_pct_5y': pb_pct,
             'pe_min_5y': float(df_5y_pe['PE(TTM)'].min()) if len(df_5y_pe) > 0 else None,
