@@ -307,3 +307,133 @@ class TestAppendIdempotent:
         with open(path) as f:
             data = json.load(f)
         assert data['VOO'][0]['pe'] == 28.0  # 没被 99 覆盖
+
+
+# ── 回归测试: 港股 5→4 位归一化(2026-05-28 bug) ──────────────────
+
+
+from fundamentals import _normalize_yf_symbol
+
+
+class TestNormalizeYfSymbol:
+    """港股代码归一化:yfinance 对 5 位 .HK 代码安静失败,
+    项目 ticker_map 历史用 5 位,需要在数据层归一化。"""
+
+    def test_hk_5digit_to_4digit(self):
+        """5 位港股代码去前导 0 到 4 位。"""
+        assert _normalize_yf_symbol('00700.HK') == '0700.HK'
+        assert _normalize_yf_symbol('09992.HK') == '9992.HK'
+        assert _normalize_yf_symbol('00883.HK') == '0883.HK'
+        assert _normalize_yf_symbol('00981.HK') == '0981.HK'
+
+    def test_hk_4digit_unchanged(self):
+        """已经 4 位的港股代码不变。"""
+        assert _normalize_yf_symbol('0700.HK') == '0700.HK'
+        assert _normalize_yf_symbol('9992.HK') == '9992.HK'
+
+    def test_hk_5digit_no_leading_zero(self):
+        """5 位不以 0 开头的港股(罕见,如 99988.HK 这种假设场景),不动。"""
+        # 实际港股没有这种,但保证函数不破坏不规范输入
+        assert _normalize_yf_symbol('12345.HK') == '12345.HK'
+
+    def test_a_share_unchanged(self):
+        """A 股代码不动。"""
+        assert _normalize_yf_symbol('601838.SS') == '601838.SS'
+        assert _normalize_yf_symbol('002202.SZ') == '002202.SZ'
+
+    def test_us_stock_unchanged(self):
+        """美股 / ADR / 无后缀代码不动。"""
+        assert _normalize_yf_symbol('SAP') == 'SAP'
+        assert _normalize_yf_symbol('AAPL') == 'AAPL'
+        assert _normalize_yf_symbol('SAP.DE') == 'SAP.DE'
+
+    def test_empty_or_none(self):
+        """空输入不报错。"""
+        assert _normalize_yf_symbol('') == ''
+        assert _normalize_yf_symbol(None) is None
+
+    def test_whitespace(self):
+        """带空格的输入归一化。"""
+        assert _normalize_yf_symbol(' 00700.HK ') == '0700.HK'
+
+    def test_history_query_uses_normalization(self, tmp_dir):
+        """get_fundamentals_history 用 5 位查询时,能命中 4 位 key 数据。"""
+        from fundamentals import get_fundamentals_history
+        path = os.path.join(tmp_dir, 'fundamentals_history.json')
+        with open(path, 'w') as f:
+            json.dump({
+                '0700.HK': [{'date': '2026-05-23', 'roe': 0.205, 'pe': 15.2}],
+            }, f)
+        # 用 ticker_map 里的 5 位代码查
+        result = get_fundamentals_history(tmp_dir, '00700.HK')
+        assert len(result) == 1
+        assert result[0]['roe'] == 0.205
+
+
+class TestDirtyCacheInvalidation:
+    """脏缓存防御:即使 today=updated,关键字段 None 也应触发重拉。
+    2026-05-28 bug: yfinance 早上拉过返回 None,缓存写入 today,
+    整天读到空数据,直到下一天。"""
+
+    def test_dirty_cache_with_none_currentPrice_triggers_refetch(self, tmp_dir, monkeypatch):
+        from datetime import date as _date
+        today = _date.today().isoformat()
+
+        # 写脏缓存:今天的,但 currentPrice / trailingPE 都是 None
+        ys_path = os.path.join(tmp_dir, 'yf_symbols.json')
+        with open(ys_path, 'w') as f:
+            json.dump({
+                '_cache': {
+                    '0700.HK': {
+                        'currentPrice': None,
+                        'trailingPE': None,
+                        'updated': today,
+                    }
+                }
+            }, f)
+
+        # mock yfinance 返回真实数据
+        class _MockInfo(dict):
+            pass
+        class _MockTicker:
+            def __init__(self, s): self._sym = s
+            @property
+            def info(self):
+                return {
+                    'currentPrice': 425.4,
+                    'trailingPE': 15.25,
+                    'priceToBook': 2.95,
+                    'returnOnEquity': 0.205,
+                }
+        monkeypatch.setattr('yfinance.Ticker', _MockTicker)
+
+        result = get_fundamentals_by_yf_symbol(tmp_dir, '0700.HK', force_refresh=False)
+        assert result is not None
+        # 关键:None 缓存被识别为脏,触发重拉,得到真实数据
+        assert result['currentPrice'] == 425.4
+        assert result['trailingPE'] == 15.25
+
+    def test_valid_cache_skips_refetch(self, tmp_dir, monkeypatch):
+        """缓存非脏时正常命中,不重拉。"""
+        from datetime import date as _date
+        today = _date.today().isoformat()
+
+        ys_path = os.path.join(tmp_dir, 'yf_symbols.json')
+        with open(ys_path, 'w') as f:
+            json.dump({
+                '_cache': {
+                    '0700.HK': {
+                        'currentPrice': 425.4,
+                        'trailingPE': 15.25,
+                        'updated': today,
+                    }
+                }
+            }, f)
+
+        # mock 一旦被调用就报错(应该走缓存,不调用)
+        def _no_call(*a, **k):
+            raise RuntimeError("不该调用 yfinance(应走缓存)")
+        monkeypatch.setattr('yfinance.Ticker', _no_call)
+
+        result = get_fundamentals_by_yf_symbol(tmp_dir, '0700.HK', force_refresh=False)
+        assert result['currentPrice'] == 425.4

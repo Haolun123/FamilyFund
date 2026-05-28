@@ -177,10 +177,35 @@ docker exec familyfund grep -n "关键词" /app/dashboard/app.py
 
 - 测试文件命名：`tests/test_dca_manager.py`、`tests/test_vxn.py` 等，一个模块一个文件
 - 不要把多个模块的测试打包进同一个文件（`test_new_features.py` 仅保留无独立文件的历史测试）
-- 跑测试命令：`docker cp tests/<file>.py familyfund:/app/tests/<file>.py && docker exec familyfund python -m pytest /app/tests/<file>.py -v`
+- 跑单个测试：`docker cp tests/<file>.py familyfund:/app/tests/<file>.py && docker exec familyfund python -m pytest /app/tests/<file>.py -v`
+- 跑完整 test suite(push 前必跑):`docker exec familyfund python -m pytest /app/tests/ -q`
 - 网络依赖的测试用 `pytest.skip` 处理，不能让网络不可用导致整体失败
 
-**完成一个 feature 的标准**：代码 ✓ + 文档 ✓ + 测试 ✓ + git push ✓
+### 何时强制写测试(纪律 C,2026-05-28 加入)
+
+| 改动类型 | 是否写测试 |
+|---------|----------|
+| 新增 src/ 模块 | ✅ 必须 |
+| 修改 src/ 模块的对外函数行为 | ✅ 必须 |
+| **修复 src/ 模块的 bug** | ✅ **必须写一个回归测试**(reproduce bug 的场景) |
+| src/ 模块内私有函数重构(行为不变) | ❌ 可选 |
+| dashboard/app.py UI 调整 | ❌ 不强制 |
+| docs/ 文档变更 | ❌ 不写 |
+| 配置变更(decisions.json / target_allocation.json 等)| ❌ 不写 |
+
+**核心规则**:**这个 bug 6 个月后我重构相关代码,会不会重新踩坑?** 会的话就写回归测试。
+
+### Push 前必做
+
+每次 `git push` 之前,先跑一次完整 test suite:
+
+```bash
+docker exec familyfund python -m pytest /app/tests/ -q
+```
+
+确认全部通过(或仅有 `pytest.skip` 跳过的网络依赖测试)再 push。
+
+**完成一个 feature 的标准**：代码 ✓ + 文档 ✓ + 测试 ✓ + 完整 test suite ✓ + git push ✓
 
 ---
 

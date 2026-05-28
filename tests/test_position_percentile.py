@@ -192,3 +192,49 @@ class TestHKWithEniuIntegration:
         if 'eniu_pb_median' in r:
             assert r['eniu_pb_median'] > 0
             assert r['eniu_data_end'] is not None
+
+
+# ── 回归测试: A 股必返回 current_price (2026-05-28 bug) ────────────
+
+
+class TestAShareReturnsCurrentPrice:
+    """_fetch_a_share 必须返回 current_price 字段。
+    2026-05-28 bug: akshare stock_value_em 有'当日收盘价'字段,
+    但代码没存,导致 Research Tab 估值区 A 股看不到价格。"""
+
+    def test_a_share_returns_current_price_field(self):
+        """A 股返回字典必须包含 current_price 键。"""
+        try:
+            from position_percentile import _fetch_a_share
+            r = _fetch_a_share('601838')
+        except Exception:
+            pytest.skip('akshare 不可用')
+        if r is None:
+            pytest.skip('akshare 拉取失败')
+        assert 'current_price' in r, "A 股返回必须包含 current_price 字段"
+        assert 'currency' in r, "A 股返回必须包含 currency 字段"
+        assert r['currency'] == 'CNY'
+
+    def test_a_share_current_price_is_numeric(self):
+        """current_price 应该是有效数值。"""
+        try:
+            from position_percentile import _fetch_a_share
+            r = _fetch_a_share('601838')
+        except Exception:
+            pytest.skip('akshare 不可用')
+        if r is None or r.get('current_price') is None:
+            pytest.skip('akshare 返回数据不完整')
+        assert isinstance(r['current_price'], (int, float))
+        assert r['current_price'] > 0
+
+    def test_a_share_market_field(self):
+        """A 股 market 字段固定为 'A'。"""
+        try:
+            from position_percentile import _fetch_a_share
+            r = _fetch_a_share('601838')
+        except Exception:
+            pytest.skip('akshare 不可用')
+        if r is None:
+            pytest.skip('akshare 拉取失败')
+        assert r['market'] == 'A'
+
