@@ -258,7 +258,10 @@ with tab_dashboard:
         st.metric("单位净值", f"{latest_fund['NAV']:.4f}")
     with col3:
         st.metric("累计收益", f"¥{simple_profit:+,.0f}", delta=f"{simple_return:+.2f}%",
-                  help=f"当前总资产 - 累计投入（¥{total_invested:,.0f}）。累计投入 = 建仓本金 + 历次外部入金")
+                  help=f"当前总资产 - 累计投入（¥{total_invested:,.0f}）。累计投入 = 建仓本金 + 历次外部入金。\n\n"
+                       f"**与下方「盈亏分析」总盈亏的差异**:此口径含 Cash 流转效应(调仓时手续费、汇率取整等微小不平衡),"
+                       f"差额通常在百-千元量级,占总资产 < 0.5%。盈亏分析口径只看资产侧浮盈/浮亏,更纯粹反映投资回报。"
+                       f"两者都正确,只是不同视角。")
     with col4:
         ann = latest_fund.get('Annualized_Return(%)')
         if ann is not None and not pd.isna(ann):
@@ -636,7 +639,11 @@ with tab_dashboard:
         with pl_col2:
             st.metric("总市值", f"¥{total_market:,.0f}")
         with pl_col3:
-            st.metric("总盈亏", f"¥{total_pl:+,.0f}")
+            st.metric("总盈亏", f"¥{total_pl:+,.0f}",
+                help="非 Cash 资产 当前市值 - 累计成本(NCF 累加,含手续费)。\n\n"
+                     "**与基金总览「累计收益」的差异**:此口径不含 Cash(中转池本身不参与盈亏),"
+                     "更纯粹反映投资浮盈/浮亏。差额通常在百-千元量级,源于 Cash 调仓流转的微小不平衡。"
+                     "两者都正确,只是不同视角。")
         with pl_col4:
             st.metric("总收益率", f"{total_pl_rate:+.2f}%")
 
