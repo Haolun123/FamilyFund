@@ -2059,9 +2059,45 @@ with tab_update:
             st.success(f"已保存 {len(save_df)} 条记录 (日期: {new_date_str}) 到 {os.path.basename(csv_path)}")
             st.balloons()
 
+            # 检测新建仓标的是否有研报，暂存到 session_state，等用户确认后再 rerun
+            _new_entries = [
+                e for e in st.session_state.get('rebalance_entries', [])
+                if e.get('is_new') and e.get('new_asset', {}).get('Code')
+            ]
+            _pending_sync = []
+            if _new_entries:
+                from research_library import find_folder_by_code, get_reports_dir as _get_rpt_dir
+                _rpt_dir = _get_rpt_dir(os.path.dirname(csv_path))
+                for _e in _new_entries:
+                    _code = _e['new_asset']['Code']
+                    _folder = find_folder_by_code(_rpt_dir, _code)
+                    if _folder:
+                        _pending_sync.append({'folder': _folder, 'code': _code})
+
             # Clear cache and refresh
             st.cache_data.clear()
             del st.session_state['update_template']
+            if _pending_sync:
+                st.session_state['wu_pending_sync'] = _pending_sync
+            else:
+                st.rerun()
+
+    # ─── Research Tab 同步提示（保存后弹出）───
+    if st.session_state.get('wu_pending_sync'):
+        _pending = st.session_state['wu_pending_sync']
+        _folders_str = '、'.join(p['folder'] for p in _pending)
+        st.info(f"检测到新建仓标的已有研报：{_folders_str}")
+        _col_sync, _col_skip = st.columns(2)
+        if _col_sync.button("一键同步 Research Tab", key='wu_sync_research', type='primary'):
+            from research_library import sync_new_holding, get_reports_dir as _get_rpt_dir2
+            _rpt_dir2 = _get_rpt_dir2(os.path.dirname(csv_path))
+            for _p in _pending:
+                sync_new_holding(_rpt_dir2, _p['folder'], portfolio_codes=[_p['code']])
+            del st.session_state['wu_pending_sync']
+            st.success("Research Tab 已同步，点 🔄 刷新研报库即可看到变化")
+            st.rerun()
+        if _col_skip.button("跳过", key='wu_sync_skip'):
+            del st.session_state['wu_pending_sync']
             st.rerun()
 
 

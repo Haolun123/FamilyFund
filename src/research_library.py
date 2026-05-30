@@ -580,3 +580,95 @@ def get_position_summary(reports_dir: str, raw_df=None) -> list[dict]:
             })
     return rows
 
+
+# ── 研报库同步 ─────────────────────────────────────────────
+
+def sync_new_holding(
+    reports_dir: str,
+    folder_name: str,
+    portfolio_codes: list,
+    yf_symbol: str = '',
+    full_name: str = '',
+) -> dict:
+    """将标的从"观察"升级为"持仓"（幂等）。
+
+    1. 移动目录：_watchlist/<folder> → <reports_dir>/<folder>
+       若已在根目录则跳过（moved=False）
+    2. ticker_map.json：把条目从 观察 移到 持仓，填 portfolio_codes
+       若已在持仓则只更新 portfolio_codes
+    3. decisions.json：若 current.action == '买入'，自动改为 '持有'
+       旧 current 归档到 history，date 改为今天
+
+    Returns:
+        {'moved': bool, 'ticker_map_updated': bool, 'decision_updated': bool}
+    """
+    import datetime
+    result = {'moved': False, 'ticker_map_updated': False, 'decision_updated': False}
+
+    # 1. 移动目录
+    watchlist_path = os.path.join(reports_dir, '_watchlist', folder_name)
+    root_path = os.path.join(reports_dir, folder_name)
+    if os.path.isdir(watchlist_path) and not os.path.isdir(root_path):
+        try:
+            os.rename(watchlist_path, root_path)
+            result['moved'] = True
+        except OSError:
+            pass  # 移动失败不阻断后续步骤
+
+    # 2. ticker_map.json
+    tm_path = os.path.join(reports_dir, '_meta', 'ticker_map.json')
+    try:
+        with open(tm_path, encoding='utf-8') as f:
+            tm = json.load(f)
+    except Exception:
+        tm = {'持仓': {}, '观察': {}}
+
+    holding_map = tm.setdefault('持仓', {})
+    watch_map = tm.setdefault('观察', {})
+
+    if folder_name in watch_map:
+        entry = watch_map.pop(folder_name)
+    elif folder_name in holding_map:
+        entry = holding_map[folder_name]
+    else:
+        entry = {}
+
+    # 更新 portfolio_codes（追加不重复）
+    existing_codes = entry.get('portfolio_codes', [])
+    for c in portfolio_codes:
+        if c and c not in existing_codes:
+            existing_codes.append(c)
+    entry['portfolio_codes'] = existing_codes
+    if yf_symbol:
+        entry['yf_symbol'] = yf_symbol
+    if full_name:
+        entry['full_name'] = full_name
+    holding_map[folder_name] = entry
+
+    tmp = tm_path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(tm, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, tm_path)
+    result['ticker_map_updated'] = True
+
+    # 3. decisions.json：买入 → 持有
+    dec_path = _decisions_path(reports_dir)
+    data = load_decisions(reports_dir)
+    dec_entry = data.get(folder_name)
+    if dec_entry and dec_entry.get('current', {}).get('action') == '买入':
+        old_current = dec_entry['current']
+        dec_entry.setdefault('history', []).append(old_current)
+        new_current = dict(old_current)
+        new_current['action'] = '持有'
+        new_current['date'] = datetime.date.today().isoformat()
+        dec_entry['current'] = new_current
+        data[folder_name] = dec_entry
+        tmp = dec_path + '.tmp'
+        os.makedirs(os.path.dirname(dec_path), exist_ok=True)
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, dec_path)
+        result['decision_updated'] = True
+
+    return result
+

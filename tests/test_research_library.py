@@ -28,6 +28,7 @@ from research_library import (
     DECISION_ACTIONS,
     DECISION_MARKETS,
     SUMMARY_MAX_LEN,
+    sync_new_holding,
 )
 
 
@@ -761,3 +762,93 @@ def test_style_exposure_aggregates(tmp_path):
     assert exp['total_pool_cny'] == pytest.approx(40000.0)
     assert exp['total_target_amount'] == pytest.approx(120000.0)
     assert exp['total_pool_target'] == pytest.approx(350000.0)
+
+
+# ── TestSyncNewHolding ─────────────────────────────────────────────
+
+class TestSyncNewHolding:
+    """sync_new_holding() 将观察标的升级为持仓（幂等）。"""
+
+    def _make_env(self, tmp_path, in_watchlist: bool, action: str = '买入'):
+        """搭建测试目录结构。"""
+        meta = tmp_path / '_meta'
+        meta.mkdir()
+        watchlist = tmp_path / '_watchlist'
+        watchlist.mkdir()
+
+        folder = '泡泡玛特（09992.HK）'
+
+        if in_watchlist:
+            (watchlist / folder).mkdir()
+        else:
+            (tmp_path / folder).mkdir()
+
+        (meta / 'ticker_map.json').write_text(json.dumps({
+            '持仓': {},
+            '观察': {folder: {'portfolio_codes': [], 'yf_symbol': '09992.HK', 'full_name': '泡泡玛特'}},
+        } if in_watchlist else {
+            '持仓': {folder: {'portfolio_codes': ['HK9992'], 'yf_symbol': '09992.HK', 'full_name': '泡泡玛特'}},
+            '观察': {},
+        }, ensure_ascii=False), encoding='utf-8')
+
+        (meta / 'decisions.json').write_text(json.dumps({
+            folder: {
+                'current': {'action': action, 'market': 'H股', 'date': '2026-05-23',
+                            'summary': '测试', 'tier': '卫星'},
+                'history': [],
+            }
+        }, ensure_ascii=False), encoding='utf-8')
+        return folder
+
+    def test_watchlist_to_holding_full_sync(self, tmp_path):
+        """标的在 _watchlist + action=买入 → 目录移动、ticker_map 更新、decision 改持有。"""
+        folder = self._make_env(tmp_path, in_watchlist=True, action='买入')
+        result = sync_new_holding(str(tmp_path), folder, portfolio_codes=['HK9992'])
+
+        assert result['moved'] is True
+        assert result['ticker_map_updated'] is True
+        assert result['decision_updated'] is True
+
+        # 目录已移到根
+        assert (tmp_path / folder).is_dir()
+        assert not (tmp_path / '_watchlist' / folder).exists()
+
+        # ticker_map：在持仓，codes 填入
+        tm = json.loads((tmp_path / '_meta' / 'ticker_map.json').read_text())
+        assert folder in tm['持仓']
+        assert 'HK9992' in tm['持仓'][folder]['portfolio_codes']
+        assert folder not in tm.get('观察', {})
+
+        # decisions：action 改为 持有，旧 history 归档
+        dec = json.loads((tmp_path / '_meta' / 'decisions.json').read_text())
+        assert dec[folder]['current']['action'] == '持有'
+        assert len(dec[folder]['history']) == 1
+        assert dec[folder]['history'][0]['action'] == '买入'
+
+    def test_already_in_holding_is_idempotent(self, tmp_path):
+        """已在持仓（幂等调用）→ moved=False，不报错，不重复归档 decision。"""
+        folder = self._make_env(tmp_path, in_watchlist=False, action='持有')
+        result = sync_new_holding(str(tmp_path), folder, portfolio_codes=['HK9992'])
+
+        assert result['moved'] is False
+        assert result['ticker_map_updated'] is True   # codes 仍会更新
+
+        # decision 不变（action 已是持有，不再翻转）
+        assert result['decision_updated'] is False
+        dec = json.loads((tmp_path / '_meta' / 'decisions.json').read_text())
+        assert dec[folder]['current']['action'] == '持有'
+        assert len(dec[folder]['history']) == 0
+
+    def test_no_research_folder_graceful(self, tmp_path):
+        """标的既不在 _watchlist 也不在 ticker_map → moved=False, ticker_map_updated=False。"""
+        meta = tmp_path / '_meta'
+        meta.mkdir()
+        (tmp_path / '_watchlist').mkdir()
+        (meta / 'ticker_map.json').write_text(json.dumps({'持仓': {}, '观察': {}}, ensure_ascii=False), encoding='utf-8')
+        (meta / 'decisions.json').write_text('{}', encoding='utf-8')
+
+        result = sync_new_holding(str(tmp_path), '不存在的标的（99999.HK）', portfolio_codes=['HK99999'])
+        # 没有研报目录，不报错
+        assert result['moved'] is False
+        # ticker_map 会把它加进持仓（portfolio_codes 有值但无目录），不崩溃
+        assert result['ticker_map_updated'] is True

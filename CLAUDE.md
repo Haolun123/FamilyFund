@@ -335,6 +335,47 @@ portfolio.csv
 
 ---
 
+## /sync-research Skill（研报库同步，2026-05-30）
+
+**触发词**：用户说"同步研报"、"更新 Research Tab"、"我买了 XXX 请更新研报库"
+
+此 skill 将新建仓标的从 `_watchlist`（观察）升级为持仓，同步三个地方：
+1. 目录：`_watchlist/<folder>` → `<Finance Reports>/<folder>`
+2. `ticker_map.json`：从 `观察` 移到 `持仓`，填入 `portfolio_codes`
+3. `decisions.json`：若 `current.action == '买入'`，自动改为 `'持有'`
+
+**核心函数**：`src/research_library.py::sync_new_holding(reports_dir, folder_name, portfolio_codes)`
+
+### 执行步骤
+
+1. **确定需要同步的标的**
+   - 若用户指定标的名/代码：直接用 `find_folder_by_code(reports_dir, code)` 找 folder_name
+   - 若未指定：对比 portfolio.csv 最新日期 vs 上一日期，找新出现的 Code，逐一查 folder
+
+2. **执行同步**
+   ```python
+   from research_library import sync_new_holding, find_folder_by_code, get_reports_dir
+   reports_dir = get_reports_dir(data_dir)
+   result = sync_new_holding(reports_dir, folder_name, portfolio_codes=[code])
+   ```
+
+3. **告知用户结果**
+   - 目录已移动：`moved=True`
+   - ticker_map 已更新：`ticker_map_updated=True`
+   - decision 已改为持有：`decision_updated=True`
+   - 提示："到 Dashboard Research Tab 点 🔄 刷新研报库即可看到变化"
+
+4. **找不到研报 folder 时**
+   - 告知用户："该标的（`<code>`）尚无研报，需要先写研报再同步。Finance Reports 目录下没有对应文件夹，或 ticker_map.json 未包含该 portfolio_code"
+
+### 注意
+
+- `sync_new_holding()` **幂等**：对已在持仓的标的重复调用不会报错，也不会重复归档 decision
+- Weekly Update 保存快照时如有新建仓且已有研报，Dashboard 会自动弹出"一键同步"提示（无需手动调 skill）
+- `/sync-research` 适用于：手动建仓后忘了同步、其他 agent 需要同步、批量同步多个标的
+
+---
+
 ## 已知问题 / 待决策
 
 - **Weekly Update：Total_Value 自动计算** — 建议方案 A（加"重算市值"按钮），待实现
