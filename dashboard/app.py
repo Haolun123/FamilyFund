@@ -587,8 +587,11 @@ with tab_dashboard:
     st.header("货币敞口")
 
     # 按原始币种汇总（不换算），同时换算 CNY 市值
+    # 黄金单独列为 Gold 桶（法币对冲/商品敞口，不归属任何货币）
     latest_all['CNY_Value'] = latest_all['Total_Value']  # Total_Value 已是 CNY
-    currency_exp = latest_all.groupby('Currency').agg(
+    _ccy_df = latest_all.copy()
+    _ccy_df.loc[_ccy_df['Asset_Class'] == 'Gold', 'Currency'] = 'Gold'
+    currency_exp = _ccy_df.groupby('Currency').agg(
         CNY_Value=('CNY_Value', 'sum'),
     ).reset_index()
     currency_exp['Pct'] = currency_exp['CNY_Value'] / grand_total
