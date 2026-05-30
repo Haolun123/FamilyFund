@@ -503,3 +503,55 @@ class TestInferCurrency:
         # 这是 2026-05-30 用户报告的真实场景
         assert infer_currency('HK9992') == 'HKD'
 
+
+# ── 回归测试: transaction.csv Price_Currency 字段 (2026-05-30) ──
+
+
+class TestTransactionPriceCurrency:
+    """2026-05-30 bug: transaction.csv 的 Price 字段无货币标识,
+    腾讯 5/22 那笔 449.6 看不出是 HKD;且新标的(is_new)被错误过滤,
+    根本没写入 transaction.csv。
+
+    本测试只覆盖逻辑正确性(用 infer_currency 推断历史标的的币种),
+    不测 dashboard UI(那部分由人工操作 + 完整 test suite 验证)。"""
+
+    def test_real_transaction_codes_classified_correctly(self):
+        """用 transaction.csv 历史 49 行的实际 Code 测 infer_currency 全部正确。
+        防止未来某次 infer_currency 调整误伤已有交易记录的归类。"""
+        # 来自 2026-05-30 真实 transaction.csv 的标的代码
+        cny_codes = [
+            '018738',   # 博时标普500 E类
+            '021000',   # 南方纳指100 I类
+            '022434',   # 南方中证A500 A类
+            'GOLD',     # 招行黄金积存(单位元/克)
+            '007721',   # 天弘
+            '016452',   # 南方A
+            '016532',   # 嘉实
+            '018043',   # 天弘
+            '040046',   # 华安
+            '019172',   # 摩根纳指100 A类
+            '007194',   # 长城短债 A
+            'JY040214', # 月月宝(招商银行理财产品代码)
+            '512890',   # 红利低波 ETF
+        ]
+        hkd_codes = [
+            'HK0700',   # 腾讯控股
+            'HK9992',   # 泡泡玛特(2026-05-29 新建仓)
+        ]
+
+        for code in cny_codes:
+            assert infer_currency(code) == 'CNY', \
+                f"Code '{code}' 应识别为 CNY, 实际 {infer_currency(code)}"
+        for code in hkd_codes:
+            assert infer_currency(code) == 'HKD', \
+                f"Code '{code}' 应识别为 HKD, 实际 {infer_currency(code)}"
+
+    def test_jy_prefix_treated_as_cny(self):
+        """JY040214 等理财产品代码(JY 前缀+数字)兜底应该是 CNY,
+        不能被误判为外币。"""
+        # 理财产品/招商银行内部代码,非纯数字也非 HK 开头
+        assert infer_currency('JY040214') == 'CNY'
+        assert infer_currency('GD040219') == 'CNY'  # 招行另一只
+        assert infer_currency('17123GH') == 'CNY'   # 招睿
+
+

@@ -1854,31 +1854,52 @@ with tab_update:
                 # ─── 写入 transaction.csv ───
                 tx_rows = []
                 for e in entries:
-                    if e['type'] not in ('买入', '卖出') or not e['asset_name'] or e['is_new']:
+                    # 包括新标的(is_new=True)——之前误过滤,导致新建仓在 transaction 里缺失
+                    if e['type'] not in ('买入', '卖出') or not e['asset_name']:
                         continue
-                    # 查找资产的 Asset_Class、Platform、Code（用于完整记录）
+                    # 对新标的,asset_name 是用户填的 Name,asset_row 应该已经在 template 里(刚追加)
                     asset_mask = template['Name'] == e['asset_name']
                     asset_row = template[asset_mask].iloc[0] if asset_mask.any() else None
                     # 成交价：用户填了则用，否则从快照 Current_Price 估算
                     price_val = e.get('price', 0.0)
                     if not price_val or price_val <= 0:
                         price_val = float(asset_row['Current_Price']) if asset_row is not None else 0.0
+                    # Price_Currency: 从 portfolio Currency 读,兜底用 infer_currency
+                    _price_ccy = ''
+                    if asset_row is not None:
+                        _price_ccy = str(asset_row.get('Currency', '') or '').strip()
+                    if not _price_ccy:
+                        from fundamentals import infer_currency
+                        _price_ccy = infer_currency(
+                            str(asset_row['Code']) if asset_row is not None else '',
+                            str(asset_row['Asset_Class']) if asset_row is not None else '',
+                        )
                     tx_rows.append({
-                        'Date':        new_date_str,
-                        'Asset_Class': asset_row['Asset_Class'] if asset_row is not None else '',
-                        'Platform':    asset_row['Platform']    if asset_row is not None else '',
-                        'Name':        e['asset_name'],
-                        'Code':        asset_row['Code']        if asset_row is not None else '',
-                        'Type':        e['type'],
-                        'Amount_CNY':  round(e['amount'], 2),
-                        'Price':       round(price_val, 4),
-                        'Fee_CNY':     round(e.get('fee', 0.0), 2),
+                        'Date':           new_date_str,
+                        'Asset_Class':    asset_row['Asset_Class'] if asset_row is not None else '',
+                        'Platform':       asset_row['Platform']    if asset_row is not None else '',
+                        'Name':           e['asset_name'],
+                        'Code':           asset_row['Code']        if asset_row is not None else '',
+                        'Type':           e['type'],
+                        'Amount_CNY':     round(e['amount'], 2),
+                        'Price':          round(price_val, 4),
+                        'Price_Currency': _price_ccy,
+                        'Fee_CNY':        round(e.get('fee', 0.0), 2),
                     })
                 if tx_rows:
                     tx_df = pd.DataFrame(tx_rows)
                     tx_path = csv_path.replace('portfolio.csv', 'transaction.csv')
                     if os.path.exists(tx_path):
                         existing = pd.read_csv(tx_path)
+                        # 兼容旧 schema: 没 Price_Currency 列时加上(留空,迁移脚本回填)
+                        if 'Price_Currency' not in existing.columns:
+                            existing['Price_Currency'] = ''
+                            # 列序对齐: 把 Price_Currency 插到 Price 之后
+                            cols = list(existing.columns)
+                            cols.remove('Price_Currency')
+                            insert_at = cols.index('Price') + 1 if 'Price' in cols else len(cols)
+                            cols.insert(insert_at, 'Price_Currency')
+                            existing = existing[cols]
                         tx_df = pd.concat([existing, tx_df], ignore_index=True)
                     tx_df.to_csv(tx_path, index=False)
 
