@@ -374,6 +374,12 @@ def compute_xirr(df):
     dates = pd.to_datetime(agg['Date']).tolist()
     cashflows = agg['Net_Cash_Flow'].tolist()
 
+    # 数据不足 1 年不展示 — 对齐 TWR 的处理(_run_nav_calculation line 149)
+    # 短期数据 XIRR 数学正确但金融无意义(49 天 1.91% 折算 +15.44% 误导性强)
+    days_elapsed = (dates[-1] - dates[0]).days
+    if days_elapsed < 365:
+        return None
+
     # 终值：最新期总市值，符号取负（代表"卖出收回"）
     cashflows[-1] -= agg['Total_Value'].iloc[-1]
 

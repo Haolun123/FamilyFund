@@ -725,3 +725,41 @@ class TestCompanyStockNcfAsExternalCashFlow:
         # 验证差额就是 SAP 归属
         assert sub - old_sub == pytest.approx(3292.01)
 
+
+class TestXirrYearThreshold:
+    """XIRR 数据时长 < 1 年时返回 None,避免短期波动放大造成误导性年化数字。
+    2026-05-30 加: 之前没有此检查,49 天数据算出 +15.44% 让用户困惑。
+    现在与 TWR(_run_nav_calculation line 149)的 1 年门槛对齐。"""
+
+    def _make_short_df(self, days):
+        """构造跨度 days 天的简单 portfolio。"""
+        from datetime import date, timedelta
+        d0 = date(2026, 1, 1)
+        d1 = d0 + timedelta(days=days)
+        return pd.DataFrame([
+            {'Date': d0.isoformat(), 'Asset_Class': 'Cash', 'Platform': 'A', 'Name': '现金', 'Code': 'CASH',
+             'Currency': 'CNY', 'Exchange_Rate': 1.0, 'Shares': 100000.0, 'Current_Price': 1.0,
+             'Total_Value': 100000.0, 'Net_Cash_Flow': 100000.0},
+            {'Date': d1.isoformat(), 'Asset_Class': 'Cash', 'Platform': 'A', 'Name': '现金', 'Code': 'CASH',
+             'Currency': 'CNY', 'Exchange_Rate': 1.0, 'Shares': 110000.0, 'Current_Price': 1.0,
+             'Total_Value': 110000.0, 'Net_Cash_Flow': 0.0},
+        ])
+
+    def test_xirr_under_1_year_returns_none(self):
+        """49 天数据(实际场景)应返回 None。"""
+        df = self._make_short_df(days=49)
+        assert compute_xirr(df) is None
+
+    def test_xirr_at_364_days_returns_none(self):
+        """边界:364 天仍 < 1 年,应 None。"""
+        df = self._make_short_df(days=364)
+        assert compute_xirr(df) is None
+
+    def test_xirr_at_365_days_returns_value(self):
+        """边界:满 365 天应返回数值。10 万投 1 年涨到 11 万 → XIRR ≈ 10%。"""
+        df = self._make_short_df(days=365)
+        result = compute_xirr(df)
+        assert result is not None
+        assert result == pytest.approx(0.10, abs=0.005)
+
+
