@@ -178,7 +178,7 @@ docker exec familyfund grep -n "关键词" /app/dashboard/app.py
 - 测试文件命名：`tests/test_dca_manager.py`、`tests/test_vxn.py` 等，一个模块一个文件
 - 不要把多个模块的测试打包进同一个文件（`test_new_features.py` 仅保留无独立文件的历史测试）
 - 跑单个测试：`docker cp tests/<file>.py familyfund:/app/tests/<file>.py && docker exec familyfund python -m pytest /app/tests/<file>.py -v`
-- 跑完整 test suite(push 前必跑):`docker exec familyfund python -m pytest /app/tests/ -q`
+- 跑完整 test suite(push 前视情况,见下方"Push 前流程"):`docker exec familyfund python -m pytest /app/tests/ -q`
 - 网络依赖的测试用 `pytest.skip` 处理，不能让网络不可用导致整体失败
 
 ### 何时强制写测试(纪律 C,2026-05-28 加入)
@@ -195,17 +195,28 @@ docker exec familyfund grep -n "关键词" /app/dashboard/app.py
 
 **核心规则**:**这个 bug 6 个月后我重构相关代码,会不会重新踩坑?** 会的话就写回归测试。
 
-### Push 前必做
+### Push 前流程(2026-05-30 更新)
 
-每次 `git push` 之前,先跑一次完整 test suite:
+**Push 前不再"必跑"完整 test suite,改为问用户拍板**。原因:完整 suite 需 ~2 分钟,大多数小改动不需要跑(用户主观判断风险面比死规则更准)。
 
-```bash
-docker exec familyfund python -m pytest /app/tests/ -q
-```
+具体流程:
+- 改动只涉及单个模块/文件 → commit 时**问一句**: "需要跑完整 test suite 吗?"
+- 用户回 "**跑**" → `docker exec familyfund python -m pytest /app/tests/ -q`,全过再 push
+- 用户回 "**不用**" → 至少跑**新增/相关的单文件测试**(`pytest tests/test_xxx.py`),通过即可 push
+- 用户回 "**直接 push**" → 跳过测试,push
 
-确认全部通过(或仅有 `pytest.skip` 跳过的网络依赖测试)再 push。
+**默认建议跑的场景**(可主动建议用户跑):
+- 改了 `src/` 多个模块(交叉影响风险高)
+- 改了 `nav_engine.py` / `fundamentals.py` / `position_percentile.py` 等核心
+- 删除/重构代码(不仅是 bug fix)
+- schema 变更
 
-**完成一个 feature 的标准**：代码 ✓ + 文档 ✓ + 测试 ✓ + 完整 test suite ✓ + git push ✓
+**默认建议不跑的场景**:
+- 仅 `dashboard/app.py` 的 UI 文字/help 调整
+- 仅 `docs/` 文档
+- 仅 memory / 配置文件
+
+**完成一个 feature 的标准**：代码 ✓ + 文档 ✓ + 测试 ✓ + git push ✓(完整 suite 视情况)
 
 ---
 
