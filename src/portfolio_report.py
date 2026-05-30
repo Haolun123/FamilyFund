@@ -25,12 +25,14 @@ def generate_report(df, fund_nav_df, class_nav_dict, allocation_df, cost_basis_d
     cum_return  = latest_fund['Cumulative_Return(%)']
     total_value = latest_fund['Total_Value']
 
-    # 总成本 = 建仓日全部持仓 + 后续所有外部入金（Cash 行正 NCF，非建仓日）
+    # 总成本 = 建仓日全部持仓 + 后续所有外部入金
+    # 外部入金来源:Cash 行(银行入金)+ Company_Stock 行(SAP ESPP/RSU 归属)
+    # 2026-05-30 修:之前只算 Cash 行,漏算 SAP 归属
     first_date = df['Date'].min()
     initial_investment = df[df['Date'] == first_date]['Total_Value'].sum()
     subsequent_inflows = df[
         (df['Date'] > first_date) &
-        (df['Asset_Class'] == 'Cash') &
+        (df['Asset_Class'].isin(['Cash', 'Company_Stock'])) &
         (df['Net_Cash_Flow'] > 0)
     ]['Net_Cash_Flow'].sum()
     total_cost = initial_investment + subsequent_inflows

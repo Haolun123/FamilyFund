@@ -200,12 +200,24 @@ def compute_fund_nav(df):
     其他资产行的 NCF 是内部调仓记录（买入=正、卖出=负），
     对整体基金净影响为零（Cash 减少 = 其他资产增加），
     不应计入整体 NCF，否则会导致 NAV 失真。
+
+    Company_Stock 行 NCF 例外:SAP ESPP/RSU 归属是"从家庭外部新入资金",
+    不是内部调仓,应计入外部现金流(2026-05-30 修)。
+
+    建仓日例外:第一天所有行的 NCF 都是本金(NCF == Total_Value 约束),
+    全部计入外部现金流。
     """
     tv_agg = df.groupby('Date')['Total_Value'].sum().reset_index()
 
-    # 只用 Cash 行 NCF 作为整体外部现金流
+    # 外部现金流 =
+    #   建仓日:所有行 NCF (本金)
+    #   后续日:Cash 行 NCF (银行入金/取出) + Company_Stock 行 NCF (SAP 归属)
+    first_date = df['Date'].min()
     cash_ncf = (
-        df[df['Asset_Class'] == 'Cash']
+        df[
+            (df['Date'] == first_date)
+            | (df['Asset_Class'].isin(['Cash', 'Company_Stock']))
+        ]
         .groupby('Date')['Net_Cash_Flow']
         .sum()
         .reset_index()
@@ -342,9 +354,14 @@ def compute_xirr(df):
     # 总市值按日期汇总
     tv_agg = df.groupby('Date')['Total_Value'].sum().reset_index()
 
-    # 只取 Cash 行的 NCF 作为外部现金流
+    # 外部现金流 = 建仓日所有 NCF(本金)+ 后续日 Cash + Company_Stock NCF
+    # 2026-05-30 修:之前只看 Cash 行,漏算 SAP 归属
+    first_date = df['Date'].min()
     cash_ncf = (
-        df[df['Asset_Class'] == 'Cash']
+        df[
+            (df['Date'] == first_date)
+            | (df['Asset_Class'].isin(['Cash', 'Company_Stock']))
+        ]
         .groupby('Date')['Net_Cash_Flow']
         .sum()
         .reset_index()

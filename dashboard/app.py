@@ -238,13 +238,14 @@ with tab_dashboard:
     latest_date = latest_fund['Date']
     latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
 
-    # 累计投入 = 建仓日总市值（初始本金）+ 后续历次外部入金（Cash NCF，非建仓日）
-    # 建仓日：NCF = Total_Value（全部记为本金），后续日期：只有 Cash 行的 NCF 是外部入金
+    # 累计投入 = 建仓日总市值（初始本金）+ 后续历次外部入金
+    # 外部入金来源(2026-05-30 修):Cash 行(银行入金)+ Company_Stock 行(SAP ESPP/RSU 归属)
+    # 这两类都是"从家庭外部新流入家庭基金的资金",不是投资回报
     first_date = raw_df['Date'].min()
     initial_investment = raw_df[raw_df['Date'] == first_date]['Total_Value'].sum()
     subsequent_inflows = raw_df[
         (raw_df['Date'] > first_date) &
-        (raw_df['Asset_Class'] == 'Cash') &
+        (raw_df['Asset_Class'].isin(['Cash', 'Company_Stock'])) &
         (raw_df['Net_Cash_Flow'] > 0)
     ]['Net_Cash_Flow'].sum()
     total_invested = initial_investment + subsequent_inflows
