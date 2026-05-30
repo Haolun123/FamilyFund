@@ -36,7 +36,7 @@ _PAT_A = re.compile(
     r'(.+?)\s*'                              # 基金名称
     r'([\d,]+\.?\d*)\s*元'                   # 金额
     r'.*?(\d{1,2})月(\d{1,2})日确认成功'    # 确认月日
-    r'.*?份额为([\d.]+)份'                   # 份额
+    r'.*?份额为([\d,]+\.?\d*)份'             # 份额（支持千分位逗号）
     r'.*?净值为([\d.]+)',                    # 净值
     re.DOTALL,
 )
@@ -49,7 +49,7 @@ _PAT_A2 = re.compile(
     r'(.+?)\s*'                              # 基金名称
     r'([\d,]+\.?\d*)\s*元'                   # 金额
     r'.*?确认成功'
-    r'.*?份额为([\d.]+)份'                   # 份额
+    r'.*?份额为([\d,]+\.?\d*)份'             # 份额（支持千分位逗号）
     r'.*?净值为([\d.]+)',                    # 净值
     re.DOTALL,
 )
@@ -60,7 +60,7 @@ _PAT_B = re.compile(
     r'(.+?)基金'                             # 基金名称
     r'([\d,]+\.?\d*)\s*元'                   # 金额
     r'于(\d{1,2})月(\d{1,2})日确认成功'     # 确认月日
-    r'.*?确认份额([\d.]+)份'                 # 份额（无"为"）
+    r'.*?确认份额([\d,]+\.?\d*)份'           # 份额（无"为"，支持千分位逗号）
     r'.*?成交净值([\d.]+)',                  # 净值（无"为"）
     re.DOTALL,
 )
@@ -71,7 +71,7 @@ _PAT_B2 = re.compile(
     r'(.+?)基金'                             # 基金名称
     r'([\d,]+\.?\d*)\s*元'                   # 金额
     r'于(\d{1,2})月(\d{1,2})日确认成功'     # 确认月日
-    r'.*?确认份额为([\d.]+)份'               # 份额（有"为"）
+    r'.*?确认份额为([\d,]+\.?\d*)份'         # 份额（有"为"，支持千分位逗号）
     r'.*?成交净值为([\d.]+)',                # 净值（有"为"）
     re.DOTALL,
 )
@@ -131,7 +131,7 @@ def _parse_one(sms: str) -> dict | None:
         confirm_mo, confirm_d = int(m.group(7)), int(m.group(8))
         fund_name = m.group(5).strip()
         amount    = _parse_amount(m.group(6))
-        shares    = float(m.group(9))
+        shares    = _parse_amount(m.group(9))
         nav       = float(m.group(10))
         return {
             'confirm_date': f'{base_year:04d}-{confirm_mo:02d}-{confirm_d:02d}',
@@ -152,7 +152,7 @@ def _parse_one(sms: str) -> dict | None:
         y, mo, d_ = int(m.group(1)), int(m.group(2)), int(m.group(3))
         fund_name = m.group(4).strip()
         amount    = _parse_amount(m.group(5))
-        shares    = float(m.group(6))
+        shares    = _parse_amount(m.group(6))
         nav       = float(m.group(7))
         return {
             'confirm_date': f'{y:04d}-{mo:02d}-{d_:02d}',
@@ -174,7 +174,7 @@ def _parse_one(sms: str) -> dict | None:
         year      = _infer_year(confirm_mo)
         fund_name = m.group(3).strip()
         amount    = _parse_amount(m.group(4))
-        shares    = float(m.group(7))
+        shares    = _parse_amount(m.group(7))
         nav       = float(m.group(8))
         return {
             'confirm_date': f'{year:04d}-{confirm_mo:02d}-{confirm_d:02d}',
@@ -196,7 +196,7 @@ def _parse_one(sms: str) -> dict | None:
         year      = _infer_year(confirm_mo)
         fund_name = m.group(3).strip()
         amount    = _parse_amount(m.group(4))
-        shares    = float(m.group(7))
+        shares    = _parse_amount(m.group(7))
         nav       = float(m.group(8))
         return {
             'confirm_date': f'{year:04d}-{confirm_mo:02d}-{confirm_d:02d}',
