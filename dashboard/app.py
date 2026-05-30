@@ -1697,9 +1697,9 @@ with tab_update:
 
             # 新增标的子表单
             if entry.get('is_new'):
-                st.info("新标的信息 — 应用后将追加一行到持仓表，请之后手动填写份额/价格/市值")
+                st.info("新标的信息 — 应用后将追加一行到持仓表，请之后手动填写份额/价格/市值。如填写 yf_symbol,会自动注册到 yf_symbols.json,Research Tab 立即可见基本面")
                 na = entry.get('new_asset', {})
-                nc1, nc2, nc3, nc4, nc5 = st.columns([1.5, 1.5, 2.0, 1.5, 1.2])
+                nc1, nc2, nc3, nc4, nc5, nc6 = st.columns([1.3, 1.3, 1.8, 1.3, 1.0, 1.4])
                 with nc1:
                     na['Asset_Class'] = st.selectbox("类别", options=sorted(VALID_ASSET_CLASSES),
                         index=sorted(VALID_ASSET_CLASSES).index(na['Asset_Class']) if na.get('Asset_Class') in VALID_ASSET_CLASSES else 0,
@@ -1711,9 +1711,17 @@ with tab_update:
                 with nc4:
                     na['Code'] = st.text_input("代码", value=na.get('Code', ''), key=f"rb_new_code_{idx}")
                 with nc5:
+                    # 智能默认 Currency: 根据 Code 推断,用户可改
+                    from fundamentals import infer_currency
+                    _ccy_default = na.get('Currency') or infer_currency(na.get('Code', ''), na.get('Asset_Class', ''))
                     na['Currency'] = st.selectbox("货币", options=["CNY", "HKD", "USD", "EUR"],
-                        index=["CNY", "HKD", "USD", "EUR"].index(na['Currency']) if na.get('Currency') in ["CNY", "HKD", "USD", "EUR"] else 0,
-                        key=f"rb_new_ccy_{idx}")
+                        index=["CNY", "HKD", "USD", "EUR"].index(_ccy_default) if _ccy_default in ["CNY", "HKD", "USD", "EUR"] else 0,
+                        key=f"rb_new_ccy_{idx}",
+                        help="根据 Code 智能推断:HK 开头/.HK 后缀→HKD;6 位数字→CNY;SAP→USD")
+                with nc6:
+                    na['yf_symbol'] = st.text_input("yf_symbol(可选)", value=na.get('yf_symbol', ''),
+                        key=f"rb_new_yf_{idx}",
+                        help="如 9992.HK / 600309.SS / SAP。填写后自动注册到 yf_symbols.json,Research Tab 立即可见基本面")
                 entry['new_asset'] = na
 
         for idx in reversed(to_remove):
@@ -1828,6 +1836,18 @@ with tab_update:
                         'Total_Value':   0.0,
                         'Net_Cash_Flow': round(ncf_val, 2),
                     })
+
+                    # 同步注册 yf_symbol 映射(如用户填了)
+                    _yf_sym_new = (na.get('yf_symbol') or '').strip()
+                    _code_new = (na.get('Code') or '').strip()
+                    if _yf_sym_new and _code_new:
+                        try:
+                            from fundamentals import add_yf_symbol
+                            add_yf_symbol(os.path.dirname(csv_path), _code_new, _yf_sym_new,
+                                          show_fundamentals=True)
+                            st.success(f"✅ 已注册 yf_symbol 映射: {_code_new} → {_yf_sym_new}")
+                        except Exception as _e:
+                            st.warning(f"yf_symbol 注册失败: {_e}")
                 if new_rows:
                     template = pd.concat([template, pd.DataFrame(new_rows)], ignore_index=True)
 

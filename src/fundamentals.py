@@ -114,6 +114,55 @@ def _normalize_yf_symbol(yf_symbol: str) -> str:
     return s
 
 
+def infer_currency(code: str, asset_class: str = '') -> str:
+    """根据 portfolio.csv 的 Code / Asset_Class 推断 Currency。
+
+    用于"新增标的"表单的智能默认值,降低用户错填(如把港股填 CNY)的概率。
+
+    Args:
+        code: portfolio.csv 的 Code 字段(如 'HK0700', '601838', 'SAP.DE')
+        asset_class: 可选,Asset_Class 字段
+
+    Returns:
+        'CNY' / 'HKD' / 'USD' / 'EUR' 之一,无法判断时返回 'CNY'
+
+    规则(按优先级):
+        - 'HK' 开头(项目历史用 HKxxxx 表示港股) → HKD
+        - 4-5 位纯数字 + 港股范围(0001-9999) + 不在 A 股范围 → 难判断,默认 CNY
+        - 6 位纯数字 → CNY (A 股 / 国内基金 / ETF)
+        - 'SAP.DE' / 'SAP' → EUR / USD (硬编码 SAP 特例)
+        - 含 '.SS' / '.SZ' → CNY
+        - 含 '.HK' → HKD
+        - 其他 → CNY (兜底)
+    """
+    if not code:
+        return 'CNY'
+    c = code.strip().upper()
+
+    # 1. SAP 特例(项目内既用 SAP 也用 SAP.DE)
+    if c == 'SAP':
+        return 'USD'  # ADR
+    if c == 'SAP.DE':
+        return 'EUR'
+
+    # 2. 显式后缀
+    if c.endswith('.HK'):
+        return 'HKD'
+    if c.endswith('.SS') or c.endswith('.SZ'):
+        return 'CNY'
+
+    # 3. 项目历史前缀
+    if c.startswith('HK'):
+        return 'HKD'
+
+    # 4. 纯数字代码 → CNY (A 股、国内基金、ETF)
+    if c.isdigit():
+        return 'CNY'
+
+    # 5. 兜底
+    return 'CNY'
+
+
 def fetch_fundamentals(yf_symbol: str) -> dict | None:
     """从 yfinance 拉取基本面数据。失败返回 None。"""
     try:

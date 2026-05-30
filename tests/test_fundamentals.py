@@ -437,3 +437,69 @@ class TestDirtyCacheInvalidation:
 
         result = get_fundamentals_by_yf_symbol(tmp_dir, '0700.HK', force_refresh=False)
         assert result['currentPrice'] == 425.4
+
+
+# ── 回归测试: 新增标的 UX 改进 (2026-05-30) ──────────────────
+
+
+from fundamentals import infer_currency
+
+
+class TestInferCurrency:
+    """根据 portfolio.csv Code 推断 Currency,
+    用于"新增标的"表单的智能默认值。"""
+
+    def test_hk_prefix(self):
+        """项目历史前缀 HK_ → HKD"""
+        assert infer_currency('HK0700') == 'HKD'
+        assert infer_currency('HK9992') == 'HKD'
+        assert infer_currency('HK0883') == 'HKD'
+
+    def test_hk_suffix(self):
+        """yfinance 风格 .HK 后缀 → HKD"""
+        assert infer_currency('0700.HK') == 'HKD'
+        assert infer_currency('9992.HK') == 'HKD'
+
+    def test_a_share_suffix(self):
+        """.SS / .SZ 后缀 → CNY"""
+        assert infer_currency('601838.SS') == 'CNY'
+        assert infer_currency('002202.SZ') == 'CNY'
+
+    def test_a_share_6digit(self):
+        """6 位数字代码 → CNY (A 股 / 国内基金 / ETF)"""
+        assert infer_currency('601838') == 'CNY'
+        assert infer_currency('600036') == 'CNY'
+        assert infer_currency('512890') == 'CNY'  # ETF
+        assert infer_currency('017641') == 'CNY'  # 国内基金
+
+    def test_sap_special_cases(self):
+        """SAP 特例: SAP→USD(ADR), SAP.DE→EUR"""
+        assert infer_currency('SAP') == 'USD'
+        assert infer_currency('SAP.DE') == 'EUR'
+
+    def test_empty_returns_default(self):
+        """空 code 返回 CNY 兜底"""
+        assert infer_currency('') == 'CNY'
+        assert infer_currency(None) == 'CNY'
+
+    def test_case_insensitive(self):
+        """大小写不敏感"""
+        assert infer_currency('hk0700') == 'HKD'
+        assert infer_currency('0700.hk') == 'HKD'
+        assert infer_currency('601838.ss') == 'CNY'
+
+    def test_whitespace_handled(self):
+        """前后空格处理"""
+        assert infer_currency(' HK0700 ') == 'HKD'
+        assert infer_currency(' 601838 ') == 'CNY'
+
+    def test_unknown_returns_default(self):
+        """无法识别的代码兜底返回 CNY"""
+        assert infer_currency('XYZ123') == 'CNY'
+        assert infer_currency('UNKNOWN') == 'CNY'
+
+    def test_泡泡玛特_real_case(self):
+        """实际场景:泡泡玛特进池 — 用户填 Code=HK9992 应自动得 HKD"""
+        # 这是 2026-05-30 用户报告的真实场景
+        assert infer_currency('HK9992') == 'HKD'
+
