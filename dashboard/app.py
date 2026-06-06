@@ -606,9 +606,8 @@ with tab_dashboard:
             st.metric(
                 row['Currency'],
                 f"¥{row['CNY_Value']:,.0f}",
-                f"{row['Pct']*100:.1f}%",
-                delta_color="off",
             )
+            st.caption(f"占比 {row['Pct']*100:.1f}%")
 
     # Pie chart
     fig_ccy = px.pie(
