@@ -607,6 +607,7 @@ with tab_dashboard:
                 row['Currency'],
                 f"¥{row['CNY_Value']:,.0f}",
                 f"{row['Pct']*100:.1f}%",
+                delta_color="off",
             )
 
     # Pie chart
