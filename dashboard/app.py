@@ -174,10 +174,12 @@ with tab_dashboard:
     target_alloc = load_target_allocation(os.path.dirname(csv_path))
 
     # ─── Portfolio 筛选控件 ───
-    with st.expander("🔧 筛选与导出", expanded=False):
+    with st.expander("🔧 图表显示与导出", expanded=False):
+        st.caption("⚠️ 日期范围仅作用于本页折线图（基金净值、分类净值、基准对比）。"
+                   "KPI 指标、饼图、表格、HTML 报告始终基于完整组合数据。")
         _fc1, _fc2, _fc3 = st.columns([2, 2, 1])
         with _fc1:
-            st.markdown("**日期范围**")
+            st.markdown("**日期范围**（折线图）")
             if len(dates) > 1:
                 _start_idx, _end_idx = st.select_slider(
                     "日期范围",
@@ -193,7 +195,7 @@ with tab_dashboard:
                 date_start = date_end = dates[0]
 
         with _fc2:
-            st.markdown("**资产类别**")
+            st.markdown("**资产类别**（分类 NAV 折线图）")
             _select_all = st.checkbox("全选", value=True, key="port_select_all")
             if _select_all:
                 selected_classes = all_classes
