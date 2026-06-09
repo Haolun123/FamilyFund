@@ -10,4 +10,6 @@ services:
       - ${FAMILYFUND_DATA:-./data}:/app/data
       - ./src:/app/src
       - ./dashboard:/app/dashboard
+      - ./mcp_server.py:/app/mcp_server.py
+      - ./tests:/app/tests
     restart: unless-stopped

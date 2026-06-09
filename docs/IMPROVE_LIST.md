@@ -53,6 +53,7 @@
 | 1 | **鲨鱼记账解析 + 季度现金流分析** | `DESIGN_CASHFLOW.md` | Q2 数据(2026-07 启动) |
 | 2 | **F5 商品价格抓取**(Brent + 黄金 + 铜 + WTI + 铁矿石)| `DESIGN_PORTFOLIO_ARCHITECTURE.md` F5 节 | 中海油接近建仓窗口(Brent < 60 + PB < 1.0)时再做,当前不需要 |
 | 3 | **短信解析 UX 改进**(防"幽灵漏加")| 见下方"已知隐患"详述 | 当前靠对账纪律兜底,可缓行 |
+| 4 | **修复 7 个 stale tests** | — | 2026-06-09 跑全量发现:5 个 SAP 测试(`test_sap_stock.py`)与 commit `05164eb` 后的"分红复投排除成本基准"实际行为不一致;2 个矩阵阈值测试(`test_market_monitor.py::test_sp500_watch_high_pe_mid_vix` / `test_ndx100_watch`)与现行观望/暂停阈值不一致。本次 mcp_server bug 修复无关,但应尽快修齐让 suite 100% 绿 |
 
 ### P3 — 需前置数据积累
 

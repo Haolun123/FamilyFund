@@ -70,7 +70,7 @@ def get_portfolio_snapshot() -> str:
             lines.append(
                 f"| {row.get('Display_Name', row['Asset_Class'])} "
                 f"| ¥{row['Total_Value']:,.0f} "
-                f"| {row['Allocation_Percent']:.1f}% |"
+                f"| {row['Allocation_Percent']*100:.1f}% |"
             )
         # Cash 单独列出
         cash_rows = allocation_df[allocation_df['Asset_Class'] == 'Cash']
