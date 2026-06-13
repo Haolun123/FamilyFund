@@ -1294,7 +1294,521 @@ with tab_update:
                 st.success(f"已解析 {len(parsed_df)} 行")
                 st.rerun()
 
-    # ─── Reset button + FX refresh ───
+    # ─── 📱 短信解析（第一步）───────────────────────────────
+    st.subheader("📱 步骤一：导入定投确认短信")
+    st.caption("粘贴本周所有定投确认短信，系统自动更新份额、净值，并登记调仓记录。完成后再手动补充其余持仓价格。")
+
+    sms_text = st.text_area("短信内容（多条短信用空行分隔）", height=120, key="sms_input",
+                            placeholder="【博时基金】尊敬的...确认成功，份额为...净值为...\n\n【南方基金】...")
+    if st.button("🔍 解析短信", key="sms_parse", type="primary"):
+        if sms_text.strip():
+            from sms_parser import parse_sms
+            _holdings = [
+                {'code': str(row['Code']), 'name': str(row['Name'])}
+                for _, row in st.session_state['update_template'][
+                    st.session_state['update_template']['Asset_Class'] != 'Cash'
+                ].iterrows()
+                if pd.notna(row['Name']) and pd.notna(row['Code'])
+            ]
+            _parsed = parse_sms(sms_text, _holdings)
+            st.session_state['sms_parsed'] = _parsed
+            st.rerun()
+        else:
+            st.warning("请先粘贴短信内容")
+
+    if 'sms_parsed' in st.session_state:
+        _parsed = st.session_state['sms_parsed']
+        st.markdown("**解析结果：**")
+        _any_error = False
+        for i, r in enumerate(_parsed):
+            if r.get('parse_error'):
+                st.error(f"第{i+1}条短信无法解析")
+                _any_error = True
+                continue
+            _match_str = f"{r['matched_code']} ({r['matched_name']})" if r['matched_code'] else "❓ 未匹配"
+            _gold_str  = f"（{r['shares']}克）" if r['is_gold'] else ""
+            st.markdown(
+                f"**{i+1}.** {r['confirm_date']} · {r['action']} · "
+                f"{r['fund_name']} → {_match_str}  "
+                f"金额 ¥{r['amount']:,.2f}{_gold_str} · 净值 {r['nav']:.4f} · 份额 {r['shares']}"
+            )
+            if not r['matched_code']:
+                _options = [''] + [
+                    f"{row['Name']} ({row['Code']})"
+                    for _, row in st.session_state['update_template'][
+                        st.session_state['update_template']['Asset_Class'] != 'Cash'
+                    ].iterrows()
+                    if pd.notna(row['Name'])
+                ]
+                _sel = st.selectbox(f"手动选择持仓（第{i+1}条）", _options, key=f"sms_match_{i}")
+                if _sel:
+                    _name, _code = _sel.rsplit(' (', 1)
+                    _code = _code.rstrip(')')
+                    _parsed[i]['matched_code'] = _code
+                    _parsed[i]['matched_name'] = _name
+                    st.session_state['sms_parsed'] = _parsed
+
+        if not _any_error:
+            if st.button("✅ 应用解析结果", key="sms_apply", type="primary"):
+                _applied = 0
+                for r in _parsed:
+                    if r.get('parse_error') or not r['matched_code']:
+                        continue
+                    # 填入调仓辅助器（Shares / NCF / Cash 统一由调仓辅助器"应用"派生）
+                    st.session_state['rebalance_entries'].append({
+                        'type':        r['action'],
+                        'asset_name':  r['matched_name'],
+                        'asset_label': f"{r['matched_name']} ({r['matched_code']})",
+                        'amount':      r['amount'],
+                        'price':       r['nav'],   # 成本净值，只进 transaction.csv
+                        'fee':         0.0,
+                        'shares':      float(r['shares']),  # 确认份额，由调仓辅助器写入 Shares
+                        'is_new':      False,
+                        'new_asset':   {},
+                    })
+                    _applied += 1
+                del st.session_state['sms_parsed']
+                st.success(f"✅ 已登记 {_applied} 条交易到调仓辅助器，请在步骤二确认后点「应用到持仓表」")
+                st.rerun()
+
+        if st.button("清除解析结果", key="sms_clear"):
+            del st.session_state['sms_parsed']
+            st.rerun()
+
+    st.divider()
+
+    # ─── 调仓辅助器（步骤二）───
+    with st.expander("⚖️ 步骤二：调仓辅助器（登记所有买卖 / 外部入金）", expanded=True):
+        st.caption(
+            "登记本期所有买卖及外部资金操作。点击「应用」后：\n"
+            "① 更新 Shares（确认份额优先，无份额则金额÷净值估算）；"
+            "② 更新 Cash 行 Total_Value；"
+            "③ 在相关资产行写入 Net_Cash_Flow（买入为正，卖出为负）；"
+            "④ 新增标的自动追加到持仓表（含初始 Shares）。"
+        )
+
+        if 'rebalance_entries' not in st.session_state:
+            st.session_state['rebalance_entries'] = []
+
+        col_add1, col_add2, col_add3, col_add4 = st.columns(4)
+        with col_add1:
+            if st.button("＋ 买入", key="rb_add_buy"):
+                st.session_state['rebalance_entries'].append(
+                    {'type': '买入', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
+                st.rerun()
+        with col_add2:
+            if st.button("＋ 卖出", key="rb_add_sell"):
+                st.session_state['rebalance_entries'].append(
+                    {'type': '卖出', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
+                st.rerun()
+        with col_add3:
+            if st.button("＋ 外部入金", key="rb_add_ext_in"):
+                st.session_state['rebalance_entries'].append(
+                    {'type': '外部入金', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
+                st.rerun()
+        with col_add4:
+            if st.button("＋ 外部取出", key="rb_add_ext_out"):
+                st.session_state['rebalance_entries'].append(
+                    {'type': '外部取出', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
+                st.rerun()
+
+        # Build asset options: "Name (Code)" for clarity, excluding Cash
+        asset_rows = st.session_state['update_template'][st.session_state['update_template']['Asset_Class'] != 'Cash'].dropna(subset=['Name'])
+        def _asset_label(row):
+            code = str(row.get('Code', '')).strip()
+            name = str(row.get('Name', '')).strip()
+            return f"{name} ({code})" if code else name
+        asset_options_labels = [_asset_label(r) for _, r in asset_rows.iterrows()] + ['新增标的']
+        # Keep a mapping from label back to Name (for NCF writing)
+        asset_label_to_name = {_asset_label(r): r['Name'] for _, r in asset_rows.iterrows()}
+        asset_label_to_name['新增标的'] = '新增标的'
+
+        # 标签 → 原始货币（用于 Price 字段币种标签）
+        # 优先看持仓表 Currency 字段；若为 CNY 但 Code 形如港股，强制识别为 HKD
+        import re as _re_ccy
+        def _detect_ccy(row):
+            ccy = str(row.get('Currency', 'CNY')).strip().upper() or 'CNY'
+            code = str(row.get('Code', '')).strip()
+            # Code 形如 HK0700 / 0700.HK 强制为 HKD（覆盖历史 Currency=CNY 的情况）
+            if _re_ccy.match(r'^HK\d+$', code, _re_ccy.IGNORECASE) or \
+               _re_ccy.match(r'^\d+\.HK$', code, _re_ccy.IGNORECASE):
+                return 'HKD'
+            return ccy
+        asset_label_to_ccy = {_asset_label(r): _detect_ccy(r) for _, r in asset_rows.iterrows()}
+        asset_label_to_ccy['新增标的'] = 'CNY'
+
+        entries = st.session_state['rebalance_entries']
+        to_remove = []
+        type_labels = {'买入': '🟢 买入', '卖出': '🔴 卖出', '外部入金': '🔵 外部入金', '外部取出': '🟠 外部取出'}
+
+        for idx, entry in enumerate(entries):
+            c1, c2, c3, c4 = st.columns([1.0, 2.5, 1.8, 0.5])
+            with c1:
+                st.markdown("　")  # label 占位，与其他列对齐
+                st.markdown(f"**{type_labels.get(entry['type'], entry['type'])}**")
+            with c2:
+                if entry['type'] in ('买入', '卖出'):
+                    current_label = entry.get('asset_label', '')
+                    selected_label = st.selectbox(
+                        "资产标的",
+                        options=[''] + asset_options_labels,
+                        index=([''] + asset_options_labels).index(current_label)
+                              if current_label in ([''] + asset_options_labels) else 0,
+                        key=f"rb_asset_{idx}",
+                        placeholder="选择资产（名称 + 代码）...",
+                    )
+                    entry['asset_label'] = selected_label
+                    entry['asset_name'] = asset_label_to_name.get(selected_label, selected_label)
+                    entry['is_new'] = (selected_label == '新增标的')
+                else:
+                    st.markdown("*外部资金*")
+                    entry['asset_name'] = ''
+                    entry['is_new'] = False
+            with c3:
+                entry['amount'] = st.number_input(
+                    "买入/卖出总金额 (CNY)", value=float(entry['amount']), min_value=0.0, step=100.0,
+                    format="%.2f", key=f"rb_amt_{idx}",
+                    help=(
+                        "本次操作的人民币总金额（券商成交金额，不含手续费）。"
+                        "买入填券商显示的成交金额，卖出填到账金额（扣费前）。"
+                        "手续费在右下框单独填写，会与本金额合并写入 NCF。"
+                    ),
+                )
+            with c4:
+                st.markdown("　")  # label 占位
+                if st.button("✕", key=f"rb_del_{idx}"):
+                    to_remove.append(idx)
+
+            # 买入/卖出：展示成交价和手续费（可选，用于 transaction.csv 记录）
+            if entry['type'] in ('买入', '卖出'):
+                # 检测当前所选标的的原始货币
+                _entry_ccy = asset_label_to_ccy.get(entry.get('asset_label', ''), 'CNY')
+
+                s_col, p_col, f_col = st.columns(3)
+                with s_col:
+                    _shares_val = float(entry.get('shares', 0.0) or 0.0)
+                    _shares_help = (
+                        "短信确认份额（自动填入，精确值）。手动买入请填确认份额，"
+                        "不填则由「金额 ÷ 成交净值」估算。港股填股数（如 100）。"
+                    )
+                    entry['shares'] = st.number_input(
+                        "确认份额（短信自动填）",
+                        value=_shares_val, min_value=0.0, format="%.4f",
+                        key=f"rb_shares_{idx}",
+                        help=_shares_help,
+                    )
+                with p_col:
+                    _price_label = f"成交单价（{_entry_ccy}，必填）" if _entry_ccy != 'CNY' \
+                        else "申购/赎回确认净值（CNY，必填）"
+                    _price_help = (
+                        f"原始货币（{_entry_ccy}）单价，用于 transaction.csv 成本记录。"
+                        f"对于港股请填港币股价（如 449.6 HKD/股）。"
+                        f"主金额栏请填券商显示的人民币结算金额。"
+                    ) if _entry_ccy != 'CNY' else \
+                    "基金净值或黄金单价（CNY），用于 transaction.csv 成本记录及份额估算。"
+                    entry['price'] = st.number_input(
+                        _price_label,
+                        value=float(entry.get('price', 0.0)), min_value=0.0, format="%.4f",
+                        key=f"rb_price_{idx}",
+                        help=_price_help,
+                    )
+                with f_col:
+                    entry['fee'] = st.number_input(
+                        "手续费 CNY（可选，默认0）",
+                        value=float(entry.get('fee', 0.0)), min_value=0.0, format="%.2f",
+                        key=f"rb_fee_{idx}",
+                        help="券商显示的交易费用（已计入 NCF 投资成本，Cash 同步扣减）",
+                    )
+
+                # 港股提示：让用户知道主金额栏要填券商人民币结算金额
+                if _entry_ccy == 'HKD' and entry.get('amount', 0) == 0:
+                    st.caption(
+                        f"💡 港股提示：主金额栏请填**券商显示的人民币成交金额**（已含汇率换算）。"
+                        f"成交单价填港币原始价。手续费已含在 NCF 投资成本中。"
+                    )
+
+            # 新增标的子表单
+            if entry.get('is_new'):
+                st.info("新标的信息 — 应用后将追加一行到持仓表，请之后手动填写份额/价格/市值。如填写 yf_symbol,会自动注册到 yf_symbols.json,Research Tab 立即可见基本面")
+                na = entry.get('new_asset', {})
+                nc1, nc2, nc3, nc4, nc5, nc6 = st.columns([1.3, 1.3, 1.8, 1.3, 1.0, 1.4])
+                with nc1:
+                    na['Asset_Class'] = st.selectbox("类别", options=sorted(VALID_ASSET_CLASSES),
+                        index=sorted(VALID_ASSET_CLASSES).index(na['Asset_Class']) if na.get('Asset_Class') in VALID_ASSET_CLASSES else 0,
+                        key=f"rb_new_ac_{idx}")
+                with nc2:
+                    na['Platform'] = st.text_input("平台", value=na.get('Platform', ''), key=f"rb_new_plat_{idx}")
+                with nc3:
+                    na['Name'] = st.text_input("名称", value=na.get('Name', ''), key=f"rb_new_name_{idx}")
+                with nc4:
+                    na['Code'] = st.text_input("代码", value=na.get('Code', ''), key=f"rb_new_code_{idx}")
+                with nc5:
+                    # 智能默认 Currency: 根据 Code 推断,用户可改
+                    from fundamentals import infer_currency
+                    _ccy_default = na.get('Currency') or infer_currency(na.get('Code', ''), na.get('Asset_Class', ''))
+                    na['Currency'] = st.selectbox("货币", options=["CNY", "HKD", "USD", "EUR"],
+                        index=["CNY", "HKD", "USD", "EUR"].index(_ccy_default) if _ccy_default in ["CNY", "HKD", "USD", "EUR"] else 0,
+                        key=f"rb_new_ccy_{idx}",
+                        help="根据 Code 智能推断:HK 开头/.HK 后缀→HKD;6 位数字→CNY;SAP→USD")
+                with nc6:
+                    na['yf_symbol'] = st.text_input("yf_symbol(可选)", value=na.get('yf_symbol', ''),
+                        key=f"rb_new_yf_{idx}",
+                        help="如 9992.HK / 600309.SS / SAP。填写后自动注册到 yf_symbols.json,Research Tab 立即可见基本面")
+                entry['new_asset'] = na
+
+        for idx in reversed(to_remove):
+            st.session_state['rebalance_entries'].pop(idx)
+        if to_remove:
+            st.rerun()
+
+        if entries:
+            st.divider()
+
+            # 买入/卖出含费成本（NCF 与 Cash 都按"成交金额 + 手续费"扣减）
+            # 卖出时手续费从到手金额里扣，所以 Cash 增加 = (成交金额 - 手续费)
+            total_buy  = sum(e['amount'] + e.get('fee', 0.0) for e in entries if e['type'] == '买入')
+            total_sell = sum(e['amount'] - e.get('fee', 0.0) for e in entries if e['type'] == '卖出')
+            ext_in     = sum(e['amount'] for e in entries if e['type'] == '外部入金')
+            ext_out    = sum(e['amount'] for e in entries if e['type'] == '外部取出')
+            cash_delta   = total_sell - total_buy + ext_in - ext_out
+            external_ncf = ext_in - ext_out
+
+            prev_cash_rows = st.session_state['update_template'][st.session_state['update_template']['Asset_Class'] == 'Cash']
+            prev_cash_tv   = prev_cash_rows['Total_Value'].sum() if len(prev_cash_rows) > 0 else 0.0
+            new_cash_tv    = prev_cash_tv + cash_delta
+
+            res_col1, res_col2, res_col3, res_col4, res_col5 = st.columns(5)
+            with res_col1:
+                st.metric("当前 Cash", f"¥{prev_cash_tv:,.0f}")
+            with res_col2:
+                st.metric("操作后 Cash", f"¥{new_cash_tv:,.0f}", delta=f"{cash_delta:+,.0f}")
+            with res_col3:
+                st.metric("Cash NCF（外部）", f"¥{external_ncf:+,.0f}", help="只有外部入金/取出计入 NCF")
+            with res_col4:
+                st.metric("买入合计", f"¥{total_buy:,.0f}")
+            with res_col5:
+                st.metric("卖出合计", f"¥{total_sell:,.0f}")
+
+            if st.button("✅ 应用到持仓表", type="primary", key="rb_apply"):
+                template = st.session_state['update_template'].copy()
+
+                # 预检警告（不阻断）
+                if new_cash_tv < 0:
+                    st.warning(f"应用后 Cash 将为负 (¥{new_cash_tv:,.0f})，请检查买入金额")
+                if total_buy > prev_cash_tv and prev_cash_tv > 0:
+                    st.warning(f"买入合计 ¥{total_buy:,.0f} 超过当前 Cash ¥{prev_cash_tv:,.0f}")
+                for e in entries:
+                    if e['type'] == '卖出' and e['asset_name'] and not e['is_new']:
+                        mask = template['Name'] == e['asset_name']
+                        if mask.any():
+                            asset_tv = template.loc[mask, 'Total_Value'].iloc[0]
+                            if e['amount'] > asset_tv:
+                                st.warning(f"卖出「{e['asset_name']}」¥{e['amount']:,.0f} 超过当前市值 ¥{asset_tv:,.0f}")
+
+                # 更新 Cash 行
+                cash_mask = template['Asset_Class'] == 'Cash'
+                if cash_mask.any():
+                    if cash_mask.sum() == 1:
+                        ci = template[cash_mask].index[0]
+                        template.at[ci, 'Total_Value']   = round(new_cash_tv, 2)
+                        template.at[ci, 'Shares']        = round(new_cash_tv, 2)
+                        template.at[ci, 'Net_Cash_Flow'] = round(external_ncf, 2)
+                    else:
+                        st.warning("检测到多条 Cash 行，请手动更新 Cash 的 Total_Value 和 NCF")
+                else:
+                    st.warning("未找到 Cash 行，请手动更新")
+
+                # 写入各资产 NCF + Shares（已有持仓）
+                # NCF 含费：买入 = +(amount + fee)；卖出 = -(amount - fee)
+                for e in entries:
+                    if e['type'] not in ('买入', '卖出') or not e['asset_name'] or e['is_new']:
+                        continue
+                    mask = template['Name'] == e['asset_name']
+                    if not mask.any():
+                        st.warning(f"找不到资产「{e['asset_name']}」，跳过写入")
+                        continue
+                    if mask.sum() > 1:
+                        st.warning(f"「{e['asset_name']}」有 {mask.sum()} 条匹配行，写入到第一条，请手动核查其余行")
+                    idx_row = template[mask].index[0]
+                    fee = e.get('fee', 0.0) or 0.0
+
+                    # --- Shares 更新 ---
+                    confirmed_shares = float(e.get('shares', 0.0) or 0.0)
+                    if confirmed_shares > 0:
+                        # 优先用确认份额（短信精确值 or 用户手填）
+                        delta_shares = confirmed_shares if e['type'] == '买入' else -confirmed_shares
+                    elif float(e.get('price', 0.0) or 0.0) > 0:
+                        # 用金额 / 净值反算（price 是原始币种，amount 是 CNY）
+                        er = float(template.at[idx_row, 'Exchange_Rate'] or 1.0)
+                        price_cny = e['price'] * er
+                        delta_shares = (e['amount'] / price_cny) if e['type'] == '买入' \
+                            else -(e['amount'] / price_cny)
+                    else:
+                        delta_shares = 0.0
+                        st.warning(f"「{e['asset_name']}」未填净值，Shares 无法计算，请手动更新")
+
+                    if delta_shares != 0.0:
+                        old_shares = float(template.at[idx_row, 'Shares'] or 0.0)
+                        template.at[idx_row, 'Shares'] = max(0.0, round(old_shares + delta_shares, 6))
+
+                    # --- NCF 写入 ---
+                    ncf_delta = (e['amount'] + fee) if e['type'] == '买入' else -(e['amount'] - fee)
+                    template.at[idx_row, 'Net_Cash_Flow'] = round(
+                        (template.at[idx_row, 'Net_Cash_Flow'] or 0) + ncf_delta, 2
+                    )
+
+                # 追加新标的行
+                new_rows = []
+                for e in entries:
+                    if e['type'] not in ('买入', '卖出') or not e.get('is_new'):
+                        continue
+                    na = e.get('new_asset', {})
+                    if not na.get('Name'):
+                        st.warning("新增标的缺少 Name 字段，跳过追加")
+                        continue
+                    if na['Name'] in template['Name'].values:
+                        st.warning(f"「{na['Name']}」已存在于持仓表，建议改用「买入」选择现有资产")
+                    fee = e.get('fee', 0.0) or 0.0
+                    if e['type'] == '买入':
+                        ncf_val = e['amount'] + fee
+                    else:
+                        ncf_val = -(e['amount'] - fee)
+                    # 新标的初始 Shares：优先确认份额，否则金额/净值反算
+                    _confirmed = float(e.get('shares', 0.0) or 0.0)
+                    if _confirmed > 0:
+                        _initial_shares = _confirmed
+                    elif float(e.get('price', 0.0) or 0.0) > 0:
+                        _initial_shares = round(e['amount'] / e['price'], 6)
+                    else:
+                        _initial_shares = 0.0
+                    new_rows.append({
+                        'Asset_Class':   na.get('Asset_Class', ''),
+                        'Platform':      na.get('Platform', ''),
+                        'Name':          na.get('Name', ''),
+                        'Code':          na.get('Code', ''),
+                        'Currency':      na.get('Currency', 'CNY'),
+                        'Exchange_Rate': 1.0,
+                        'Shares':        _initial_shares,
+                        'Current_Price': 0.0,
+                        'Total_Value':   0.0,
+                        'Net_Cash_Flow': round(ncf_val, 2),
+                    })
+
+                    # 同步注册 yf_symbol 映射(如用户填了)
+                    _yf_sym_new = (na.get('yf_symbol') or '').strip()
+                    _code_new = (na.get('Code') or '').strip()
+                    if _yf_sym_new and _code_new:
+                        try:
+                            from fundamentals import add_yf_symbol
+                            add_yf_symbol(os.path.dirname(csv_path), _code_new, _yf_sym_new,
+                                          show_fundamentals=True)
+                            st.success(f"✅ 已注册 yf_symbol 映射: {_code_new} → {_yf_sym_new}")
+                        except Exception as _e:
+                            st.warning(f"yf_symbol 注册失败: {_e}")
+                if new_rows:
+                    template = pd.concat([template, pd.DataFrame(new_rows)], ignore_index=True)
+
+                # ─── 暂存 transaction 条目（不落盘，等保存快照时统一提交）───
+                if 'pending_transactions' not in st.session_state:
+                    st.session_state['pending_transactions'] = []
+                for e in entries:
+                    if e['type'] not in ('买入', '卖出') or not e['asset_name']:
+                        continue
+                    asset_mask = template['Name'] == e['asset_name']
+                    asset_row = template[asset_mask].iloc[0] if asset_mask.any() else None
+                    price_val = e.get('price', 0.0)
+                    if not price_val or price_val <= 0:
+                        price_val = float(asset_row['Current_Price']) if asset_row is not None else 0.0
+                    _price_ccy = ''
+                    if asset_row is not None:
+                        _price_ccy = str(asset_row.get('Currency', '') or '').strip()
+                    if not _price_ccy:
+                        from fundamentals import infer_currency
+                        _price_ccy = infer_currency(
+                            str(asset_row['Code']) if asset_row is not None else '',
+                            str(asset_row['Asset_Class']) if asset_row is not None else '',
+                        )
+                    st.session_state['pending_transactions'].append({
+                        'Date':           new_date_str,
+                        'Asset_Class':    asset_row['Asset_Class'] if asset_row is not None else '',
+                        'Platform':       asset_row['Platform']    if asset_row is not None else '',
+                        'Name':           e['asset_name'],
+                        'Code':           asset_row['Code']        if asset_row is not None else '',
+                        'Type':           e['type'],
+                        'Amount_CNY':     round(e['amount'], 2),
+                        'Price':          round(price_val, 4),
+                        'Price_Currency': _price_ccy,
+                        'Fee_CNY':        round(e.get('fee', 0.0), 2),
+                    })
+
+                st.session_state['update_template'] = template
+                st.session_state['rebalance_entries'] = []
+                st.rerun()
+
+        if entries and st.button("清空所有条目", key="rb_clear", type="secondary"):
+            st.session_state['rebalance_entries'] = []
+            st.rerun()
+
+    # ─── Editable table ───
+    st.subheader("步骤三：确认持仓数据 / 刷新净值")
+    st.caption("调仓辅助器应用后，Shares / NCF 已自动更新。点「刷新净值」拉取最新 Current_Price，固定收益如拉取失败请手动填写，最后重算市值。")
+
+    edited_df = st.data_editor(
+        st.session_state['update_template'],
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Asset_Class": st.column_config.SelectboxColumn(
+                "Asset_Class",
+                options=sorted(VALID_ASSET_CLASSES),
+                required=True,
+            ),
+            "Platform": st.column_config.TextColumn("Platform", required=True),
+            "Name": st.column_config.TextColumn("Name", required=True),
+            "Code": st.column_config.TextColumn("Code", default=""),
+            "Currency": st.column_config.SelectboxColumn(
+                "Currency",
+                options=["CNY", "HKD", "USD", "EUR"],
+                required=True,
+            ),
+            "Exchange_Rate": st.column_config.NumberColumn(
+                "Exchange_Rate", format="%.4f", min_value=0.0001, default=1.0,
+                help="Currency to CNY (e.g. EUR→CNY ≈ 7.92)",
+            ),
+            "Shares": st.column_config.NumberColumn("Shares", format="%.2f", min_value=0.0),
+            "Current_Price": st.column_config.NumberColumn("Current_Price", format="%.4f", min_value=0.0),
+            "Total_Value": st.column_config.NumberColumn("Total_Value", format="%.2f", min_value=0.0),
+            "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", format="%.2f", default=0.0),
+        },
+        column_order=[
+            "Asset_Class", "Platform", "Name", "Code", "Currency", "Exchange_Rate",
+            "Shares", "Current_Price", "Total_Value", "Net_Cash_Flow",
+        ],
+        key="weekly_editor",
+    )
+
+    # ─── 重算市值（在 data_editor 之后，读 edited_df）───
+    if st.button("🔄 重算市值 (Shares × Price × Rate)", type="secondary",
+                 help="对所有 Shares > 0 且 Current_Price > 0 的非 Cash 行，自动计算 Total_Value = Shares × Current_Price × Exchange_Rate。手动填写的 Total_Value 仍可在表格中直接覆盖。"):
+        recalc = edited_df.copy()
+        mask = (
+            (recalc['Asset_Class'] != 'Cash') &
+            (pd.to_numeric(recalc['Shares'], errors='coerce').fillna(0) > 0) &
+            (pd.to_numeric(recalc['Current_Price'], errors='coerce').fillna(0) > 0)
+        )
+        recalc.loc[mask, 'Total_Value'] = (
+            pd.to_numeric(recalc.loc[mask, 'Shares'], errors='coerce') *
+            pd.to_numeric(recalc.loc[mask, 'Current_Price'], errors='coerce') *
+            pd.to_numeric(recalc.loc[mask, 'Exchange_Rate'], errors='coerce').fillna(1.0)
+        ).round(2)
+        updated_count = mask.sum()
+        st.session_state['update_template'] = recalc
+        st.success(f"已重算 {updated_count} 行市值")
+        st.rerun()
+
+
+    # ─── 工具栏：重置 / 汇率 / 净值刷新 ───
     btn_col1, btn_col2 = st.columns(2)
     with btn_col1:
         if st.button("重置为上周模板", type="secondary"):
@@ -1410,520 +1924,6 @@ with tab_update:
                     st.markdown(f"⚠️ `{code}` — {res['msg']}")
                 else:
                     st.markdown(f"❌ `{code}` — {res['msg']}")
-
-    # ─── 📱 短信解析（第一步）───────────────────────────────
-    st.subheader("📱 步骤一：导入定投确认短信")
-    st.caption("粘贴本周所有定投确认短信，系统自动更新份额、净值，并登记调仓记录。完成后再手动补充其余持仓价格。")
-
-    sms_text = st.text_area("短信内容（多条短信用空行分隔）", height=120, key="sms_input",
-                            placeholder="【博时基金】尊敬的...确认成功，份额为...净值为...\n\n【南方基金】...")
-    if st.button("🔍 解析短信", key="sms_parse", type="primary"):
-        if sms_text.strip():
-            from sms_parser import parse_sms
-            _holdings = [
-                {'code': str(row['Code']), 'name': str(row['Name'])}
-                for _, row in st.session_state['update_template'][
-                    st.session_state['update_template']['Asset_Class'] != 'Cash'
-                ].iterrows()
-                if pd.notna(row['Name']) and pd.notna(row['Code'])
-            ]
-            _parsed = parse_sms(sms_text, _holdings)
-            st.session_state['sms_parsed'] = _parsed
-            st.rerun()
-        else:
-            st.warning("请先粘贴短信内容")
-
-    if 'sms_parsed' in st.session_state:
-        _parsed = st.session_state['sms_parsed']
-        st.markdown("**解析结果：**")
-        _any_error = False
-        for i, r in enumerate(_parsed):
-            if r.get('parse_error'):
-                st.error(f"第{i+1}条短信无法解析")
-                _any_error = True
-                continue
-            _match_str = f"{r['matched_code']} ({r['matched_name']})" if r['matched_code'] else "❓ 未匹配"
-            _gold_str  = f"（{r['shares']}克）" if r['is_gold'] else ""
-            st.markdown(
-                f"**{i+1}.** {r['confirm_date']} · {r['action']} · "
-                f"{r['fund_name']} → {_match_str}  "
-                f"金额 ¥{r['amount']:,.2f}{_gold_str} · 净值 {r['nav']:.4f} · 份额 {r['shares']}"
-            )
-            if not r['matched_code']:
-                _options = [''] + [
-                    f"{row['Name']} ({row['Code']})"
-                    for _, row in st.session_state['update_template'][
-                        st.session_state['update_template']['Asset_Class'] != 'Cash'
-                    ].iterrows()
-                    if pd.notna(row['Name'])
-                ]
-                _sel = st.selectbox(f"手动选择持仓（第{i+1}条）", _options, key=f"sms_match_{i}")
-                if _sel:
-                    _name, _code = _sel.rsplit(' (', 1)
-                    _code = _code.rstrip(')')
-                    _parsed[i]['matched_code'] = _code
-                    _parsed[i]['matched_name'] = _name
-                    st.session_state['sms_parsed'] = _parsed
-
-        if not _any_error:
-            if st.button("✅ 应用解析结果", key="sms_apply", type="primary"):
-                _shares_updated = 0
-                for r in _parsed:
-                    if r.get('parse_error') or not r['matched_code']:
-                        continue
-                    # 1. 填入调仓辅助器（NCF / Cash）
-                    st.session_state['rebalance_entries'].append({
-                        'type':        r['action'],
-                        'asset_name':  r['matched_name'],
-                        'asset_label': f"{r['matched_name']} ({r['matched_code']})",
-                        'amount':      r['amount'],
-                        'price':       r['nav'],
-                        'fee':         0.0,
-                        'is_new':      False,
-                        'new_asset':   {},
-                    })
-                    # 2. 自动更新持仓表 Shares 和 Current_Price
-                    _tpl = st.session_state['update_template']
-                    _mask = _tpl['Code'].astype(str) == str(r['matched_code'])
-                    if not _mask.any():
-                        _mask = _tpl['Name'].astype(str) == str(r['matched_name'])
-                    if _mask.any():
-                        _idx = _tpl[_mask].index[0]
-                        if r['action'] == '买入':
-                            _tpl.at[_idx, 'Shares'] = round(
-                                float(_tpl.at[_idx, 'Shares'] or 0) + float(r['shares']), 6
-                            )
-                        else:
-                            _tpl.at[_idx, 'Shares'] = round(
-                                max(0.0, float(_tpl.at[_idx, 'Shares'] or 0) - float(r['shares'])), 6
-                            )
-                        _tpl.at[_idx, 'Current_Price'] = float(r['nav'])
-                        st.session_state['update_template'] = _tpl
-                        _shares_updated += 1
-                del st.session_state['sms_parsed']
-                st.success(f"✅ 已自动更新 {_shares_updated} 个标的的 Shares / Current_Price，调仓辅助器已登记")
-                # 短信应用后自动触发刷新净值，补全其余标的价格
-                st.session_state['_refresh_prices'] = True
-                st.rerun()
-
-        if st.button("清除解析结果", key="sms_clear"):
-            del st.session_state['sms_parsed']
-            st.rerun()
-
-    st.divider()
-
-    # ─── Editable table ───
-    st.subheader("步骤二：确认 / 补充持仓数据")
-    st.caption("短信解析后已自动刷新所有标的净值。如有拉取失败或固定收益产品，请手动补充 Current_Price。")
-    st.markdown("买卖 NCF 通过调仓辅助器自动填写，外部入金/出金记在 Cash 行的 Net_Cash_Flow")
-
-    edited_df = st.data_editor(
-        st.session_state['update_template'],
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Asset_Class": st.column_config.SelectboxColumn(
-                "Asset_Class",
-                options=sorted(VALID_ASSET_CLASSES),
-                required=True,
-            ),
-            "Platform": st.column_config.TextColumn("Platform", required=True),
-            "Name": st.column_config.TextColumn("Name", required=True),
-            "Code": st.column_config.TextColumn("Code", default=""),
-            "Currency": st.column_config.SelectboxColumn(
-                "Currency",
-                options=["CNY", "HKD", "USD", "EUR"],
-                required=True,
-            ),
-            "Exchange_Rate": st.column_config.NumberColumn(
-                "Exchange_Rate", format="%.4f", min_value=0.0001, default=1.0,
-                help="Currency to CNY (e.g. EUR→CNY ≈ 7.92)",
-            ),
-            "Shares": st.column_config.NumberColumn("Shares", format="%.2f", min_value=0.0),
-            "Current_Price": st.column_config.NumberColumn("Current_Price", format="%.4f", min_value=0.0),
-            "Total_Value": st.column_config.NumberColumn("Total_Value", format="%.2f", min_value=0.0),
-            "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", format="%.2f", default=0.0),
-        },
-        column_order=[
-            "Asset_Class", "Platform", "Name", "Code", "Currency", "Exchange_Rate",
-            "Shares", "Current_Price", "Total_Value", "Net_Cash_Flow",
-        ],
-        key="weekly_editor",
-    )
-
-    # ─── 重算市值（在 data_editor 之后，读 edited_df）───
-    if st.button("🔄 重算市值 (Shares × Price × Rate)", type="secondary",
-                 help="对所有 Shares > 0 且 Current_Price > 0 的非 Cash 行，自动计算 Total_Value = Shares × Current_Price × Exchange_Rate。手动填写的 Total_Value 仍可在表格中直接覆盖。"):
-        recalc = edited_df.copy()
-        mask = (
-            (recalc['Asset_Class'] != 'Cash') &
-            (pd.to_numeric(recalc['Shares'], errors='coerce').fillna(0) > 0) &
-            (pd.to_numeric(recalc['Current_Price'], errors='coerce').fillna(0) > 0)
-        )
-        recalc.loc[mask, 'Total_Value'] = (
-            pd.to_numeric(recalc.loc[mask, 'Shares'], errors='coerce') *
-            pd.to_numeric(recalc.loc[mask, 'Current_Price'], errors='coerce') *
-            pd.to_numeric(recalc.loc[mask, 'Exchange_Rate'], errors='coerce').fillna(1.0)
-        ).round(2)
-        updated_count = mask.sum()
-        st.session_state['update_template'] = recalc
-        st.success(f"已重算 {updated_count} 行市值")
-        st.rerun()
-
-    # ─── 调仓辅助器（在编辑持仓表之后，确保 edited_df 已赋值）───
-    with st.expander("⚖️ 步骤三：调仓辅助器（登记其他买卖 / 外部入金）", expanded=False):
-        st.caption(
-            "登记本期所有买卖及外部资金操作。点击「应用」后：\n"
-            "① 更新 Cash 行 Total_Value；"
-            "② 在相关资产行写入 Net_Cash_Flow（买入为正，卖出为负）；"
-            "③ 新增标的自动追加到持仓表底部（请之后手动填写份额/价格/市值）。"
-        )
-
-        if 'rebalance_entries' not in st.session_state:
-            st.session_state['rebalance_entries'] = []
-
-        col_add1, col_add2, col_add3, col_add4 = st.columns(4)
-        with col_add1:
-            if st.button("＋ 买入", key="rb_add_buy"):
-                st.session_state['rebalance_entries'].append(
-                    {'type': '买入', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
-                st.rerun()
-        with col_add2:
-            if st.button("＋ 卖出", key="rb_add_sell"):
-                st.session_state['rebalance_entries'].append(
-                    {'type': '卖出', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
-                st.rerun()
-        with col_add3:
-            if st.button("＋ 外部入金", key="rb_add_ext_in"):
-                st.session_state['rebalance_entries'].append(
-                    {'type': '外部入金', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
-                st.rerun()
-        with col_add4:
-            if st.button("＋ 外部取出", key="rb_add_ext_out"):
-                st.session_state['rebalance_entries'].append(
-                    {'type': '外部取出', 'asset_name': '', 'amount': 0.0, 'price': 0.0, 'fee': 0.0, 'is_new': False, 'new_asset': {}})
-                st.rerun()
-
-        # Build asset options: "Name (Code)" for clarity, excluding Cash
-        asset_rows = edited_df[edited_df['Asset_Class'] != 'Cash'].dropna(subset=['Name'])
-        def _asset_label(row):
-            code = str(row.get('Code', '')).strip()
-            name = str(row.get('Name', '')).strip()
-            return f"{name} ({code})" if code else name
-        asset_options_labels = [_asset_label(r) for _, r in asset_rows.iterrows()] + ['新增标的']
-        # Keep a mapping from label back to Name (for NCF writing)
-        asset_label_to_name = {_asset_label(r): r['Name'] for _, r in asset_rows.iterrows()}
-        asset_label_to_name['新增标的'] = '新增标的'
-
-        # 标签 → 原始货币（用于 Price 字段币种标签）
-        # 优先看持仓表 Currency 字段；若为 CNY 但 Code 形如港股，强制识别为 HKD
-        import re as _re_ccy
-        def _detect_ccy(row):
-            ccy = str(row.get('Currency', 'CNY')).strip().upper() or 'CNY'
-            code = str(row.get('Code', '')).strip()
-            # Code 形如 HK0700 / 0700.HK 强制为 HKD（覆盖历史 Currency=CNY 的情况）
-            if _re_ccy.match(r'^HK\d+$', code, _re_ccy.IGNORECASE) or \
-               _re_ccy.match(r'^\d+\.HK$', code, _re_ccy.IGNORECASE):
-                return 'HKD'
-            return ccy
-        asset_label_to_ccy = {_asset_label(r): _detect_ccy(r) for _, r in asset_rows.iterrows()}
-        asset_label_to_ccy['新增标的'] = 'CNY'
-
-        entries = st.session_state['rebalance_entries']
-        to_remove = []
-        type_labels = {'买入': '🟢 买入', '卖出': '🔴 卖出', '外部入金': '🔵 外部入金', '外部取出': '🟠 外部取出'}
-
-        for idx, entry in enumerate(entries):
-            c1, c2, c3, c4 = st.columns([1.0, 2.5, 1.8, 0.5])
-            with c1:
-                st.markdown("　")  # label 占位，与其他列对齐
-                st.markdown(f"**{type_labels.get(entry['type'], entry['type'])}**")
-            with c2:
-                if entry['type'] in ('买入', '卖出'):
-                    current_label = entry.get('asset_label', '')
-                    selected_label = st.selectbox(
-                        "资产标的",
-                        options=[''] + asset_options_labels,
-                        index=([''] + asset_options_labels).index(current_label)
-                              if current_label in ([''] + asset_options_labels) else 0,
-                        key=f"rb_asset_{idx}",
-                        placeholder="选择资产（名称 + 代码）...",
-                    )
-                    entry['asset_label'] = selected_label
-                    entry['asset_name'] = asset_label_to_name.get(selected_label, selected_label)
-                    entry['is_new'] = (selected_label == '新增标的')
-                else:
-                    st.markdown("*外部资金*")
-                    entry['asset_name'] = ''
-                    entry['is_new'] = False
-            with c3:
-                entry['amount'] = st.number_input(
-                    "买入/卖出总金额 (CNY)", value=float(entry['amount']), min_value=0.0, step=100.0,
-                    format="%.2f", key=f"rb_amt_{idx}",
-                    help=(
-                        "本次操作的人民币总金额（券商成交金额，不含手续费）。"
-                        "买入填券商显示的成交金额，卖出填到账金额（扣费前）。"
-                        "手续费在右下框单独填写，会与本金额合并写入 NCF。"
-                    ),
-                )
-            with c4:
-                st.markdown("　")  # label 占位
-                if st.button("✕", key=f"rb_del_{idx}"):
-                    to_remove.append(idx)
-
-            # 买入/卖出：展示成交价和手续费（可选，用于 transaction.csv 记录）
-            if entry['type'] in ('买入', '卖出'):
-                # 检测当前所选标的的原始货币
-                _entry_ccy = asset_label_to_ccy.get(entry.get('asset_label', ''), 'CNY')
-
-                p_col, f_col = st.columns(2)
-                with p_col:
-                    _price_label = f"成交单价（{_entry_ccy}，可选）" if _entry_ccy != 'CNY' \
-                        else "申购/赎回确认净值（CNY，可选）"
-                    _price_help = (
-                        f"原始货币（{_entry_ccy}）单价。"
-                        f"对于港股请填港币股价（如 449.6 HKD/股）。"
-                        f"主金额栏请填券商显示的人民币结算金额。"
-                    ) if _entry_ccy != 'CNY' else \
-                    "基金净值或黄金单价（原始货币），从基金平台交易记录查询。不填则用快照价格估算。"
-                    entry['price'] = st.number_input(
-                        _price_label,
-                        value=float(entry.get('price', 0.0)), min_value=0.0, format="%.4f",
-                        key=f"rb_price_{idx}",
-                        help=_price_help,
-                    )
-                with f_col:
-                    entry['fee'] = st.number_input(
-                        "手续费 CNY（可选，默认0）",
-                        value=float(entry.get('fee', 0.0)), min_value=0.0, format="%.2f",
-                        key=f"rb_fee_{idx}",
-                        help="券商显示的交易费用（已计入 NCF 投资成本，Cash 同步扣减）",
-                    )
-
-                # 港股提示：让用户知道主金额栏要填券商人民币结算金额
-                if _entry_ccy == 'HKD' and entry.get('amount', 0) == 0:
-                    st.caption(
-                        f"💡 港股提示：主金额栏请填**券商显示的人民币成交金额**（已含汇率换算）。"
-                        f"成交单价填港币原始价。手续费已含在 NCF 投资成本中。"
-                    )
-
-            # 新增标的子表单
-            if entry.get('is_new'):
-                st.info("新标的信息 — 应用后将追加一行到持仓表，请之后手动填写份额/价格/市值。如填写 yf_symbol,会自动注册到 yf_symbols.json,Research Tab 立即可见基本面")
-                na = entry.get('new_asset', {})
-                nc1, nc2, nc3, nc4, nc5, nc6 = st.columns([1.3, 1.3, 1.8, 1.3, 1.0, 1.4])
-                with nc1:
-                    na['Asset_Class'] = st.selectbox("类别", options=sorted(VALID_ASSET_CLASSES),
-                        index=sorted(VALID_ASSET_CLASSES).index(na['Asset_Class']) if na.get('Asset_Class') in VALID_ASSET_CLASSES else 0,
-                        key=f"rb_new_ac_{idx}")
-                with nc2:
-                    na['Platform'] = st.text_input("平台", value=na.get('Platform', ''), key=f"rb_new_plat_{idx}")
-                with nc3:
-                    na['Name'] = st.text_input("名称", value=na.get('Name', ''), key=f"rb_new_name_{idx}")
-                with nc4:
-                    na['Code'] = st.text_input("代码", value=na.get('Code', ''), key=f"rb_new_code_{idx}")
-                with nc5:
-                    # 智能默认 Currency: 根据 Code 推断,用户可改
-                    from fundamentals import infer_currency
-                    _ccy_default = na.get('Currency') or infer_currency(na.get('Code', ''), na.get('Asset_Class', ''))
-                    na['Currency'] = st.selectbox("货币", options=["CNY", "HKD", "USD", "EUR"],
-                        index=["CNY", "HKD", "USD", "EUR"].index(_ccy_default) if _ccy_default in ["CNY", "HKD", "USD", "EUR"] else 0,
-                        key=f"rb_new_ccy_{idx}",
-                        help="根据 Code 智能推断:HK 开头/.HK 后缀→HKD;6 位数字→CNY;SAP→USD")
-                with nc6:
-                    na['yf_symbol'] = st.text_input("yf_symbol(可选)", value=na.get('yf_symbol', ''),
-                        key=f"rb_new_yf_{idx}",
-                        help="如 9992.HK / 600309.SS / SAP。填写后自动注册到 yf_symbols.json,Research Tab 立即可见基本面")
-                entry['new_asset'] = na
-
-        for idx in reversed(to_remove):
-            st.session_state['rebalance_entries'].pop(idx)
-        if to_remove:
-            st.rerun()
-
-        if entries:
-            st.divider()
-
-            # 买入/卖出含费成本（NCF 与 Cash 都按"成交金额 + 手续费"扣减）
-            # 卖出时手续费从到手金额里扣，所以 Cash 增加 = (成交金额 - 手续费)
-            total_buy  = sum(e['amount'] + e.get('fee', 0.0) for e in entries if e['type'] == '买入')
-            total_sell = sum(e['amount'] - e.get('fee', 0.0) for e in entries if e['type'] == '卖出')
-            ext_in     = sum(e['amount'] for e in entries if e['type'] == '外部入金')
-            ext_out    = sum(e['amount'] for e in entries if e['type'] == '外部取出')
-            cash_delta   = total_sell - total_buy + ext_in - ext_out
-            external_ncf = ext_in - ext_out
-
-            prev_cash_rows = edited_df[edited_df['Asset_Class'] == 'Cash']
-            prev_cash_tv   = prev_cash_rows['Total_Value'].sum() if len(prev_cash_rows) > 0 else 0.0
-            new_cash_tv    = prev_cash_tv + cash_delta
-
-            res_col1, res_col2, res_col3, res_col4, res_col5 = st.columns(5)
-            with res_col1:
-                st.metric("当前 Cash", f"¥{prev_cash_tv:,.0f}")
-            with res_col2:
-                st.metric("操作后 Cash", f"¥{new_cash_tv:,.0f}", delta=f"{cash_delta:+,.0f}")
-            with res_col3:
-                st.metric("Cash NCF（外部）", f"¥{external_ncf:+,.0f}", help="只有外部入金/取出计入 NCF")
-            with res_col4:
-                st.metric("买入合计", f"¥{total_buy:,.0f}")
-            with res_col5:
-                st.metric("卖出合计", f"¥{total_sell:,.0f}")
-
-            if st.button("✅ 应用到持仓表", type="primary", key="rb_apply"):
-                template = edited_df.copy()
-
-                # 预检警告（不阻断）
-                if new_cash_tv < 0:
-                    st.warning(f"应用后 Cash 将为负 (¥{new_cash_tv:,.0f})，请检查买入金额")
-                if total_buy > prev_cash_tv and prev_cash_tv > 0:
-                    st.warning(f"买入合计 ¥{total_buy:,.0f} 超过当前 Cash ¥{prev_cash_tv:,.0f}")
-                for e in entries:
-                    if e['type'] == '卖出' and e['asset_name'] and not e['is_new']:
-                        mask = template['Name'] == e['asset_name']
-                        if mask.any():
-                            asset_tv = template.loc[mask, 'Total_Value'].iloc[0]
-                            if e['amount'] > asset_tv:
-                                st.warning(f"卖出「{e['asset_name']}」¥{e['amount']:,.0f} 超过当前市值 ¥{asset_tv:,.0f}")
-
-                # 更新 Cash 行
-                cash_mask = template['Asset_Class'] == 'Cash'
-                if cash_mask.any():
-                    if cash_mask.sum() == 1:
-                        ci = template[cash_mask].index[0]
-                        template.at[ci, 'Total_Value']   = round(new_cash_tv, 2)
-                        template.at[ci, 'Shares']        = round(new_cash_tv, 2)
-                        template.at[ci, 'Net_Cash_Flow'] = round(external_ncf, 2)
-                    else:
-                        st.warning("检测到多条 Cash 行，请手动更新 Cash 的 Total_Value 和 NCF")
-                else:
-                    st.warning("未找到 Cash 行，请手动更新")
-
-                # 写入各资产 NCF（已有持仓）
-                # NCF 含费：买入 = +(amount + fee)；卖出 = -(amount - fee)
-                # 含义：NCF 反映"为这笔投资真实付出/收回的现金"
-                for e in entries:
-                    if e['type'] not in ('买入', '卖出') or not e['asset_name'] or e['is_new']:
-                        continue
-                    mask = template['Name'] == e['asset_name']
-                    if not mask.any():
-                        st.warning(f"找不到资产「{e['asset_name']}」，跳过 NCF 写入")
-                        continue
-                    if mask.sum() > 1:
-                        st.warning(f"「{e['asset_name']}」有 {mask.sum()} 条匹配行，NCF 写入到第一条，请手动核查其余行")
-                    fee = e.get('fee', 0.0) or 0.0
-                    if e['type'] == '买入':
-                        ncf_delta = e['amount'] + fee  # 买入：含费成本
-                    else:
-                        ncf_delta = -(e['amount'] - fee)  # 卖出：扣费后到手（负号 = 流出资产）
-                    idx_row = template[mask].index[0]
-                    template.at[idx_row, 'Net_Cash_Flow'] = round(
-                        (template.at[idx_row, 'Net_Cash_Flow'] or 0) + ncf_delta, 2
-                    )
-
-                # 追加新标的行
-                new_rows = []
-                for e in entries:
-                    if e['type'] not in ('买入', '卖出') or not e.get('is_new'):
-                        continue
-                    na = e.get('new_asset', {})
-                    if not na.get('Name'):
-                        st.warning("新增标的缺少 Name 字段，跳过追加")
-                        continue
-                    if na['Name'] in template['Name'].values:
-                        st.warning(f"「{na['Name']}」已存在于持仓表，建议改用「买入」选择现有资产")
-                    fee = e.get('fee', 0.0) or 0.0
-                    if e['type'] == '买入':
-                        ncf_val = e['amount'] + fee
-                    else:
-                        ncf_val = -(e['amount'] - fee)
-                    new_rows.append({
-                        'Asset_Class':   na.get('Asset_Class', ''),
-                        'Platform':      na.get('Platform', ''),
-                        'Name':          na.get('Name', ''),
-                        'Code':          na.get('Code', ''),
-                        'Currency':      na.get('Currency', 'CNY'),
-                        'Exchange_Rate': 1.0,
-                        'Shares':        0.0,
-                        'Current_Price': 0.0,
-                        'Total_Value':   0.0,
-                        'Net_Cash_Flow': round(ncf_val, 2),
-                    })
-
-                    # 同步注册 yf_symbol 映射(如用户填了)
-                    _yf_sym_new = (na.get('yf_symbol') or '').strip()
-                    _code_new = (na.get('Code') or '').strip()
-                    if _yf_sym_new and _code_new:
-                        try:
-                            from fundamentals import add_yf_symbol
-                            add_yf_symbol(os.path.dirname(csv_path), _code_new, _yf_sym_new,
-                                          show_fundamentals=True)
-                            st.success(f"✅ 已注册 yf_symbol 映射: {_code_new} → {_yf_sym_new}")
-                        except Exception as _e:
-                            st.warning(f"yf_symbol 注册失败: {_e}")
-                if new_rows:
-                    template = pd.concat([template, pd.DataFrame(new_rows)], ignore_index=True)
-
-                # ─── 写入 transaction.csv ───
-                tx_rows = []
-                for e in entries:
-                    # 包括新标的(is_new=True)——之前误过滤,导致新建仓在 transaction 里缺失
-                    if e['type'] not in ('买入', '卖出') or not e['asset_name']:
-                        continue
-                    # 对新标的,asset_name 是用户填的 Name,asset_row 应该已经在 template 里(刚追加)
-                    asset_mask = template['Name'] == e['asset_name']
-                    asset_row = template[asset_mask].iloc[0] if asset_mask.any() else None
-                    # 成交价：用户填了则用，否则从快照 Current_Price 估算
-                    price_val = e.get('price', 0.0)
-                    if not price_val or price_val <= 0:
-                        price_val = float(asset_row['Current_Price']) if asset_row is not None else 0.0
-                    # Price_Currency: 从 portfolio Currency 读,兜底用 infer_currency
-                    _price_ccy = ''
-                    if asset_row is not None:
-                        _price_ccy = str(asset_row.get('Currency', '') or '').strip()
-                    if not _price_ccy:
-                        from fundamentals import infer_currency
-                        _price_ccy = infer_currency(
-                            str(asset_row['Code']) if asset_row is not None else '',
-                            str(asset_row['Asset_Class']) if asset_row is not None else '',
-                        )
-                    tx_rows.append({
-                        'Date':           new_date_str,
-                        'Asset_Class':    asset_row['Asset_Class'] if asset_row is not None else '',
-                        'Platform':       asset_row['Platform']    if asset_row is not None else '',
-                        'Name':           e['asset_name'],
-                        'Code':           asset_row['Code']        if asset_row is not None else '',
-                        'Type':           e['type'],
-                        'Amount_CNY':     round(e['amount'], 2),
-                        'Price':          round(price_val, 4),
-                        'Price_Currency': _price_ccy,
-                        'Fee_CNY':        round(e.get('fee', 0.0), 2),
-                    })
-                if tx_rows:
-                    tx_df = pd.DataFrame(tx_rows)
-                    tx_path = csv_path.replace('portfolio.csv', 'transaction.csv')
-                    if os.path.exists(tx_path):
-                        existing = pd.read_csv(tx_path)
-                        # 兼容旧 schema: 没 Price_Currency 列时加上(留空,迁移脚本回填)
-                        if 'Price_Currency' not in existing.columns:
-                            existing['Price_Currency'] = ''
-                            # 列序对齐: 把 Price_Currency 插到 Price 之后
-                            cols = list(existing.columns)
-                            cols.remove('Price_Currency')
-                            insert_at = cols.index('Price') + 1 if 'Price' in cols else len(cols)
-                            cols.insert(insert_at, 'Price_Currency')
-                            existing = existing[cols]
-                        tx_df = pd.concat([existing, tx_df], ignore_index=True)
-                    tx_df.to_csv(tx_path, index=False)
-
-                st.session_state['update_template'] = template
-                st.session_state['rebalance_entries'] = []
-                st.rerun()
-
-        if entries and st.button("清空所有条目", key="rb_clear", type="secondary"):
-            st.session_state['rebalance_entries'] = []
-            st.rerun()
-
     # ─── Validation ───
 
     def validate_snapshot(df, prev_df, new_date_str, last_date_str):
@@ -2039,6 +2039,17 @@ with tab_update:
         st.dataframe(preview_df, use_container_width=True, hide_index=True)
         st.caption(f"共 {len(preview_df)} 行 | 总市值: ¥{preview_df['Total_Value'].sum():,.2f}")
 
+    # ─── Transaction Review ───
+    _pending_tx = st.session_state.get('pending_transactions', [])
+    if _pending_tx:
+        with st.expander(f"📋 待写入交易记录（{len(_pending_tx)} 条，保存快照时一并落盘）", expanded=True):
+            st.dataframe(pd.DataFrame(_pending_tx), use_container_width=True, hide_index=True)
+            if st.button("🗑️ 清空待写入记录", type="secondary", key="clear_pending_tx"):
+                st.session_state['pending_transactions'] = []
+                st.rerun()
+    else:
+        st.caption("本次无交易记录待写入")
+
     # ─── Save ───
     st.divider()
 
@@ -2060,6 +2071,24 @@ with tab_update:
 
             # Atomic write with file lock
             _atomic_write_csv(combined_df, csv_path)
+
+            # ─── 写入 transaction.csv ───
+            _pending_tx = st.session_state.get('pending_transactions', [])
+            if _pending_tx:
+                tx_df = pd.DataFrame(_pending_tx)
+                tx_path = csv_path.replace('portfolio.csv', 'transaction.csv')
+                if os.path.exists(tx_path):
+                    existing_tx = pd.read_csv(tx_path)
+                    if 'Price_Currency' not in existing_tx.columns:
+                        existing_tx['Price_Currency'] = ''
+                        cols = list(existing_tx.columns)
+                        cols.remove('Price_Currency')
+                        insert_at = cols.index('Price') + 1 if 'Price' in cols else len(cols)
+                        cols.insert(insert_at, 'Price_Currency')
+                        existing_tx = existing_tx[cols]
+                    tx_df = pd.concat([existing_tx, tx_df], ignore_index=True)
+                tx_df.to_csv(tx_path, index=False)
+                st.session_state['pending_transactions'] = []
 
             st.success(f"已保存 {len(save_df)} 条记录 (日期: {new_date_str}) 到 {os.path.basename(csv_path)}")
             st.balloons()
