@@ -390,6 +390,35 @@ portfolio.csv
 
 当用户说"分析 XXX"、"评估 XXX"、"用芒格框架分析 XXX"等类似指令时，按以下流程执行。
 
+### 分析框架（三维度强制叠加，2026-06-15 确立）
+
+每次个股分析或研报复盘，**必须同时使用以下三个维度**，缺一不可：
+
+1. **芒格框架**（`munger-perspective` skill）
+   - 逆向思考：怎么买会亏钱？
+   - 五模型审视：多元思维 / 逆向 / Lollapalooza / 能力圈 / 激励机制
+   - 三筐分类：Yes / No / Too Hard
+   - 葡萄干与粪便：有没有致命缺陷？
+
+2. **知识库模型校验**（`~/Library/Mobile Documents/com~apple~CloudDocs/Obsidian/vault/atoms/`）
+   - 搜索与该标的相关的 atom 文件（行业特征、护城河、周期、激励、IP等关键词）
+   - 至少找到 2-3 个可以直接应用或反驳的 atom
+   - 重点 atoms（高频相关）：
+     - `cyclical_stocks_reverse_pe_logic`：周期股用PB分位而非PE
+     - `yield_on_cost_compounds_over_time`：红利股成本股息率复利
+     - `asset_function_is_cycle_dependent`：资产功能是周期依赖的
+     - `logic_intact_hold_through_drawdown`：逻辑未破，浮亏不是止损信号
+     - `sniper_stink_bid_precommit_entry`：狙击手挂单，不追涨
+     - `ip_scarcity_discipline_evergreen`：IP稀缺管理纪律
+     - `policy_driven_strategy_asymmetric_risk`：政策驱动不对称风险
+     - `subculture_ip_breakout_death_trap`：子文化IP破圈死亡陷阱
+
+3. **中美债务周期视角**（参考 `essays/china_debt_cycle_asset_allocation.md` 和 `essays/us_debt_cycle_analysis.md`）
+   - 中国化债进度对该标的的传导链（直接/间接/无关）
+   - 美国债务周期（AI增长+温和通胀）对该标的的含义
+   - 利率方向对估值的影响（注意区分路径一/路径二）
+   - 可观测的领先信号：M1/PPI/居民中长期贷款
+
 ### Step 1: 准备工作
 
 - 路径：`$FAMILYFUND_DATA/Finance Reports/`

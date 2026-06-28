@@ -258,6 +258,9 @@ def _fetch_yfinance(symbol: str, period: str = '1y') -> pd.Series | None:
             return None
         df.index = pd.to_datetime(df.index).strftime('%Y-%m-%d')
         close = df['Close'].squeeze()
+        # squeeze() 在只有1行时会退化成标量，统一包成 Series
+        if not isinstance(close, pd.Series):
+            close = pd.Series([close], index=df.index)
         return close.astype(float)
     except Exception:
         return None

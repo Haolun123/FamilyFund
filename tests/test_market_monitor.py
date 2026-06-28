@@ -234,3 +234,85 @@ class TestTargetsConfig:
         assert TARGETS['gold']['primary_ma']   == 200
         assert TARGETS['ndx100']['primary_ma'] == 200
         assert TARGETS['sp500']['primary_ma']  == 200
+
+
+# ─── _fetch_yfinance 单行返回回归测试（2026-06-28 修复）───
+#
+# Bug: yfinance.download 在某些情况（市场假期、symbol 数据稀缺）
+# 只返回 1 行时,df['Close'].squeeze() 会退化为 numpy.float64 标量,
+# 上游对它调用 len() 报 TypeError。^TNX（美债10Y）端午节假期触发。
+
+class TestFetchYfinanceSingleRow:
+    """覆盖 _fetch_yfinance 在 yfinance 返回 1 行/0 行/多行 的三种场景。"""
+
+    def _mock_yf_download(self, monkeypatch, df):
+        import market_monitor
+        # 替换 _fetch_yfinance 内部的 yfinance.download
+        class FakeYF:
+            @staticmethod
+            def download(*args, **kwargs):
+                return df
+        monkeypatch.setitem(__import__('sys').modules, 'yfinance', FakeYF)
+
+    def test_single_row_returns_series_not_scalar(self, monkeypatch):
+        """1 行数据时返回值必须是 Series，不能是标量。"""
+        import pandas as pd
+        from market_monitor import _fetch_yfinance
+
+        df = pd.DataFrame(
+            {'Close': [4.25]},
+            index=pd.to_datetime(['2026-06-27']),
+        )
+        self._mock_yf_download(monkeypatch, df)
+
+        result = _fetch_yfinance('^TNX', period='5d')
+        assert result is not None
+        assert isinstance(result, pd.Series), \
+            f'Expected pd.Series, got {type(result)}'
+        assert len(result) == 1
+        assert float(result.iloc[-1]) == 4.25
+
+    def test_multi_row_returns_series(self, monkeypatch):
+        """多行数据时返回值是 Series。"""
+        import pandas as pd
+        from market_monitor import _fetch_yfinance
+
+        df = pd.DataFrame(
+            {'Close': [4.20, 4.22, 4.25]},
+            index=pd.to_datetime(['2026-06-25', '2026-06-26', '2026-06-27']),
+        )
+        self._mock_yf_download(monkeypatch, df)
+
+        result = _fetch_yfinance('^TNX', period='5d')
+        assert result is not None
+        assert isinstance(result, pd.Series)
+        assert len(result) == 3
+        assert float(result.iloc[-1]) == 4.25
+
+    def test_empty_dataframe_returns_none(self, monkeypatch):
+        """空 DataFrame 返回 None。"""
+        import pandas as pd
+        from market_monitor import _fetch_yfinance
+
+        df = pd.DataFrame({'Close': []})
+        self._mock_yf_download(monkeypatch, df)
+
+        result = _fetch_yfinance('^TNX', period='5d')
+        assert result is None
+
+    def test_single_row_result_can_be_indexed(self, monkeypatch):
+        """1 行返回值必须支持 len() 和 iloc[-1]（调用方依赖）。"""
+        import pandas as pd
+        from market_monitor import _fetch_yfinance
+
+        df = pd.DataFrame(
+            {'Close': [4.25]},
+            index=pd.to_datetime(['2026-06-27']),
+        )
+        self._mock_yf_download(monkeypatch, df)
+
+        result = _fetch_yfinance('^TNX', period='5d')
+        # 这正是 get_market_data 第 439 行的调用模式
+        assert len(result) > 0  # 之前这里 TypeError
+        latest = round(float(result.iloc[-1]), 3)
+        assert latest == 4.25
