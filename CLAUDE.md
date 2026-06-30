@@ -376,6 +376,38 @@ portfolio.csv
 
 ---
 
+## CSV 数据修改纪律（2026-06-30 加入）
+
+**起因：** 2026-06-30 一次失误,用 Python `csv.writer` 直接覆盖 balance_sheet.csv,**绕过了 backup 机制+删除了 Q1 丈母娘注资¥50万负债行**。靠用户的人工备份才发现。
+
+**强制纪律：**
+
+| 数据文件 | 必须走的写入路径 | 禁止 |
+|---------|----------------|------|
+| `portfolio.csv` | `nav_engine._atomic_write_csv()` | 直接 `df.to_csv()` |
+| `balance_sheet.csv` | `quarterly_engine.save_balance_sheet()` | `csv.writer` / `df.to_csv()` |
+| `transaction.csv` | dashboard 走步骤三调仓辅助器写入(已有逻辑) | 直接覆盖 |
+| `decisions.json` | 直接 Edit,但**改前先打印当前行让用户确认** | 盲目覆盖 |
+| `yf_symbols.json` | `fundamentals.save_yf_symbols()` | 直接 json.dump |
+
+**所有 CSV 写入函数应走 `_atomic_write_csv`,获得：**
+- 30 份滚动备份(在 `$FAMILYFUND_DATA/backups/`)
+- 原子替换(避免半写状态)
+- 文件锁(避免并发)
+
+**操作前的纪律：**
+
+任何修改 CSV/JSON 的脚本,**写入前必须先做：**
+1. `cp source /tmp/backup_<timestamp>.csv` 留一份原文备份
+2. 对比预期改动量(行数+/-多少),与实际是否吻合
+3. 如果是用户主动指挥的"补充新数据",改动只能是 append/insert,**绝对不能 delete**
+
+如果非要 rewrite 整个文件,要做到：
+- 改完立即 diff 显示给用户看
+- 在 commit message 里明确说明被删/被改的行
+
+---
+
 ## 已知问题 / 待决策
 
 - **Weekly Update：Total_Value 自动计算** — 建议方案 A（加"重算市值"按钮），待实现

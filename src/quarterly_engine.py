@@ -91,6 +91,23 @@ def load_cashflow_log(path: str = CASHFLOW_LOG_PATH) -> pd.DataFrame | None:
     return df
 
 
+def save_balance_sheet(df: pd.DataFrame, bs_path: str = BALANCE_SHEET_PATH):
+    """保存 balance_sheet.csv，自动带备份 + 原子写入。
+
+    所有修改 balance_sheet.csv 的代码必须走这个函数，
+    禁止直接用 csv.writer / df.to_csv 覆盖——会绕过备份机制。
+
+    背景：2026-06-30 一次失误覆盖了 Q1 数据，触发此函数的建立。
+    """
+    from nav_engine import _atomic_write_csv
+
+    # 写入前严格校验列顺序，避免被无序DataFrame污染
+    expected_cols = ['Quarter', 'Category', 'Sub_Category', 'Account',
+                     'Amount', 'Currency', 'FX_Rate', 'CNY_Amount', 'Notes']
+    df_to_save = df[expected_cols].copy()  # 显式选列+复制，避免视图修改
+    _atomic_write_csv(df_to_save, bs_path)
+
+
 def available_quarters(df: pd.DataFrame) -> list[str]:
     """返回 balance_sheet 中所有季度，按时间升序。"""
     return sorted(df['Quarter'].unique().tolist())
