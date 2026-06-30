@@ -4204,6 +4204,157 @@ with tab_quarterly:
 
         st.caption("⚠️ 房产/车辆为估算公允价值，非精确市场价。损益表分解从 2026Q2 起可用（需 portfolio.csv 投资收益数据）。")
 
+        # ─── 现金流分析（Q2起，需要鲨鱼记账数据）────────────
+        st.divider()
+        st.subheader("现金流分析")
+        st.caption(f"基于鲨鱼记账 {q_curr}.csv + cashflow_log.csv 特殊现金流。债务还本按双轨制处理:净储蓄剔除本金,自由现金流保留。")
+
+        try:
+            from cashflow_engine import (
+                load_quarter_shark, compute_cashflow_summary,
+                aggregate_by_category, build_sankey_data,
+                compute_net_worth_reconciliation,
+            )
+            from quarterly_engine import load_cashflow_log
+
+            data_dir = os.path.dirname(csv_path)
+            shark_df = load_quarter_shark(data_dir, q_curr)
+
+            if shark_df is None:
+                st.info(f"未找到鲨鱼记账数据：`$FAMILYFUND_DATA/鲨鱼记账/{q_curr}.csv`。"
+                       f" 请从鲨鱼记账 APP 导出 {q_curr} 明细放入该路径。")
+            else:
+                cf_summary = compute_cashflow_summary(shark_df)
+
+                # ── 核心 KPI ───────────────────────────────
+                kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+                kpi1.metric("总收入", f"¥{cf_summary['income_total']:,.0f}")
+                kpi2.metric("净储蓄率", f"{cf_summary['savings_rate']*100:.1f}%",
+                            help="净储蓄 ÷ 总收入。净储蓄=收入-支出+债务还本(本金不算消耗)。")
+                kpi3.metric("自由现金流", f"¥{cf_summary['free_cashflow']:,.0f}",
+                            help="收入 - 总支出(含债务还本)。反映真实可支配现金。")
+                kpi4.metric("必需支出占比",
+                            f"{cf_summary['necessary_ratio']*100:.1f}%",
+                            help="必需支出 ÷ (必需+可选支出)。反映消费弹性,失业时可压缩空间。")
+
+                # 次要指标
+                col_a, col_b, col_c = st.columns(3)
+                col_a.metric("总支出(含债务)", f"¥{cf_summary['expense_total']:,.0f}")
+                col_b.metric("债务还本", f"¥{cf_summary['debt_principal']:,.0f}",
+                             help="本金部分。利息计入支出。")
+                col_c.metric("净储蓄(净资产视角)", f"¥{cf_summary['net_savings']:,.0f}")
+
+                # ── 支出明细 ───────────────────────────────
+                st.markdown("##### 支出明细（按一级分类）")
+                exp_agg = aggregate_by_category(shark_df, '支出')
+                if not exp_agg.empty:
+                    exp_display = exp_agg.copy()
+                    exp_display['金额'] = exp_display['Amount'].apply(lambda x: f"¥{x:,.2f}")
+                    exp_display['笔数'] = exp_display['Count']
+                    exp_display = exp_display[['Bucket', 'Category', '金额', '笔数']]
+                    exp_display.columns = ['类型', '分类', '金额', '笔数']
+                    st.dataframe(exp_display, hide_index=True, use_container_width=True)
+
+                # ── 桑基图 ────────────────────────────────
+                st.markdown("##### 资金流向（桑基图）")
+                sankey = build_sankey_data(shark_df)
+                if sankey['values']:
+                    import plotly.graph_objects as go
+
+                    # 配色:统一柔和色系,避免高饱和度刺眼,所有节点文字保持可读
+                    def _node_color(name):
+                        if '收入' in name:
+                            return '#A5D6A7'  # 浅绿
+                        if name == '总流入':
+                            return '#CFD8DC'  # 浅灰
+                        if name in ('净储蓄', '净支出(超支)'):
+                            return '#90CAF9'  # 浅蓝
+                        if name == '债务还本':
+                            return '#CE93D8'  # 浅紫
+                        from cashflow_engine import (NECESSARY_CATEGORIES,
+                                                     DISCRETIONARY_CATEGORIES)
+                        if name in NECESSARY_CATEGORIES:
+                            return '#FFCC80'  # 浅橙(必需)
+                        if name in DISCRETIONARY_CATEGORIES:
+                            return '#EF9A9A'  # 浅红(可选)
+                        return '#E0E0E0'  # 浅灰(其他)
+
+                    # 流的颜色:用半透明的目标节点颜色,既能区分又不喧宾夺主
+                    def _link_color(target_name):
+                        c = _node_color(target_name)
+                        # 转 rgba 加透明度
+                        return f"rgba({int(c[1:3],16)},{int(c[3:5],16)},{int(c[5:7],16)},0.35)"
+
+                    link_colors = [_link_color(sankey['nodes'][t])
+                                   for t in sankey['targets']]
+
+                    fig_sankey = go.Figure(data=[go.Sankey(
+                        arrangement='snap',
+                        node=dict(
+                            pad=20, thickness=22,
+                            line=dict(color='#37474F', width=0.5),
+                            label=sankey['nodes'],
+                            color=[_node_color(n) for n in sankey['nodes']],
+                        ),
+                        link=dict(
+                            source=sankey['sources'],
+                            target=sankey['targets'],
+                            value=sankey['values'],
+                            color=link_colors,
+                        ),
+                        textfont=dict(size=13, color='#212121', family='PingFang SC, sans-serif'),
+                    )])
+                    fig_sankey.update_layout(
+                        height=560,
+                        margin=dict(t=20, b=20, l=10, r=10),
+                        font=dict(size=13, color='#212121'),
+                        paper_bgcolor='white',
+                    )
+                    st.plotly_chart(fig_sankey, use_container_width=True)
+                    st.caption("绿=收入 / 灰=汇聚 / 橙=必需支出 / 红=可选支出 / 紫=债务还本 / 蓝=净储蓄")
+
+                # ── 净资产核对 ─────────────────────────────
+                if q_prev:
+                    cfl_df = load_cashflow_log()
+                    prev_nw_data = compute_net_worth(bs_df, q_prev)
+                    rec = compute_net_worth_reconciliation(
+                        shark_df,
+                        nw_prev=prev_nw_data['net_worth'],
+                        nw_curr=curr['net_worth'],
+                        cashflow_log=cfl_df,
+                        quarter=q_curr,
+                    )
+                    st.markdown("##### 净资产核对")
+                    st.caption(
+                        "核对公式：期末净资产 ≈ 期初净资产 + 鲨鱼收入 - 鲨鱼支出（剔债务还本）"
+                        " ± 特殊现金流 ± 资产估值变化（残差）"
+                    )
+
+                    rec_table = pd.DataFrame([
+                        ('鲨鱼收入',         f"+¥{rec['shark_income']:,.2f}"),
+                        ('鲨鱼支出(剔债务还本)', f"-¥{rec['shark_expense_ex_debt']:,.2f}"),
+                        ('特殊入金(卖资产/补贴/分红)', f"+¥{rec['special_inflow']:,.2f}"),
+                        ('特殊出金',         f"-¥{rec['special_outflow']:,.2f}"),
+                        ('预测净资产变化',     f"¥{rec['predicted_change']:+,.2f}"),
+                        ('实际净资产变化',     f"¥{rec['nw_change']:+,.2f}"),
+                        ('残差(资产估值变化)', f"¥{rec['residual']:+,.2f}"
+                            f" ({rec['residual_pct']*100:.2f}% 期初净资产)"),
+                    ], columns=['项目', '金额'])
+                    st.dataframe(rec_table, hide_index=True, use_container_width=True)
+
+                    if abs(rec['residual_pct']) < 0.02:
+                        st.success(f"✅ 残差 {rec['residual_pct']*100:.2f}% < 2%，对账正常")
+                    elif abs(rec['residual_pct']) < 0.05:
+                        st.warning(f"⚠️ 残差 {rec['residual_pct']*100:.2f}% 偏大，可能因 SAP/黄金等持仓估值变化")
+                    else:
+                        st.error(f"❌ 残差 {rec['residual_pct']*100:.2f}% 过大，请检查数据是否完整")
+
+        except Exception as e:
+            st.warning(f"现金流分析失败：{e}")
+            import traceback
+            with st.expander("错误详情"):
+                st.code(traceback.format_exc())
+
         # ─── PDF 导出 ────────────────────────────────────────
         st.divider()
 
