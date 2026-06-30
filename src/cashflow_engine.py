@@ -293,6 +293,32 @@ def build_sankey_data(df: pd.DataFrame) -> dict:
 
 # ── 净资产核对 ────────────────────────────────────────
 
+# Type 枚举的分类(参考 docs/USER_MANUAL.md):
+#   经营性: 影响净资产(真实新增/消耗财富)
+#   资本性: 资产形态转换,不影响净资产(如卖车=车→现金)
+OPERATING_INFLOW_TYPES = {'Inflow_Salary', 'Inflow_Other'}
+OPERATING_OUTFLOW_TYPES = {'Outflow_Major'}
+CAPITAL_TYPES = {'Capital_Inflow', 'Capital_Outflow'}
+
+
+def _classify_cashflow_type(type_str: str, amount: float) -> str:
+    """把 cashflow_log 的 Type 字段映射到三类:
+    - 'operating_in'    经营性流入(影响净资产)
+    - 'operating_out'   经营性流出(影响净资产)
+    - 'capital'         资本性(不影响净资产)
+    - 'unknown'         未知Type(保守按经营性处理,避免漏算)
+    """
+    t = (type_str or '').strip()
+    if t in OPERATING_INFLOW_TYPES:
+        return 'operating_in'
+    if t in OPERATING_OUTFLOW_TYPES:
+        return 'operating_out'
+    if t in CAPITAL_TYPES:
+        return 'capital'
+    # 未知Type: 按金额符号回退到经营性(保守,避免漏算真实流入流出)
+    return 'operating_in' if amount > 0 else 'operating_out'
+
+
 def compute_net_worth_reconciliation(
     df_shark: pd.DataFrame,
     nw_prev: float,
@@ -300,13 +326,15 @@ def compute_net_worth_reconciliation(
     cashflow_log: pd.DataFrame | None = None,
     quarter: str | None = None,
 ) -> dict:
-    """净资产核对公式:
+    """净资产核对公式(2026-07-01 修正: 区分经营性 vs 资本性):
 
     期末净资产 ≈ 期初净资产
-               + 鲨鱼收入合计
-               - 鲨鱼支出合计(剔除"债务还本")
-               + cashflow_log 中的特殊现金流
+               + 鲨鱼收入合计                            (经营性流入)
+               - 鲨鱼支出合计(剔除"债务还本")             (经营性流出)
+               + cashflow_log 经营性流入(Inflow_*)        (鲨鱼外的经营性)
+               - cashflow_log 经营性流出(Outflow_Major)
                ± 资产估值变化(残差)
+               ─── 不含 Capital_Inflow/Outflow(资产形态转换不影响净资产)───
 
     Args:
         df_shark:     当季鲨鱼记账数据
@@ -319,29 +347,44 @@ def compute_net_worth_reconciliation(
         dict with keys:
           nw_prev, nw_curr, nw_change
           shark_income, shark_expense_ex_debt
-          special_inflow, special_outflow
-          predicted_change   预测的净资产变化
-          residual           实际变化 - 预测变化(应≈资产估值变化)
-          residual_pct       残差占期初净资产比例
+          operating_inflow      鲨鱼外经营性流入(工资奖金/补贴/分红等)
+          operating_outflow     鲨鱼外经营性流出(基金外大额支出)
+          capital_inflow        资本性流入(卖车/资产变现,不计入预测)
+          capital_outflow       资本性流出(大额资产购置,不计入预测)
+          predicted_change      预测净资产变化(只含经营性)
+          residual              实际变化 - 预测变化(应≈资产估值变化)
+          residual_pct          残差占期初净资产比例
+          capital_net           资本性净流(展示用,不计入残差)
     """
     summary = compute_cashflow_summary(df_shark)
     shark_income = summary['income_total']
-    # 鲨鱼支出(剔除债务还本)= 总支出 - 债务还本
     shark_expense_ex_debt = summary['expense_total'] - summary['debt_principal']
 
-    special_inflow = 0.0
-    special_outflow = 0.0
+    operating_inflow = 0.0
+    operating_outflow = 0.0
+    capital_inflow = 0.0
+    capital_outflow = 0.0
+
     if cashflow_log is not None and not cashflow_log.empty and quarter:
         cfl_q = cashflow_log[cashflow_log['Quarter'] == quarter]
         for _, row in cfl_q.iterrows():
             amt = float(row.get('Amount', 0))
-            if amt > 0:
-                special_inflow += amt
-            else:
-                special_outflow += abs(amt)
+            type_str = row.get('Type', '')
+            bucket = _classify_cashflow_type(type_str, amt)
+            abs_amt = abs(amt)
+            if bucket == 'operating_in':
+                operating_inflow += abs_amt
+            elif bucket == 'operating_out':
+                operating_outflow += abs_amt
+            else:  # capital
+                if amt > 0:
+                    capital_inflow += abs_amt
+                else:
+                    capital_outflow += abs_amt
 
+    # 预测变化只含经营性(不含资本性,资产置换不创造净资产)
     predicted_change = (shark_income - shark_expense_ex_debt
-                       + special_inflow - special_outflow)
+                        + operating_inflow - operating_outflow)
     actual_change = nw_curr - nw_prev
     residual = actual_change - predicted_change
     residual_pct = abs(residual) / nw_prev if nw_prev > 0 else 0.0
@@ -352,8 +395,15 @@ def compute_net_worth_reconciliation(
         'nw_change':            round(actual_change, 2),
         'shark_income':         round(shark_income, 2),
         'shark_expense_ex_debt': round(shark_expense_ex_debt, 2),
-        'special_inflow':       round(special_inflow, 2),
-        'special_outflow':      round(special_outflow, 2),
+        # 新字段(2026-07-01 区分经营性 vs 资本性):
+        'operating_inflow':     round(operating_inflow, 2),
+        'operating_outflow':    round(operating_outflow, 2),
+        'capital_inflow':       round(capital_inflow, 2),
+        'capital_outflow':      round(capital_outflow, 2),
+        'capital_net':          round(capital_inflow - capital_outflow, 2),
+        # 向后兼容(旧调用方还在用 special_*),只含经营性以保持语义正确:
+        'special_inflow':       round(operating_inflow, 2),
+        'special_outflow':      round(operating_outflow, 2),
         'predicted_change':     round(predicted_change, 2),
         'residual':             round(residual, 2),
         'residual_pct':         round(residual_pct, 4),

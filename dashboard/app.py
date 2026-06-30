@@ -4124,16 +4124,63 @@ with tab_quarterly:
 
         # KPI
         st.subheader("核心指标")
+
+        # 预计算 prev 数据用于所有 KPI 的 QoQ delta
+        prev_kpi = None
+        if q_prev:
+            try:
+                prev_kpi = compute_net_worth(bs_df, q_prev)
+            except Exception:
+                prev_kpi = None
+
+        def _fmt_money_delta(curr_v, prev_v, pct=False):
+            """格式化金额型 delta 字符串。pct=True 时附加百分比。
+
+            注意:Streamlit metric 的 delta 必须以 +/- 开头才能识别正负,
+            因此不能用 ¥ 前缀。改为 "+/-1,234 元" 形式,既保留单位又能识别方向。
+            """
+            if prev_v is None or prev_v == 0:
+                return None
+            d = curr_v - prev_v
+            if pct:
+                pct_v = d / prev_v * 100
+                return f"{d:+,.0f} 元 ({pct_v:+.2f}%)"
+            return f"{d:+,.0f} 元"
+
+        def _fmt_pct_delta(curr_v, prev_v):
+            """格式化百分点型 delta（适用于占比类指标）。
+            同样要求以 +/- 开头。"""
+            if prev_v is None:
+                return None
+            d = curr_v - prev_v
+            return f"{d:+.2f}pp"
+
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("家庭净资产", f"¥{curr['net_worth']:,.0f}")
-        k2.metric("总资产", f"¥{curr['total_assets']:,.0f}")
-        k3.metric("总负债", f"¥{curr['total_liabilities']:,.0f}")
-        k4.metric("资产负债率", f"{curr['debt_ratio']:.1f}%")
+        k1.metric("家庭净资产", f"¥{curr['net_worth']:,.0f}",
+                  delta=_fmt_money_delta(curr['net_worth'],
+                                         prev_kpi['net_worth'] if prev_kpi else None,
+                                         pct=True))
+        k2.metric("总资产", f"¥{curr['total_assets']:,.0f}",
+                  delta=_fmt_money_delta(curr['total_assets'],
+                                         prev_kpi['total_assets'] if prev_kpi else None))
+        k3.metric("总负债", f"¥{curr['total_liabilities']:,.0f}",
+                  delta=_fmt_money_delta(curr['total_liabilities'],
+                                         prev_kpi['total_liabilities'] if prev_kpi else None),
+                  delta_color="inverse")  # 负债减少是好事,反向配色
+        k4.metric("资产负债率", f"{curr['debt_ratio']:.1f}%",
+                  delta=_fmt_pct_delta(curr['debt_ratio'],
+                                       prev_kpi['debt_ratio'] if prev_kpi else None),
+                  delta_color="inverse")
 
         k5, k6, k7, k8 = st.columns(4)
-        k5.metric("金融投资占比", f"{curr['investment_ratio']:.1f}%")
+        k5.metric("金融投资占比", f"{curr['investment_ratio']:.1f}%",
+                  delta=_fmt_pct_delta(curr['investment_ratio'],
+                                       prev_kpi['investment_ratio'] if prev_kpi else None))
         cr = curr['current_ratio']
-        k6.metric("流动比率", f"{cr:.2f}" if cr else "—", help="流动资产/流动负债")
+        cr_prev = prev_kpi['current_ratio'] if prev_kpi else None
+        k6.metric("流动比率", f"{cr:.2f}" if cr else "—",
+                  delta=f"{cr - cr_prev:+.2f}" if (cr and cr_prev) else None,
+                  help="流动资产/流动负债")
         k7.metric("季度", q_curr)
         if q_prev:
             qoq = compute_qoq(bs_df, q_prev, q_curr)
@@ -4326,28 +4373,59 @@ with tab_quarterly:
                     )
                     st.markdown("##### 净资产核对")
                     st.caption(
-                        "核对公式：期末净资产 ≈ 期初净资产 + 鲨鱼收入 - 鲨鱼支出（剔债务还本）"
-                        " ± 特殊现金流 ± 资产估值变化（残差）"
+                        "公式：期末净资产 ≈ 期初 + 鲨鱼收入 - 鲨鱼支出（剔债务还本）"
+                        " ± 经营性现金流 ± 资产估值变化（残差）"
+                        "。**资本性流（卖车/资产置换等）单独展示但不参与预测**——它只是资产形态转换。"
                     )
 
-                    rec_table = pd.DataFrame([
-                        ('鲨鱼收入',         f"+¥{rec['shark_income']:,.2f}"),
+                    # 主表:只含经营性,直接参与预测计算
+                    main_rows = [
+                        ('鲨鱼收入',           f"+¥{rec['shark_income']:,.2f}"),
                         ('鲨鱼支出(剔债务还本)', f"-¥{rec['shark_expense_ex_debt']:,.2f}"),
-                        ('特殊入金(卖资产/补贴/分红)', f"+¥{rec['special_inflow']:,.2f}"),
-                        ('特殊出金',         f"-¥{rec['special_outflow']:,.2f}"),
-                        ('预测净资产变化',     f"¥{rec['predicted_change']:+,.2f}"),
-                        ('实际净资产变化',     f"¥{rec['nw_change']:+,.2f}"),
-                        ('残差(资产估值变化)', f"¥{rec['residual']:+,.2f}"
-                            f" ({rec['residual_pct']*100:.2f}% 期初净资产)"),
-                    ], columns=['项目', '金额'])
+                    ]
+                    if rec['operating_inflow'] > 0:
+                        main_rows.append(
+                            ('鲨鱼外经营性流入(补贴/分红等)', f"+¥{rec['operating_inflow']:,.2f}")
+                        )
+                    if rec['operating_outflow'] > 0:
+                        main_rows.append(
+                            ('鲨鱼外经营性流出(大额特殊支出)', f"-¥{rec['operating_outflow']:,.2f}")
+                        )
+                    main_rows.extend([
+                        ('—— 预测净资产变化 ——', f"¥{rec['predicted_change']:+,.2f}"),
+                        ('—— 实际净资产变化 ——', f"¥{rec['nw_change']:+,.2f}"),
+                        ('★ 残差(资产估值变化)',
+                         f"¥{rec['residual']:+,.2f}"
+                         f"  ({rec['residual_pct']*100:.2f}% 期初净资产)"),
+                    ])
+                    rec_table = pd.DataFrame(main_rows, columns=['项目', '金额'])
                     st.dataframe(rec_table, hide_index=True, use_container_width=True)
 
+                    # 资本性现金流单独展示(如有)
+                    if rec['capital_inflow'] > 0 or rec['capital_outflow'] > 0:
+                        with st.expander(
+                            f"📌 资本性现金流 (资产置换,不影响净资产)  净额 ¥{rec['capital_net']:+,.2f}",
+                            expanded=False
+                        ):
+                            cap_rows = []
+                            if rec['capital_inflow'] > 0:
+                                cap_rows.append(('资本性流入(资产变现)', f"+¥{rec['capital_inflow']:,.2f}"))
+                            if rec['capital_outflow'] > 0:
+                                cap_rows.append(('资本性流出(资产购置)', f"-¥{rec['capital_outflow']:,.2f}"))
+                            cap_df = pd.DataFrame(cap_rows, columns=['项目', '金额'])
+                            st.dataframe(cap_df, hide_index=True, use_container_width=True)
+                            st.caption(
+                                "例:卖车¥20.7万 → 资产从「车辆」转移到「现金」,"
+                                "净资产**不变**,所以不计入预测。但残差会受此影响为0,因为"
+                                "balance_sheet 已经反映了资产端的此次转移。"
+                            )
+
                     if abs(rec['residual_pct']) < 0.02:
-                        st.success(f"✅ 残差 {rec['residual_pct']*100:.2f}% < 2%，对账正常")
+                        st.success(f"✅ 残差 {rec['residual_pct']*100:.2f}% < 2%，对账正常（金融资产估值波动在合理范围）")
                     elif abs(rec['residual_pct']) < 0.05:
-                        st.warning(f"⚠️ 残差 {rec['residual_pct']*100:.2f}% 偏大，可能因 SAP/黄金等持仓估值变化")
+                        st.warning(f"⚠️ 残差 {rec['residual_pct']*100:.2f}% 偏大，可能因 SAP/黄金等持仓估值大幅变化")
                     else:
-                        st.error(f"❌ 残差 {rec['residual_pct']*100:.2f}% 过大，请检查数据是否完整")
+                        st.error(f"❌ 残差 {rec['residual_pct']*100:.2f}% 过大，请检查数据是否完整（鲨鱼记账 / cashflow_log / balance_sheet）")
 
         except Exception as e:
             st.warning(f"现金流分析失败：{e}")

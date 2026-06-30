@@ -269,23 +269,113 @@ class TestNetWorthReconciliation:
         assert r['residual'] == 30000  # 30000 来自资产升值
 
     def test_with_cashflow_log(self):
-        """cashflow_log 中的特殊现金流应该纳入计算。"""
+        """cashflow_log 中的现金流按 Type 区分纳入计算(2026-07-01 修正)。
+
+        旧逻辑: 所有 cashflow_log 都加入预测 → 错误(卖车不创造净资产)
+        新逻辑: 只把经营性(Inflow_*/Outflow_*) 加入预测,
+                资本性(Capital_*) 单独展示但不入预测
+        """
         df = _mock_df([
             ('2026-04-01', '收入', '工资', 100000),
         ])
+        # 混合三种 Type: 资本性 + 经营性流入 + 跨季度过滤
         cfl = pd.DataFrame([
-            {'Quarter': '2026Q2', 'Date': '2026-04-15', 'Amount': 200000, 'Type': 'Capital_Inflow', 'Note': '卖车'},
-            {'Quarter': '2026Q1', 'Date': '2026-01-01', 'Amount': 99999, 'Type': 'Other', 'Note': '不算在内'},
+            {'Quarter': '2026Q2', 'Date': '2026-04-15', 'Amount': 200000,
+             'Type': 'Capital_Inflow',  'Note': '卖车'},   # 资本性,不入预测
+            {'Quarter': '2026Q2', 'Date': '2026-05-25', 'Amount':  15000,
+             'Type': 'Inflow_Other',    'Note': '政府补贴'},  # 经营性,入预测
+            {'Quarter': '2026Q1', 'Date': '2026-01-01', 'Amount':  99999,
+             'Type': 'Inflow_Salary',   'Note': '不算在内(Q1)'},  # 跨季度,被过滤
         ])
         r = compute_net_worth_reconciliation(
-            df, nw_prev=1_000_000, nw_curr=1_300_000,
+            df, nw_prev=1_000_000, nw_curr=1_115_000,
             cashflow_log=cfl, quarter='2026Q2',
         )
-        assert r['special_inflow'] == 200000
-        assert r['special_outflow'] == 0
-        # 预测变化 = 100000(工资) - 0(无支出) + 200000(卖车) - 0 = 300000
-        assert r['predicted_change'] == 300000
+        # 新字段
+        assert r['capital_inflow'] == 200000     # 卖车单独记录
+        assert r['capital_outflow'] == 0
+        assert r['operating_inflow'] == 15000    # 只有政府补贴
+        assert r['operating_outflow'] == 0
+        # 预测变化只含经营性: 工资 100k - 支出 0 + 经营性流入 15k = 115k
+        assert r['predicted_change'] == 115000
+        # 实际变化 115k → 残差 0
         assert r['residual'] == 0
+
+    def test_capital_inflow_does_not_affect_prediction(self):
+        """关键不变性: Capital_Inflow 不应该影响 predicted_change。"""
+        df = _mock_df([('2026-04-01', '收入', '工资', 100000)])
+        cfl = pd.DataFrame([
+            {'Quarter': '2026Q2', 'Date': '2026-04-15', 'Amount': 500000,
+             'Type': 'Capital_Inflow', 'Note': '卖房'},
+        ])
+        r = compute_net_worth_reconciliation(
+            df, nw_prev=1_000_000, nw_curr=1_100_000,
+            cashflow_log=cfl, quarter='2026Q2',
+        )
+        # 即使卖房¥50万,预测只含工资 = 10万,不含资本性流入
+        assert r['predicted_change'] == 100000
+        assert r['capital_inflow'] == 500000  # 但单独记录可见
+
+    def test_capital_outflow(self):
+        """Capital_Outflow(大额资产购置)也不影响预测。"""
+        df = _mock_df([('2026-04-01', '收入', '工资', 100000)])
+        cfl = pd.DataFrame([
+            {'Quarter': '2026Q2', 'Date': '2026-04-15', 'Amount': -200000,
+             'Type': 'Capital_Outflow', 'Note': '买车付首付'},
+        ])
+        r = compute_net_worth_reconciliation(
+            df, nw_prev=1_000_000, nw_curr=1_100_000,
+            cashflow_log=cfl, quarter='2026Q2',
+        )
+        assert r['predicted_change'] == 100000
+        assert r['capital_outflow'] == 200000
+        assert r['operating_outflow'] == 0
+
+    def test_operating_outflow(self):
+        """Outflow_Major (基金外大额经营性支出) 应该减少预测。"""
+        df = _mock_df([('2026-04-01', '收入', '工资', 100000)])
+        cfl = pd.DataFrame([
+            {'Quarter': '2026Q2', 'Date': '2026-04-15', 'Amount': -30000,
+             'Type': 'Outflow_Major', 'Note': '保险年费'},
+        ])
+        r = compute_net_worth_reconciliation(
+            df, nw_prev=1_000_000, nw_curr=1_070_000,
+            cashflow_log=cfl, quarter='2026Q2',
+        )
+        # 预测 = 工资 100k - 0 + 0 - 30k = 70k
+        assert r['predicted_change'] == 70000
+        assert r['operating_outflow'] == 30000
+        assert r['residual'] == 0
+
+    def test_unknown_type_defaults_to_operating(self):
+        """未知 Type 按金额符号回退到经营性(保守,避免漏算)。"""
+        df = _mock_df([('2026-04-01', '收入', '工资', 100000)])
+        cfl = pd.DataFrame([
+            {'Quarter': '2026Q2', 'Date': '2026-04-15', 'Amount': 5000,
+             'Type': 'SomeUnknownType', 'Note': '未来新增类型'},
+        ])
+        r = compute_net_worth_reconciliation(
+            df, nw_prev=1_000_000, nw_curr=1_105_000,
+            cashflow_log=cfl, quarter='2026Q2',
+        )
+        # 未知Type按正金额→operating_in
+        assert r['operating_inflow'] == 5000
+        assert r['capital_inflow'] == 0
+
+    def test_backward_compat_special_fields(self):
+        """旧 UI 代码用 special_inflow/outflow 字段,新版应保持可用。"""
+        df = _mock_df([('2026-04-01', '收入', '工资', 100000)])
+        cfl = pd.DataFrame([
+            {'Quarter': '2026Q2', 'Date': '2026-04-15', 'Amount': 15000,
+             'Type': 'Inflow_Other', 'Note': '补贴'},
+        ])
+        r = compute_net_worth_reconciliation(
+            df, nw_prev=1_000_000, nw_curr=1_115_000,
+            cashflow_log=cfl, quarter='2026Q2',
+        )
+        # 向后兼容: special_* 应该只反映经营性(不再包含资本性)
+        assert r['special_inflow'] == 15000
+        assert r['special_outflow'] == 0
 
 
 # ─── 集成测试:用 Q1 真实数据 ───
