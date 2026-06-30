@@ -377,6 +377,66 @@ class TestNetWorthReconciliation:
         assert r['special_inflow'] == 15000
         assert r['special_outflow'] == 0
 
+    def test_sap_vesting_included(self):
+        """SAP NCF(ESPP+RSU 归属)应纳入预测,且剔除建仓日。
+
+        建仓日定义: portfolio 中最早的 Date(min)。
+        其 NCF 是成本基准(Total_Value 全量),不算流入。
+        """
+        df = _mock_df([('2026-04-01', '收入', '工资', 100000)])
+        # 建仓日 2026-04-10 +458,503(基准,不算流入),后续 +20,547(实际归属)
+        portfolio = pd.DataFrame([
+            {'Date': '2026-04-10', 'Asset_Class': 'Company_Stock',
+             'Name': 'SAP', 'Net_Cash_Flow': 458503},
+            {'Date': '2026-05-08', 'Asset_Class': 'Company_Stock',
+             'Name': 'SAP', 'Net_Cash_Flow': 3292},
+            {'Date': '2026-06-12', 'Asset_Class': 'Company_Stock',
+             'Name': 'SAP', 'Net_Cash_Flow': 3292},
+            {'Date': '2026-06-19', 'Asset_Class': 'Company_Stock',
+             'Name': 'SAP', 'Net_Cash_Flow': 13963},
+            # 非 Company_Stock 的 NCF 不算
+            {'Date': '2026-05-22', 'Asset_Class': 'ETF_Stock',
+             'Name': '腾讯', 'Net_Cash_Flow': 50000},
+        ])
+        r = compute_net_worth_reconciliation(
+            df, nw_prev=1_000_000, nw_curr=1_120_547,
+            portfolio_df=portfolio,
+            q_prev_end='2026-03-31', q_curr_end='2026-06-30',
+        )
+        # SAP 归属 = 3292 + 3292 + 13963 = 20547(剔除建仓日 458503)
+        assert r['sap_vesting'] == 20547
+        # 预测 = 100000(工资) + 20547(SAP) = 120547
+        assert r['predicted_change'] == 120547
+        assert r['residual'] == 0
+
+    def test_sap_vesting_filters_outside_quarter(self):
+        """季度区间外的 NCF 应被过滤,且建仓日定义符合 portfolio.csv 最早日期。"""
+        df = _mock_df([('2026-04-01', '收入', '工资', 100000)])
+        # 建仓日在 Q1(2025-12-31)，Q2 内有 NCF 应被纳入
+        portfolio = pd.DataFrame([
+            {'Date': '2025-12-31', 'Asset_Class': 'Company_Stock',
+             'Name': 'SAP', 'Net_Cash_Flow': 500000},  # 建仓日,剔除
+            {'Date': '2026-03-15', 'Asset_Class': 'Company_Stock',
+             'Name': 'SAP', 'Net_Cash_Flow': 9999},     # Q1 内,被区间过滤
+            {'Date': '2026-05-08', 'Asset_Class': 'Company_Stock',
+             'Name': 'SAP', 'Net_Cash_Flow': 3292},     # Q2 内,纳入
+        ])
+        r = compute_net_worth_reconciliation(
+            df, nw_prev=1_000_000, nw_curr=1_103_292,
+            portfolio_df=portfolio,
+            q_prev_end='2026-03-31', q_curr_end='2026-06-30',
+        )
+        assert r['sap_vesting'] == 3292
+
+    def test_sap_vesting_skipped_when_no_portfolio(self):
+        """portfolio_df 为 None 时 sap_vesting=0,不报错。"""
+        df = _mock_df([('2026-04-01', '收入', '工资', 100000)])
+        r = compute_net_worth_reconciliation(
+            df, nw_prev=1_000_000, nw_curr=1_100_000,
+        )
+        assert r['sap_vesting'] == 0
+        assert r['predicted_change'] == 100000
+
 
 # ─── 集成测试:用 Q1 真实数据 ───
 

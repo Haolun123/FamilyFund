@@ -4364,17 +4364,35 @@ with tab_quarterly:
                 if q_prev:
                     cfl_df = load_cashflow_log()
                     prev_nw_data = compute_net_worth(bs_df, q_prev)
+
+                    # 计算季末日期(用于 portfolio 区间过滤)
+                    def _q_end(q):
+                        y = int(q[:4]); n = int(q[5])
+                        m = n * 3
+                        return pd.Timestamp(year=y, month=m, day=1) + pd.offsets.MonthEnd(0)
+                    q_prev_end = _q_end(q_prev).strftime('%Y-%m-%d')
+                    q_curr_end = _q_end(q_curr).strftime('%Y-%m-%d')
+
+                    # 加载 portfolio(用于提取 Q 内 Company_Stock NCF)
+                    try:
+                        portfolio_df = pd.read_csv(csv_path)
+                    except Exception:
+                        portfolio_df = None
+
                     rec = compute_net_worth_reconciliation(
                         shark_df,
                         nw_prev=prev_nw_data['net_worth'],
                         nw_curr=curr['net_worth'],
                         cashflow_log=cfl_df,
                         quarter=q_curr,
+                        portfolio_df=portfolio_df,
+                        q_prev_end=q_prev_end,
+                        q_curr_end=q_curr_end,
                     )
                     st.markdown("##### 净资产核对")
                     st.caption(
                         "公式：期末净资产 ≈ 期初 + 鲨鱼收入 - 鲨鱼支出（剔债务还本）"
-                        " ± 经营性现金流 ± 资产估值变化（残差）"
+                        " + 经营性现金流 + **SAP 归属薪酬(ESPP+RSU)** ± 资产估值变化（残差）"
                         "。**资本性流（卖车/资产置换等）单独展示但不参与预测**——它只是资产形态转换。"
                     )
 
@@ -4390,6 +4408,11 @@ with tab_quarterly:
                     if rec['operating_outflow'] > 0:
                         main_rows.append(
                             ('鲨鱼外经营性流出(大额特殊支出)', f"-¥{rec['operating_outflow']:,.2f}")
+                        )
+                    if rec.get('sap_vesting', 0) != 0:
+                        main_rows.append(
+                            ('SAP 归属薪酬(ESPP Cost_CNY + RSU FMV)',
+                             f"+¥{rec['sap_vesting']:,.2f}")
                         )
                     main_rows.extend([
                         ('—— 预测净资产变化 ——', f"¥{rec['predicted_change']:+,.2f}"),

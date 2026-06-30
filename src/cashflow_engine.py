@@ -325,14 +325,18 @@ def compute_net_worth_reconciliation(
     nw_curr: float,
     cashflow_log: pd.DataFrame | None = None,
     quarter: str | None = None,
+    portfolio_df: pd.DataFrame | None = None,
+    q_prev_end: str | None = None,
+    q_curr_end: str | None = None,
 ) -> dict:
-    """净资产核对公式(2026-07-01 修正: 区分经营性 vs 资本性):
+    """净资产核对公式(2026-07-01 修正: 区分经营性 vs 资本性 + 补 SAP 薪酬):
 
     期末净资产 ≈ 期初净资产
                + 鲨鱼收入合计                            (经营性流入)
                - 鲨鱼支出合计(剔除"债务还本")             (经营性流出)
                + cashflow_log 经营性流入(Inflow_*)        (鲨鱼外的经营性)
                - cashflow_log 经营性流出(Outflow_Major)
+               + Company_Stock NCF (ESPP+RSU 薪酬)        (SAP 归属,不经过银行账户)
                ± 资产估值变化(残差)
                ─── 不含 Capital_Inflow/Outflow(资产形态转换不影响净资产)───
 
@@ -342,6 +346,9 @@ def compute_net_worth_reconciliation(
         nw_curr:      期末净资产(CNY)
         cashflow_log: cashflow_log.csv 数据(可选)
         quarter:      要过滤的季度,如 '2026Q2'
+        portfolio_df: portfolio.csv 数据(可选,用于提取 Company_Stock NCF)
+        q_prev_end:   上一季末日期 'YYYY-MM-DD'(用于 NCF 区间过滤)
+        q_curr_end:   当季末日期 'YYYY-MM-DD'
 
     Returns:
         dict with keys:
@@ -349,12 +356,13 @@ def compute_net_worth_reconciliation(
           shark_income, shark_expense_ex_debt
           operating_inflow      鲨鱼外经营性流入(工资奖金/补贴/分红等)
           operating_outflow     鲨鱼外经营性流出(基金外大额支出)
+          sap_vesting           SAP 归属薪酬(Company_Stock NCF,ESPP+RSU)
           capital_inflow        资本性流入(卖车/资产变现,不计入预测)
           capital_outflow       资本性流出(大额资产购置,不计入预测)
-          predicted_change      预测净资产变化(只含经营性)
+          capital_net           资本性净流(展示用)
+          predicted_change      预测净资产变化(经营性 + SAP 归属)
           residual              实际变化 - 预测变化(应≈资产估值变化)
           residual_pct          残差占期初净资产比例
-          capital_net           资本性净流(展示用,不计入残差)
     """
     summary = compute_cashflow_summary(df_shark)
     shark_income = summary['income_total']
@@ -382,9 +390,32 @@ def compute_net_worth_reconciliation(
                 else:
                     capital_outflow += abs_amt
 
-    # 预测变化只含经营性(不含资本性,资产置换不创造净资产)
+    # SAP 归属薪酬: portfolio.csv 中 Company_Stock 的 NCF 累计
+    #   ESPP NCF = Cost_CNY (机会成本,折扣价买入)
+    #   RSU NCF = 归属市值 (无偿归属的 FMV)
+    # 这两类都不出现在鲨鱼记账里(钱不经过银行/现金账户),
+    # 但都真实增加净资产,必须独立纳入预测。
+    # 注意剔除建仓日的 NCF(它是基准点,不是新增流入)。
+    sap_vesting = 0.0
+    if (portfolio_df is not None and not portfolio_df.empty
+            and q_prev_end and q_curr_end):
+        df_p = portfolio_df.copy()
+        df_p['Date'] = pd.to_datetime(df_p['Date'])
+        df_p['Net_Cash_Flow'] = pd.to_numeric(
+            df_p['Net_Cash_Flow'], errors='coerce').fillna(0)
+        inception_date = df_p['Date'].min()
+        mask = (
+            (df_p['Asset_Class'] == 'Company_Stock')
+            & (df_p['Date'] > pd.to_datetime(q_prev_end))
+            & (df_p['Date'] <= pd.to_datetime(q_curr_end))
+            & (df_p['Date'] != inception_date)
+        )
+        sap_vesting = float(df_p.loc[mask, 'Net_Cash_Flow'].sum())
+
+    # 预测变化 = 经营性 + SAP归属薪酬(不含资本性)
     predicted_change = (shark_income - shark_expense_ex_debt
-                        + operating_inflow - operating_outflow)
+                        + operating_inflow - operating_outflow
+                        + sap_vesting)
     actual_change = nw_curr - nw_prev
     residual = actual_change - predicted_change
     residual_pct = abs(residual) / nw_prev if nw_prev > 0 else 0.0
@@ -395,13 +426,12 @@ def compute_net_worth_reconciliation(
         'nw_change':            round(actual_change, 2),
         'shark_income':         round(shark_income, 2),
         'shark_expense_ex_debt': round(shark_expense_ex_debt, 2),
-        # 新字段(2026-07-01 区分经营性 vs 资本性):
         'operating_inflow':     round(operating_inflow, 2),
         'operating_outflow':    round(operating_outflow, 2),
+        'sap_vesting':          round(sap_vesting, 2),
         'capital_inflow':       round(capital_inflow, 2),
         'capital_outflow':      round(capital_outflow, 2),
         'capital_net':          round(capital_inflow - capital_outflow, 2),
-        # 向后兼容(旧调用方还在用 special_*),只含经营性以保持语义正确:
         'special_inflow':       round(operating_inflow, 2),
         'special_outflow':      round(operating_outflow, 2),
         'predicted_change':     round(predicted_change, 2),
