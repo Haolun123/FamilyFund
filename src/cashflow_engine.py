@@ -220,21 +220,24 @@ def aggregate_by_category(df: pd.DataFrame, exp_type: str = '支出') -> pd.Data
 
 # ── 桑基图数据 ──────────────────────────────────────────
 
-def build_sankey_data(df: pd.DataFrame) -> dict:
+def build_sankey_data(df: pd.DataFrame, group_expense: bool = True) -> dict:
     """构造桑基图节点和流。
 
     设计:
       左侧节点 = 各收入类别(工资/分红/公积金/...)
       中间节点 = "总流入"(单一汇聚节点,让左右对称美观)
-      右侧节点 = 各支出类别 + "净储蓄"
+      右侧节点 = 支出/储蓄
+
+    Args:
+        df: 鲨鱼记账数据
+        group_expense: 是否把右侧支出合并为 必需/可选/债务还本 三桶(默认 True,降低视觉噪音).
+                       False 时退化为按一级类别展开(保留向后兼容,测试用).
 
     Returns:
         dict with keys:
-          nodes: list[str] 节点名称(按顺序)
-          sources: list[int] 流的起点索引
-          targets: list[int] 流的终点索引
-          values:  list[float] 流的金额
-          colors:  list[str] 流的颜色(可选,这里按目标类别归色)
+          nodes:  list[str] 节点名称
+          sources, targets, values: 流的端点和金额
+          flow_amounts: dict[(source_idx, target_idx)] → 金额  (供 UI 在 link 上标注)
     """
     income_agg = aggregate_by_category(df, '收入')
     expense_agg = aggregate_by_category(df, '支出')
@@ -250,44 +253,60 @@ def build_sankey_data(df: pd.DataFrame) -> dict:
     nodes.append(HUB)
     hub_idx = len(nodes) - 1
 
-    # 右侧: 支出类别 + 净储蓄
-    expense_names = expense_agg['Category'].tolist()
-    nodes.extend(expense_names)
-
-    # 净储蓄节点(可正可负)
-    SAVINGS = '净储蓄' if summary['net_savings'] >= 0 else '净支出(超支)'
-    nodes.append(SAVINGS)
-    savings_idx = len(nodes) - 1
+    sources, targets, values = [], [], []
 
     # 流: 左 → 中
-    sources, targets, values = [], [], []
     for i, (_, row) in enumerate(income_agg.iterrows()):
         sources.append(i)
         targets.append(hub_idx)
         values.append(float(row['Amount']))
 
-    # 流: 中 → 右(支出)
-    expense_offset = hub_idx + 1
-    for i, (_, row) in enumerate(expense_agg.iterrows()):
-        sources.append(hub_idx)
-        targets.append(expense_offset + i)
-        values.append(float(row['Amount']))
+    # 流: 中 → 右
+    if group_expense:
+        # 桶聚合模式: 必需 / 可选 / 债务还本 三桶
+        necessary  = float(expense_agg.loc[expense_agg['Bucket'] == '必需',     'Amount'].sum())
+        discretion = float(expense_agg.loc[expense_agg['Bucket'] == '可选',     'Amount'].sum())
+        debt       = float(expense_agg.loc[expense_agg['Bucket'] == '债务还本', 'Amount'].sum())
+        other      = float(expense_agg.loc[expense_agg['Bucket'] == '其他',     'Amount'].sum())
+        # 未归类项默认按必需(与 compute_cashflow_summary 一致)
+        necessary += other
 
-    # 流: 中 → 净储蓄(如果有结余)
+        for label, amount in (('必需支出', necessary),
+                              ('可选支出', discretion),
+                              ('债务还本', debt)):
+            if amount > 0:
+                nodes.append(label)
+                sources.append(hub_idx)
+                targets.append(len(nodes) - 1)
+                values.append(amount)
+    else:
+        # 展开模式(向后兼容): 按一级类别
+        for _, row in expense_agg.iterrows():
+            nodes.append(row['Category'])
+            sources.append(hub_idx)
+            targets.append(len(nodes) - 1)
+            values.append(float(row['Amount']))
+
+    # 流: 中 → 净储蓄
     if summary['net_savings'] > 0:
+        SAVINGS = '净储蓄'
+        nodes.append(SAVINGS)
         sources.append(hub_idx)
-        targets.append(savings_idx)
+        targets.append(len(nodes) - 1)
         values.append(summary['net_savings'])
     elif summary['net_savings'] < 0:
-        # 超支: 净储蓄 → 中(反向流,展示赤字)
-        # 桑基图不能展示负数流,改为说明性的0,然后用脚注提示
-        pass
+        # 超支:桑基图不能画负数流,改用说明性节点+0值
+        nodes.append('净支出(超支)')
+
+    # flow_amounts 供 UI 用做 link label
+    flow_amounts = {(s, t): v for s, t, v in zip(sources, targets, values)}
 
     return {
         'nodes':   nodes,
         'sources': sources,
         'targets': targets,
         'values':  [round(v, 2) for v in values],
+        'flow_amounts': flow_amounts,
     }
 
 

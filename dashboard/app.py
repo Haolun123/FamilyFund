@@ -4192,20 +4192,94 @@ with tab_quarterly:
         # 资产负债表
         st.subheader("资产负债表")
         asset_df, liab_df = generate_balance_sheet_table(bs_df, q_curr)
-        tbl1, tbl2 = st.columns(2)
-        with tbl1:
-            st.markdown("**资产端**")
-            st.dataframe(asset_df.drop(columns=['Notes']), use_container_width=True,
-                         hide_index=True,
-                         column_config={'金额(CNY)': st.column_config.NumberColumn(format="¥%.0f")})
-            st.markdown(f"**总资产: ¥{curr['total_assets']:,.0f}**")
-        with tbl2:
-            st.markdown("**负债端**")
-            st.dataframe(liab_df.drop(columns=['Notes']), use_container_width=True,
-                         hide_index=True,
-                         column_config={'金额(CNY)': st.column_config.NumberColumn(format="¥%.0f")})
-            st.markdown(f"**总负债: ¥{curr['total_liabilities']:,.0f}**")
-            st.markdown(f"**净资产: ¥{curr['net_worth']:,.0f}**")
+
+        if q_prev:
+            # QoQ 并排对比模式: Q_prev vs Q_curr,按 (大类,子类,账户/项目) outer merge
+            asset_prev_df, liab_prev_df = generate_balance_sheet_table(bs_df, q_prev)
+
+            def _merge_qoq(df_prev, df_curr, prev_label, curr_label):
+                key_cols = ['大类', '子类', '账户/项目']
+                p = df_prev[key_cols + ['金额(CNY)']].rename(columns={'金额(CNY)': prev_label})
+                c = df_curr[key_cols + ['金额(CNY)']].rename(columns={'金额(CNY)': curr_label})
+                merged = pd.merge(p, c, on=key_cols, how='outer')
+                merged[prev_label] = merged[prev_label].fillna(0)
+                merged[curr_label] = merged[curr_label].fillna(0)
+                merged['变化'] = merged[curr_label] - merged[prev_label]
+                # 排序: 大类 > 子类(小计放该大类末尾) > 账户/项目
+                merged['_is_subtotal'] = merged['子类'].eq('── 小计').astype(int)
+                merged = merged.sort_values(
+                    ['大类', '_is_subtotal', '子类', '账户/项目']
+                ).drop(columns='_is_subtotal').reset_index(drop=True)
+                return merged
+
+            asset_cmp = _merge_qoq(asset_prev_df, asset_df, q_prev, q_curr)
+            liab_cmp = _merge_qoq(liab_prev_df, liab_df, q_prev, q_curr)
+
+            st.caption(f"📊 QoQ 并排对比：{q_prev} vs {q_curr}。'—' 表示该项当季不存在；新增/消失项一目了然。")
+
+            tbl1, tbl2 = st.columns(2)
+
+            def _fmt_cny(v):
+                return '—' if v == 0 else f"¥{v:,.0f}"
+
+            with tbl1:
+                st.markdown("**资产端**")
+                # 显示用副本(0 替换为 '—',变化保留数字)
+                display_a = asset_cmp.copy()
+                display_a[q_prev] = display_a[q_prev].apply(_fmt_cny)
+                display_a[q_curr] = display_a[q_curr].apply(_fmt_cny)
+                st.dataframe(
+                    display_a, use_container_width=True, hide_index=True,
+                    column_config={
+                        '变化': st.column_config.NumberColumn(format="¥%+,.0f"),
+                    },
+                )
+                prev_ta = compute_net_worth(bs_df, q_prev)['total_assets']
+                curr_ta = curr['total_assets']
+                st.markdown(
+                    f"**总资产: ¥{prev_ta:,.0f} → ¥{curr_ta:,.0f} "
+                    f"(变化 {curr_ta - prev_ta:+,.0f})**"
+                )
+
+            with tbl2:
+                st.markdown("**负债端**")
+                display_l = liab_cmp.copy()
+                display_l[q_prev] = display_l[q_prev].apply(_fmt_cny)
+                display_l[q_curr] = display_l[q_curr].apply(_fmt_cny)
+                st.dataframe(
+                    display_l, use_container_width=True, hide_index=True,
+                    column_config={
+                        '变化': st.column_config.NumberColumn(format="¥%+,.0f"),
+                    },
+                )
+                prev_tl = compute_net_worth(bs_df, q_prev)['total_liabilities']
+                curr_tl = curr['total_liabilities']
+                prev_nw_val = compute_net_worth(bs_df, q_prev)['net_worth']
+                curr_nw_val = curr['net_worth']
+                st.markdown(
+                    f"**总负债: ¥{prev_tl:,.0f} → ¥{curr_tl:,.0f} "
+                    f"(变化 {curr_tl - prev_tl:+,.0f})**"
+                )
+                st.markdown(
+                    f"**净资产: ¥{prev_nw_val:,.0f} → ¥{curr_nw_val:,.0f} "
+                    f"(变化 {curr_nw_val - prev_nw_val:+,.0f})**"
+                )
+        else:
+            # 单季模式(没有上一季可对比时)
+            tbl1, tbl2 = st.columns(2)
+            with tbl1:
+                st.markdown("**资产端**")
+                st.dataframe(asset_df.drop(columns=['Notes']), use_container_width=True,
+                             hide_index=True,
+                             column_config={'金额(CNY)': st.column_config.NumberColumn(format="¥%.0f")})
+                st.markdown(f"**总资产: ¥{curr['total_assets']:,.0f}**")
+            with tbl2:
+                st.markdown("**负债端**")
+                st.dataframe(liab_df.drop(columns=['Notes']), use_container_width=True,
+                             hide_index=True,
+                             column_config={'金额(CNY)': st.column_config.NumberColumn(format="¥%.0f")})
+                st.markdown(f"**总负债: ¥{curr['total_liabilities']:,.0f}**")
+                st.markdown(f"**净资产: ¥{curr['net_worth']:,.0f}**")
 
         st.divider()
 
@@ -4308,57 +4382,81 @@ with tab_quarterly:
                 if sankey['values']:
                     import plotly.graph_objects as go
 
-                    # 配色:统一柔和色系,避免高饱和度刺眼,所有节点文字保持可读
+                    # 配色: 收益方向(净储蓄/债务还本)统一冷色柔和系,消耗方向(支出)暖色
                     def _node_color(name):
                         if '收入' in name:
-                            return '#A5D6A7'  # 浅绿
+                            return '#A5D6A7'  # 浅绿:收入
                         if name == '总流入':
-                            return '#CFD8DC'  # 浅灰
-                        if name in ('净储蓄', '净支出(超支)'):
-                            return '#90CAF9'  # 浅蓝
+                            return '#CFD8DC'  # 浅灰:汇聚
+                        if name == '净储蓄':
+                            return '#81D4FA'  # 浅蓝:储蓄(净资产+)
                         if name == '债务还本':
-                            return '#CE93D8'  # 浅紫
-                        from cashflow_engine import (NECESSARY_CATEGORIES,
-                                                     DISCRETIONARY_CATEGORIES)
-                        if name in NECESSARY_CATEGORIES:
-                            return '#FFCC80'  # 浅橙(必需)
-                        if name in DISCRETIONARY_CATEGORIES:
-                            return '#EF9A9A'  # 浅红(可选)
-                        return '#E0E0E0'  # 浅灰(其他)
+                            return '#80CBC4'  # 浅青:本金还款(净资产+)
+                        if name == '必需支出':
+                            return '#FFB74D'  # 中橙:必需消耗
+                        if name == '可选支出':
+                            return '#EF9A9A'  # 浅红:可选消耗
+                        if name == '净支出(超支)':
+                            return '#FFAB91'  # 浅橙红:超支
+                        return '#E0E0E0'
 
-                    # 流的颜色:用半透明的目标节点颜色,既能区分又不喧宾夺主
                     def _link_color(target_name):
                         c = _node_color(target_name)
-                        # 转 rgba 加透明度
                         return f"rgba({int(c[1:3],16)},{int(c[3:5],16)},{int(c[5:7],16)},0.35)"
+
+                    # 节点 label 加金额: "工资 收入<br>¥X万"
+                    def _fmt_amount(v):
+                        if v >= 10000:
+                            return f"¥{v/10000:.1f}万"
+                        return f"¥{v:,.0f}"
+
+                    # 累加每个节点上的总流量,作为 label
+                    node_totals = {}
+                    for s, t, v in zip(sankey['sources'], sankey['targets'], sankey['values']):
+                        node_totals[s] = node_totals.get(s, 0) + v
+                        node_totals[t] = node_totals.get(t, 0) + v
+                    # 中间节点的总流量被双倍计入(进+出),修正
+                    hub_idx_local = sankey['nodes'].index('总流入') if '总流入' in sankey['nodes'] else None
+                    if hub_idx_local is not None:
+                        node_totals[hub_idx_local] = node_totals[hub_idx_local] / 2
+
+                    node_labels = [
+                        f"{name}<br>{_fmt_amount(node_totals.get(i, 0))}"
+                        for i, name in enumerate(sankey['nodes'])
+                    ]
 
                     link_colors = [_link_color(sankey['nodes'][t])
                                    for t in sankey['targets']]
+                    # link label: 显示金额(常显,而非 hover)
+                    link_labels = [_fmt_amount(v) for v in sankey['values']]
 
                     fig_sankey = go.Figure(data=[go.Sankey(
                         arrangement='snap',
                         node=dict(
-                            pad=20, thickness=22,
+                            pad=22, thickness=22,
                             line=dict(color='#37474F', width=0.5),
-                            label=sankey['nodes'],
+                            label=node_labels,
                             color=[_node_color(n) for n in sankey['nodes']],
+                            hovertemplate='%{label}<extra></extra>',
                         ),
                         link=dict(
                             source=sankey['sources'],
                             target=sankey['targets'],
                             value=sankey['values'],
                             color=link_colors,
+                            label=link_labels,
+                            hovertemplate='%{source.label} → %{target.label}<br>¥%{value:,.0f}<extra></extra>',
                         ),
                         textfont=dict(size=13, color='#212121', family='PingFang SC, sans-serif'),
                     )])
                     fig_sankey.update_layout(
-                        height=560,
+                        height=520,
                         margin=dict(t=20, b=20, l=10, r=10),
                         font=dict(size=13, color='#212121'),
                         paper_bgcolor='white',
                     )
                     st.plotly_chart(fig_sankey, use_container_width=True)
-                    st.caption("绿=收入 / 灰=汇聚 / 橙=必需支出 / 红=可选支出 / 紫=债务还本 / 蓝=净储蓄")
+                    st.caption("绿=收入 / 灰=汇聚 / 橙=必需支出 / 红=可选支出 / 青=债务还本(净资产+) / 蓝=净储蓄(净资产+) · hover 流条可看精确金额")
 
                 # ── 净资产核对 ─────────────────────────────
                 if q_prev:
