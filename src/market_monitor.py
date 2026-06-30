@@ -220,10 +220,23 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict):
     os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-    tmp = CACHE_PATH + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, CACHE_PATH)
+    # 用 pid + 时间戳生成唯一 tmp 文件名，避免多进程并发时
+    # 同一个 .tmp 被另一个进程提前 replace 掉，触发 FileNotFoundError
+    import time
+    tmp = f"{CACHE_PATH}.{os.getpid()}.{int(time.time()*1000)}.tmp"
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CACHE_PATH)
+    except Exception:
+        # 写入失败或 replace 时 tmp 已不存在（已被并发进程移动），
+        # 静默清理残留并放弃本次写入——下次有数据更新时会重试
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
 
 
 def _cache_is_fresh(cache: dict, key: str) -> bool:
@@ -475,7 +488,13 @@ def get_market_data(force_refresh: bool = False) -> dict:
             cache_dirty = True
 
     if cache_dirty:
-        _save_cache(cache)
+        try:
+            _save_cache(cache)
+        except Exception:
+            # 缓存写失败不应中断 dashboard 渲染——内存里 cache 字典依然完整可用,
+            # 下次 get_market_data 调用时会重新尝试写入。多进程并发场景下偶发
+            # FileNotFoundError 由 _save_cache 的唯一 tmp 文件名缓解,但仍保留兜底。
+            pass
 
     # ── 组装结果 ──
     all_keys = list(TARGETS.keys()) + ['vix', 'vxn', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500', 'treasury_10y', 'cn_treasury_10y']
