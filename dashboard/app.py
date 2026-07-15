@@ -4349,7 +4349,11 @@ with tab_quarterly:
 
                 # ── 核心 KPI ───────────────────────────────
                 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-                kpi1.metric("总收入", f"¥{cf_summary['income_total']:,.0f}")
+                _div = cf_summary.get('investment_dividend', 0)
+                kpi1.metric("总收入", f"¥{cf_summary['income_total']:,.0f}",
+                            help="生活现金流收入(工资/房租等),**不含投资分红**。"
+                                 f"本季投资分红 ¥{_div:,.0f} 单独统计(见下方),"
+                                 "因分红是投资体系内回报,已在 portfolio.csv 市值里体现。")
                 kpi2.metric("净储蓄率", f"{cf_summary['savings_rate']*100:.1f}%",
                             help="净储蓄 ÷ 总收入。净储蓄=收入-支出+债务还本(本金不算消耗)。")
                 kpi3.metric("自由现金流", f"¥{cf_summary['free_cashflow']:,.0f}",
@@ -4364,6 +4368,12 @@ with tab_quarterly:
                 col_b.metric("债务还本", f"¥{cf_summary['debt_principal']:,.0f}",
                              help="本金部分。利息计入支出。")
                 col_c.metric("净储蓄(净资产视角)", f"¥{cf_summary['net_savings']:,.0f}")
+
+                if _div > 0:
+                    st.caption(
+                        f"💰 本季投资分红 ¥{_div:,.0f}（券商账户内现金分红，"
+                        "已含在 portfolio.csv 持仓/Cash 里，不计入上方生活现金流收入与储蓄率）。"
+                    )
 
                 # ── 支出明细 ───────────────────────────────
                 st.markdown("##### 支出明细（按一级分类）")
@@ -4487,11 +4497,18 @@ with tab_quarterly:
                         q_prev_end=q_prev_end,
                         q_curr_end=q_curr_end,
                     )
-                    st.markdown("##### 净资产核对")
+                    st.markdown("##### 大额现金流核对")
                     st.caption(
                         "公式：期末净资产 ≈ 期初 + 鲨鱼收入 - 鲨鱼支出（剔债务还本）"
                         " + 经营性现金流 + **SAP 归属薪酬(ESPP+RSU)** ± 资产估值变化（残差）"
                         "。**资本性流（卖车/资产置换等）单独展示但不参与预测**——它只是资产形态转换。"
+                    )
+                    st.caption(
+                        "⚠️ **定位与局限**：这是**大额漏记的粗筛器 + 强制对账仪式**，不是精确预测。"
+                        "残差是「数据漏记 + 资产估值波动」的混合体，而估值噪声量级很大"
+                        "（房产 ±5% 就是几十万），**小额漏记（如一笔分红）会被噪声淹没，抓不到**。"
+                        "它能抓的是「量级接近估值噪声的大额错误」（如漏记卖车 20 万），"
+                        "以及「连续多季残差同向偏移」暴露的系统性漏记。单季残差绝对值不必细究。"
                     )
 
                     # 主表:只含经营性,直接参与预测计算

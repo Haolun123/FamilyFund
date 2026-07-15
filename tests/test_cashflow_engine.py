@@ -75,6 +75,39 @@ class TestCashflowSummary:
         result = compute_cashflow_summary(pd.DataFrame())
         assert result['income_total'] == 0
         assert result['savings_rate'] == 0
+        assert result['investment_dividend'] == 0
+
+    def test_investment_dividend_excluded_from_income(self):
+        """投资分红类别从 income_total 剔除,单列 investment_dividend。
+
+        原因(2026-07-15): 分红是投资体系内资产孵化的回报,已体现在
+        portfolio.csv snapshot 里。计入生活现金流"收入"会导致储蓄率虚高 +
+        大额现金流核对重复计算。
+        """
+        df = _mock_df([
+            ('2026-04-01', '收入', '工资', 100000),
+            ('2026-04-15', '收入', '投资分红', 1100),   # 成都银行分红,应剔除
+            ('2026-04-02', '支出', '餐饮', 30000),
+        ])
+        r = compute_cashflow_summary(df)
+        # income_total 只含工资,不含分红
+        assert r['income_total'] == 100000
+        assert r['investment_dividend'] == 1100
+        # 储蓄率基于剔除分红后的收入
+        # net_savings = 100000 - 30000 = 70000; rate = 70000/100000 = 0.7
+        assert r['net_savings'] == 70000
+        assert r['savings_rate'] == 0.7
+
+    def test_only_investment_dividend_no_wage(self):
+        """只有分红没有工资时,income_total=0,不报错(储蓄率分母为0)。"""
+        df = _mock_df([
+            ('2026-04-15', '收入', '投资分红', 500),
+            ('2026-04-02', '支出', '餐饮', 200),
+        ])
+        r = compute_cashflow_summary(df)
+        assert r['income_total'] == 0
+        assert r['investment_dividend'] == 500
+        assert r['savings_rate'] == 0.0   # income=0,不除零
 
     def test_simple_balance(self):
         """收入10万 - 必需3万 - 可选1万 = 净储蓄6万,储蓄率60%。"""
@@ -252,6 +285,29 @@ class TestNetWorthReconciliation:
         assert r['predicted_change'] == 70000
         assert r['nw_change'] == 70000
         assert r['residual'] == 0
+
+    def test_investment_dividend_not_in_prediction(self):
+        """投资分红不参与预测(已在 snapshot 端体现,避免重复计算)。
+
+        回归测试(2026-07-15): 分红作为鲨鱼"投资分红"类别记录,但净资产
+        核对的 shark_income 不含它,故不影响 predicted_change。
+        """
+        df = _mock_df([
+            ('2026-04-01', '收入', '工资', 100000),
+            ('2026-04-15', '收入', '投资分红', 1100),   # 券商账户分红
+            ('2026-04-02', '支出', '餐饮', 30000),
+        ])
+        # 分红 1100 已通过 Cash 入金体现在期末净资产里(snapshot 端 +1100)
+        # 期初 100w, 期末 = 100w + 净储蓄 70000 + 分红 1100 = 1,071,100
+        r = compute_net_worth_reconciliation(
+            df, nw_prev=1_000_000, nw_curr=1_071_100,
+        )
+        # shark_income 不含分红
+        assert r['shark_income'] == 100000
+        # 预测只含工资-支出,不含分红
+        assert r['predicted_change'] == 70000
+        # 实际变化 71100 - 预测 70000 = 残差 1100(即那笔分红的估值贡献)
+        assert r['residual'] == 1100
 
     def test_with_asset_appreciation(self):
         """股票/房产升值会造成残差为正。"""

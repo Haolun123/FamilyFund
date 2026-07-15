@@ -127,7 +127,8 @@ def compute_cashflow_summary(df: pd.DataFrame) -> dict:
 
     Returns:
         dict with keys:
-          income_total       总收入
+          income_total       总收入(不含"投资分红"类别)
+          investment_dividend 投资分红(单独统计,不计入 income_total/储蓄率/核对)
           expense_total      总支出(含债务还本)
           expense_necessary  必需支出
           expense_discretionary 可选支出
@@ -138,10 +139,17 @@ def compute_cashflow_summary(df: pd.DataFrame) -> dict:
           savings_rate       净储蓄率 = net_savings / income_total
           necessary_ratio    必需支出占比 = expense_necessary / (expense_necessary + expense_discretionary)
                              (注:分母不含债务还本,反映"日常消费"中必需比例)
+
+    关于"投资分红"类别(2026-07-15 加入):
+      分红是投资体系内资产孵化的回报,已体现在 portfolio.csv snapshot 的
+      市值/Cash 里。用户在鲨鱼记账用"投资分红"类别记录仅作台账留痕,
+      但它不是生活现金流的"收入",故从 income_total 剔除,单列 investment_dividend。
+      这样储蓄率、桑基图、大额现金流核对三处自动正确,无需各自打补丁。
     """
     if df.empty:
         return {
             'income_total': 0.0,
+            'investment_dividend': 0.0,
             'expense_total': 0.0,
             'expense_necessary': 0.0,
             'expense_discretionary': 0.0,
@@ -152,7 +160,15 @@ def compute_cashflow_summary(df: pd.DataFrame) -> dict:
             'necessary_ratio': 0.0,
         }
 
-    income = df[df['Type'] == '收入']['Amount'].sum()
+    # 投资分红单独统计,不计入 income_total。
+    # 原因: 分红是投资体系内资产(股票)孵化的回报,已体现在 portfolio.csv
+    # snapshot 的市值/Cash 里。若计入生活现金流的"收入",会导致:
+    #   1) 储蓄率虚高(把没进生活账户的钱当收入)
+    #   2) 大额现金流核对重复计算(snapshot 端已含,预测端再加一次)
+    # 用户在鲨鱼记账用"投资分红"类别记录,仅作台账留痕。
+    income_all = df[df['Type'] == '收入']
+    investment_dividend = income_all[income_all['Category'] == '投资分红']['Amount'].sum()
+    income = income_all[income_all['Category'] != '投资分红']['Amount'].sum()
 
     expense_df = df[df['Type'] == '支出'].copy()
     expense_df['Bucket'] = expense_df['Category'].apply(categorize_expense)
@@ -176,6 +192,7 @@ def compute_cashflow_summary(df: pd.DataFrame) -> dict:
 
     return {
         'income_total':           round(float(income), 2),
+        'investment_dividend':    round(float(investment_dividend), 2),
         'expense_total':          round(float(e_total), 2),
         'expense_necessary':      round(float(e_necessary), 2),
         'expense_discretionary':  round(float(e_discretionary), 2),
@@ -240,6 +257,9 @@ def build_sankey_data(df: pd.DataFrame, group_expense: bool = True) -> dict:
           flow_amounts: dict[(source_idx, target_idx)] → 金额  (供 UI 在 link 上标注)
     """
     income_agg = aggregate_by_category(df, '收入')
+    # 投资分红不属于生活现金流,从桑基图收入端排除(否则与已排除分红的
+    # 净储蓄口径不一致,导致左右流量失衡)。见 compute_cashflow_summary 说明。
+    income_agg = income_agg[income_agg['Category'] != '投资分红'].reset_index(drop=True)
     expense_agg = aggregate_by_category(df, '支出')
     summary = compute_cashflow_summary(df)
 
