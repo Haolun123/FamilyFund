@@ -4,6 +4,7 @@
   A: 博时等基金公司（申购关键词，含年份日期）
   B: 南方基金定投格式（定投关键词，不含年份）
   D: 招商银行黄金积存金
+  E: 摩根基金（申购/定期定额申购，不含年份，确认日从"持有时间从X月X日"推算）
 
 返回结构：
     [
@@ -83,6 +84,20 @@ _PAT_D = re.compile(
     r'.*?扣款金额人民币([\d.]+)元',                   # 金额
     re.DOTALL,
 )
+
+
+# 格式E：摩根基金，"您于N月N日通过摩根基金成功申购/定期定额申购...持有时间从N月N日开始计算"
+# 确认日 = 持有时间起始日 - 1天（T+1确认，T+2开始持有）
+_PAT_E = re.compile(
+    r'您于(\d{1,2})月(\d{1,2})日通过摩根基金成功(?:定期定额)?申购'
+    r'(.+?)\s*'                               # 基金名称
+    r'([\d,]+\.?\d*)\s*元'                    # 金额
+    r'.*?成交净值([\d.]+)'                    # 净值
+    r'.*?确认份额([\d,]+\.?\d*)份'            # 份额
+    r'.*?持有时间从(\d{1,2})月(\d{1,2})日',  # 持有起始月日（确认日+1天）
+    re.DOTALL,
+)
+
 
 
 def _parse_amount(s: str) -> float:
@@ -211,10 +226,44 @@ def _parse_one(sms: str) -> dict | None:
             'matched_name': None,
         }
 
+    # 格式E：摩根基金
+    result = _parse_jpmorgan(sms)
+    if result:
+        return result
+
     return None
 
 
-# ── 基金名称匹配 ──────────────────────────────────────────
+# ── 格式E：摩根基金 ──────────────────────────────────────────
+def _parse_jpmorgan(sms: str) -> dict | None:
+    """解析摩根基金格式短信（格式E）。"""
+    m = _PAT_E.search(sms)
+    if not m:
+        return None
+    fund_name  = m.group(3).strip()
+    amount     = _parse_amount(m.group(4))
+    nav        = float(m.group(5))
+    shares     = _parse_amount(m.group(6))
+    hold_mo, hold_d = int(m.group(7)), int(m.group(8))
+    # 持有起始日 - 1 天 = 确认日
+    hold_year  = _infer_year(hold_mo)
+    hold_date  = date(hold_year, hold_mo, hold_d)
+    from datetime import timedelta
+    confirm_date = hold_date - timedelta(days=1)
+    return {
+        'confirm_date': confirm_date.strftime('%Y-%m-%d'),
+        'action':       '买入',
+        'fund_name':    fund_name,
+        'amount':       amount,
+        'shares':       shares,
+        'nav':          nav,
+        'is_gold':      False,
+        'raw':          sms,
+        'matched_code': None,
+        'matched_name': None,
+    }
+
+
 
 def _match_holding(fund_name: str, holdings: list[dict]) -> tuple[str | None, str | None]:
     """将短信基金名称模糊匹配到持仓。

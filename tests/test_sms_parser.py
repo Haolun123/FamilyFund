@@ -10,6 +10,7 @@ HOLDINGS = [
     {'code': '022434', 'name': '南方中证A500 A类'},
     {'code': '021000', 'name': '南方纳指100 I类'},
     {'code': 'GOLD',   'name': '黄金'},
+    {'code': '017641', 'name': '摩根标普500 A类'},
 ]
 
 SMS_BOSHI = """【博时基金】尊敬的严浩伦，您于2026年05月06日通过博时直销申购博时标普500ETF联接E  240元05月08日确认成功，份额为44.19份，净值为5.4308。温馨提示：若赎回请先查询了解基金赎回费。详询95105568。"""
@@ -194,4 +195,65 @@ class TestSharesWithComma:
         r = parse_sms(SMS_NANFANG_BUY_LARGE, HOLDINGS)[0]
         assert not r.get('parse_error'), "应解析成功"
         assert r['shares'] == pytest.approx(1507.42)
+
+
+# ── 回归测试: 摩根基金格式 (2026-07-19 新增) ──────────────────
+
+SMS_JPMORGAN_BUY = "【摩根基金】尊敬的客户，您于7月14日通过摩根基金成功申购摩根标普500人民币A300.00元，成交净值1.6808，确认份额178.49份，手续费0.00元，该笔份额持有时间从7月16日开始计算。"
+SMS_JPMORGAN_DCA = "【摩根基金】尊敬的客户，您于7月15日通过摩根基金成功定期定额申购摩根标普500人民币A300.00元，成交净值1.6849，确认份额176.99份，该笔份额持有时间从7月17日开始计算。"
+
+
+class TestParseJPMorgan:
+    """摩根基金格式（格式E）回归测试。
+    确认日 = 持有起始日 - 1天（持有起始日为T+2，确认日为T+1）。
+    """
+
+    def test_buy_confirm_date(self):
+        """申购：持有从7月16日，确认日为7月15日"""
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JPMORGAN_BUY, HOLDINGS)[0]
+        assert not r.get('parse_error'), "应解析成功"
+        assert r['confirm_date'] == '2026-07-15'
+
+    def test_dca_confirm_date(self):
+        """定期定额申购：持有从7月17日，确认日为7月16日"""
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JPMORGAN_DCA, HOLDINGS)[0]
+        assert not r.get('parse_error'), "应解析成功"
+        assert r['confirm_date'] == '2026-07-16'
+
+    def test_buy_amount(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JPMORGAN_BUY, HOLDINGS)[0]
+        assert r['amount'] == pytest.approx(300.0)
+
+    def test_buy_shares(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JPMORGAN_BUY, HOLDINGS)[0]
+        assert r['shares'] == pytest.approx(178.49)
+
+    def test_buy_nav(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JPMORGAN_BUY, HOLDINGS)[0]
+        assert r['nav'] == pytest.approx(1.6808)
+
+    def test_dca_shares(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JPMORGAN_DCA, HOLDINGS)[0]
+        assert r['shares'] == pytest.approx(176.99)
+
+    def test_fund_name_parsed(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JPMORGAN_BUY, HOLDINGS)[0]
+        assert '摩根标普500' in r['fund_name']
+
+    def test_matched_code(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JPMORGAN_BUY, HOLDINGS)[0]
+        assert r['matched_code'] == '017641'
+
+    def test_action_is_buy(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JPMORGAN_BUY, HOLDINGS)[0]
+        assert r['action'] == '买入'
 
