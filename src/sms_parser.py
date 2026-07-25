@@ -235,11 +235,8 @@ def _parse_one(sms: str) -> dict | None:
 
 
 # ── 格式E：摩根基金 ──────────────────────────────────────────
-def _parse_jpmorgan(sms: str) -> dict | None:
-    """解析摩根基金格式短信（格式E）。"""
-    m = _PAT_E.search(sms)
-    if not m:
-        return None
+def _build_jpmorgan(m: re.Match, raw: str) -> dict:
+    """从一个 _PAT_E 匹配构造结果字典。"""
     fund_name  = m.group(3).strip()
     amount     = _parse_amount(m.group(4))
     nav        = float(m.group(5))
@@ -258,10 +255,23 @@ def _parse_jpmorgan(sms: str) -> dict | None:
         'shares':       shares,
         'nav':          nav,
         'is_gold':      False,
-        'raw':          sms,
+        'raw':          raw,
         'matched_code': None,
         'matched_name': None,
     }
+
+
+def _parse_jpmorgan(sms: str) -> dict | None:
+    """解析摩根基金格式短信（格式E），返回第一笔。"""
+    m = _PAT_E.search(sms)
+    if not m:
+        return None
+    return _build_jpmorgan(m, sms)
+
+
+def _parse_jpmorgan_all(sms: str) -> list[dict]:
+    """提取一个块内的所有摩根交易（摩根会把多笔塞进同一条无空行短信）。"""
+    return [_build_jpmorgan(m, sms) for m in _PAT_E.finditer(sms)]
 
 
 
@@ -329,7 +339,29 @@ def parse_sms(text: str, holdings: list[dict] | None = None) -> list[dict]:
     # 按空行分割多条短信
     blocks = [b.strip() for b in re.split(r'\n\s*\n', text) if b.strip()]
     results = []
+
+    def _attach_match(parsed: dict) -> dict:
+        """为解析结果附加持仓匹配。"""
+        if holdings and not parsed['is_gold']:
+            code, name = _match_holding(parsed['fund_name'], holdings)
+            parsed['matched_code'] = code
+            parsed['matched_name'] = name
+        elif parsed['is_gold'] and holdings:
+            gold = [h for h in holdings if 'GOLD' in h.get('code', '').upper()
+                    or '黄金' in h.get('name', '')]
+            if gold:
+                parsed['matched_code'] = gold[0]['code']
+                parsed['matched_name'] = gold[0]['name']
+        return parsed
+
     for block in blocks:
+        # 摩根格式：一个块内可能含多笔交易，先尝试全部提取
+        jpm_all = _parse_jpmorgan_all(block)
+        if jpm_all:
+            for parsed in jpm_all:
+                results.append(_attach_match(parsed))
+            continue
+
         parsed = _parse_one(block)
         if parsed is None:
             # 无法解析，返回错误条目
@@ -348,19 +380,6 @@ def parse_sms(text: str, holdings: list[dict] | None = None) -> list[dict]:
             })
             continue
 
-        # 基金名称匹配
-        if holdings and not parsed['is_gold']:
-            code, name = _match_holding(parsed['fund_name'], holdings)
-            parsed['matched_code'] = code
-            parsed['matched_name'] = name
-        elif parsed['is_gold'] and holdings:
-            # 黄金：匹配持仓中 Asset_Class=Gold 的项
-            gold = [h for h in holdings if 'GOLD' in h.get('code', '').upper()
-                    or '黄金' in h.get('name', '')]
-            if gold:
-                parsed['matched_code'] = gold[0]['code']
-                parsed['matched_name'] = gold[0]['name']
-
-        results.append(parsed)
+        results.append(_attach_match(parsed))
 
     return results

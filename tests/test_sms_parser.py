@@ -11,6 +11,7 @@ HOLDINGS = [
     {'code': '021000', 'name': '南方纳指100 I类'},
     {'code': 'GOLD',   'name': '黄金'},
     {'code': '017641', 'name': '摩根标普500 A类'},
+    {'code': '019172', 'name': '摩根纳指100 A类'},
 ]
 
 SMS_BOSHI = """【博时基金】尊敬的严浩伦，您于2026年05月06日通过博时直销申购博时标普500ETF联接E  240元05月08日确认成功，份额为44.19份，净值为5.4308。温馨提示：若赎回请先查询了解基金赎回费。详询95105568。"""
@@ -257,3 +258,58 @@ class TestParseJPMorgan:
         r = parse_sms(SMS_JPMORGAN_BUY, HOLDINGS)[0]
         assert r['action'] == '买入'
 
+
+
+# ── 回归测试: 摩根合并短信(一条含多笔) (2026-07-25 bug) ──────────────
+# 摩根会把当日确认的多笔交易(标普+纳指)塞进【同一条无空行短信】。
+# 旧实现每个块只 _parse_one 一次, 只提取第一笔, 丢弃其余。
+# 修复: parse_sms 对每个块用 _PAT_E.finditer 提取全部摩根交易。
+
+# 一条短信含 2 笔: 7/21 纳指 + 7/21 标普
+SMS_JPM_MERGED_1 = "【摩根基金】尊敬的客户，您于7月21日通过摩根基金成功申购摩根纳斯达克100人民币A300.00元，成交净值1.7338，确认份额173.03份，手续费0.00元，该笔份额持有时间从7月23日开始计算。您于7月21日通过摩根基金成功定期定额申购摩根标普500人民币A300.00元，成交净值1.6718，确认份额178.38份，该笔份额持有时间从7月23日开始计算。"
+
+# 一条短信含 2 笔: 7/22 标普 + 7/22 纳指
+SMS_JPM_MERGED_2 = "【摩根基金】尊敬的客户，您于7月22日通过摩根基金成功定期定额申购摩根标普500人民币A300.00元，成交净值1.6700，确认份额178.57份，该笔份额持有时间从7月24日开始计算。您于7月22日通过摩根基金成功定期定额申购摩根纳斯达克100人民币A300.00元，成交净值1.7256，确认份额172.82份，该笔份额持有时间从7月24日开始计算。"
+
+
+class TestJPMorganMergedSms:
+    """摩根合并短信: 一条短信含多笔交易, 必须全部解析出来。"""
+
+    def test_single_sms_two_transactions(self):
+        """一条短信含 2 笔, 应解析出 2 条"""
+        from sms_parser import parse_sms
+        results = parse_sms(SMS_JPM_MERGED_1, HOLDINGS)
+        assert len(results) == 2, f"应解析出 2 笔, 实际 {len(results)}"
+
+    def test_merged_no_transaction_dropped(self):
+        """两条合并短信共 4 笔, 一笔都不能丢"""
+        from sms_parser import parse_sms
+        results = parse_sms(SMS_JPM_MERGED_1 + "\n\n" + SMS_JPM_MERGED_2, HOLDINGS)
+        assert len(results) == 4, f"应解析出 4 笔, 实际 {len(results)}"
+        assert all(not r.get('parse_error') for r in results)
+
+    def test_both_funds_matched(self):
+        """标普和纳指都要正确匹配到持仓"""
+        from sms_parser import parse_sms
+        results = parse_sms(SMS_JPM_MERGED_1, HOLDINGS)
+        codes = {r['matched_code'] for r in results}
+        assert codes == {'017641', '019172'}, f"匹配码应为标普+纳指, 实际 {codes}"
+
+    def test_nasdaq_new_holding_matched(self):
+        """摩根纳斯达克100人民币A → 匹配摩根纳指100 A类(019172)"""
+        from sms_parser import parse_sms
+        results = parse_sms(SMS_JPM_MERGED_1, HOLDINGS)
+        ndx = [r for r in results if r['matched_code'] == '019172']
+        assert len(ndx) == 1
+        assert ndx[0]['nav'] == pytest.approx(1.7338)
+        assert ndx[0]['shares'] == pytest.approx(173.03)
+
+    def test_second_transaction_values(self):
+        """验证第二笔(标普)的数值没有被第一笔污染"""
+        from sms_parser import parse_sms
+        results = parse_sms(SMS_JPM_MERGED_1, HOLDINGS)
+        sp = [r for r in results if r['matched_code'] == '017641']
+        assert len(sp) == 1
+        assert sp[0]['nav'] == pytest.approx(1.6718)
+        assert sp[0]['shares'] == pytest.approx(178.38)
+        assert sp[0]['confirm_date'] == '2026-07-22'  # 持有 7/23 - 1 天
