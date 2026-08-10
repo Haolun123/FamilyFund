@@ -1377,16 +1377,16 @@ with tab_update:
 
     st.divider()
 
-    # ─── 合成标普β定投建议（道指预付池 + 整体美股β缺口动态抵扣）───
+    # ─── 合成标普β定投建议（道指预付池 + 纳指类超额镜像抵扣）───
     with st.expander("🔀 合成标普β定投建议（建信纳指 + 道指预付池）", expanded=False):
         st.caption(
-            "QDII 额度受限 + 场内溢价 8-12% 的替代方案：用「场外建信纳指 + 场内道指ETF」拼类标普β。"
-            "道指走预付池（一次性买入避开最低手续费墙），每周抵扣按【整体美股β缺口】= "
-            "（标普矩阵目标 + 纳指矩阵目标）−（本周美股类实际投入）动态计算。"
+            "QDII 额度受限 + 场内溢价 8-12% 的替代方案：用「场外纳指基金 + 场内道指ETF」拼类标普β。"
+            "标普比纳指难买，道指专补标普缺口——只有【纳指买够自己目标后的超额】才算帮标普拼，"
+            "道指 1:1 镜像这个帮补量（纳指没买够→道指不扣）。道指走预付池（一次性买入避开手续费墙）。"
         )
         try:
             from synthetic_sp import (
-                load_prepaid, compute_synthetic_dca, compute_beta_gap,
+                load_prepaid, compute_synthetic_dca, compute_dow_deduct,
                 estimate_coverage, consume_prepaid, topup_prepaid,
             )
             _syn_data_dir = os.path.dirname(csv_path)
@@ -1396,45 +1396,62 @@ with tab_update:
             _syn = compute_synthetic_dca(_syn_md, _syn_cfg)
             _syn_balance = _syn_state['dow_prepaid'].get('balance', 0.0)
 
-            # 从短信解析结果自动读取本周美股类（标普+纳指）实际投入
-            _us_classes = {'US_Blend_Fund', 'US_Growth_Fund'}
+            # 从短信解析结果分两类累加本周实际投入
             _code2class = dict(zip(raw_df['Code'].astype(str), raw_df['Asset_Class']))
-            _us_actual_auto = 0.0
+            _sp_actual_auto = 0.0   # US_Blend_Fund 纯标普
+            _ndx_actual_auto = 0.0  # US_Growth_Fund 全体纳指
             for _p in st.session_state.get('sms_parsed', []):
                 if _p.get('parse_error') or not _p.get('matched_code') or not _p.get('amount'):
                     continue
-                if _code2class.get(str(_p['matched_code'])) in _us_classes:
-                    _us_actual_auto += float(_p['amount'])
+                _cls = _code2class.get(str(_p['matched_code']))
+                if _cls == 'US_Blend_Fund':
+                    _sp_actual_auto += float(_p['amount'])
+                elif _cls == 'US_Growth_Fund':
+                    _ndx_actual_auto += float(_p['amount'])
 
-            _has_sms = _us_actual_auto > 0
-            if not _has_sms:
-                st.info("尚未解析到美股类定投短信。可在步骤一先解析短信，或在下方手动输入本周美股实际投入。")
+            if _sp_actual_auto == 0 and _ndx_actual_auto == 0:
+                st.info("尚未解析到美股类定投短信。可在步骤一先解析短信，或在下方手动输入本周标普/纳指实际投入。")
 
-            _us_actual = st.number_input(
-                "本周美股类实际投入（标普+纳指，含建信全额）",
-                min_value=0.0, value=float(_us_actual_auto), step=100.0, key="syn_us_actual",
-                help="自动从短信解析累加；可手动修正。整体美股β缺口 = 矩阵总目标 − 此值",
+            _in1, _in2 = st.columns(2)
+            _sp_actual = _in1.number_input(
+                "本周标普类实际投入（纯标普）",
+                min_value=0.0, value=float(_sp_actual_auto), step=100.0, key="syn_sp_actual",
+                help="US_Blend_Fund：博时/摩根标普等。自动从短信累加，可手改",
+            )
+            _ndx_actual = _in2.number_input(
+                "本周纳指类实际投入（全部纳指）",
+                min_value=0.0, value=float(_ndx_actual_auto), step=100.0, key="syn_ndx_actual",
+                help="US_Growth_Fund：建信/南方/摩根等所有纳指。自动从短信累加，可手改",
             )
 
-            _beta = compute_beta_gap(_syn_md, _syn_cfg, us_actual_total=_us_actual)
-            _syn_cover = estimate_coverage(_syn_balance, _beta['dow_deduct'])
+            _dd = compute_dow_deduct(_syn_md, _syn_cfg, sp_actual=_sp_actual, ndx_actual=_ndx_actual)
+            _syn_cover = estimate_coverage(_syn_balance, _dd['dow_deduct'])
 
             _c1, _c2, _c3, _c4 = st.columns(4)
-            _c1.metric("美股β总目标", f"¥{_beta['total_target']:,.0f}",
-                       help=f"标普 {_beta['sp_multiplier']}x + 纳指 {_beta['ndx_multiplier']}x")
-            _c2.metric("本周美股实际", f"¥{_us_actual:,.0f}",
-                       help="来自短信解析（可手改）")
-            _c3.metric("美股β缺口", f"¥{_beta['gap']:,.0f}",
-                       help="总目标 − 实际；负数表示超额，道指不抵扣")
+            _c1.metric("标普缺口", f"¥{_dd['sp_gap']:,.0f}",
+                       help=f"标普目标 ¥{_dd['sp_target']:,.0f}（{_dd['sp_multiplier']}x）− 实际 ¥{_sp_actual:,.0f}")
+            _c2.metric("纳指超额", f"¥{_dd['ndx_surplus']:,.0f}",
+                       help=f"纳指目标 ¥{_dd['ndx_target']:,.0f}（{_dd['ndx_multiplier']}x）；超出部分才帮标普")
+            _c3.metric("道指应抵扣", f"¥{_dd['dow_deduct']:,.0f}",
+                       help=f"= min(纳指超额, 标普缺口×道指占比 ¥{_dd['ndx_leg_needed']:,.0f})")
             _c4.metric("道指预付池余额", f"¥{_syn_balance:,.0f}")
 
-            if _beta['gap'] < 0:
-                st.info(f"本周美股投入超额 ¥{-_beta['gap']:,.0f}，道指无需抵扣（超额部分记为美股β超配）")
+            if _dd['dow_deduct'] == 0:
+                if _dd['sp_gap'] == 0:
+                    st.info("标普已买满，无缺口，道指本周不抵扣")
+                else:
+                    st.info("纳指未买够自己目标，尚无超额帮标普，道指本周不抵扣")
             elif _syn_cover >= 0:
                 if _syn_cover <= 2:
                     st.error(f"⚠️ 预付池按本周抵扣仅够 {_syn_cover} 周，需尽快补仓道指ETF")
                 else:
                     st.info(f"预付池按本周抵扣可覆盖约 {_syn_cover} 周")
+
+            if _dd['ndx_extra_surplus'] > 0:
+                st.caption(
+                    f"ℹ️ 纳指超额中有 ¥{_dd['ndx_extra_surplus']:,.0f} 已超过帮标普额度，"
+                    "默认记为纯纳指超配（道指不再多扣）。如需这部分也拼标普，请在下方手动调高抵扣。"
+                )
 
             st.markdown(
                 f"**建信纳指本周参考**：¥{_syn['jianxin_weekly']:,.0f}"
@@ -1444,15 +1461,15 @@ with tab_update:
             _b1, _b2 = st.columns(2)
             with _b1:
                 _dow_deduct = st.number_input(
-                    "本周道指抵扣（默认按缺口算，可手改）",
-                    min_value=0.0, value=float(_beta['dow_deduct']), step=10.0, key="syn_dow_deduct",
+                    "本周道指抵扣（默认按模型算，可手改）",
+                    min_value=0.0, value=float(_dd['dow_deduct']), step=10.0, key="syn_dow_deduct",
                 )
                 if st.button("✅ 确认本周道指抵扣", key="syn_consume",
                              disabled=(_dow_deduct <= 0)):
                     from datetime import date as _date
                     _r = consume_prepaid(
                         _syn_data_dir, _date.today().strftime('%Y-%m-%d'),
-                        dow_weekly=_dow_deduct, sp_multiplier=_beta['sp_multiplier'],
+                        dow_weekly=_dow_deduct, sp_multiplier=_dd['sp_multiplier'],
                     )
                     if _r['need_topup']:
                         st.warning(f"已扣减 ¥{_r['consumed']:,.0f}，余额 ¥{_r['balance_after']:,.0f}。预付池将耗尽，请补仓！")

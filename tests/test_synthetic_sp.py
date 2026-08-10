@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from synthetic_sp import (  # noqa: E402
     compute_synthetic_dca,
-    compute_beta_gap,
+    compute_dow_deduct,
     estimate_coverage,
     load_prepaid,
     save_prepaid,
@@ -167,58 +167,69 @@ class TestPrepaidState:
         assert data['dow_prepaid']['balance'] == 9000.0
 
 
-class TestBetaGap:
-    """整体美股β缺口模型（道指动态抵扣）。
-    当前 标普750/纳指2000 → 美股β总目标 2750。dow_ratio=0.5。
+class TestDowDeduct:
+    """纳指类超额镜像模型。
+    测试用矩阵目标 标普2500/纳指2500（倍数都=1.0），标普实际500 → 标普缺口2000，
+    纳指腿额度 = 2000 × 0.5 = 1000。道指抵扣 = min(纳指超额, 1000)。
     """
 
-    def test_normal(self):
-        """正常按矩阵: 标普550+纳指2100=2650, 缺口100, 抵扣50"""
-        r = compute_beta_gap({}, CONFIG, us_actual_total=2650,
-                             sp_multiplier=0.3, ndx_multiplier=0.8)
-        assert r['total_target'] == 2750
-        assert r['gap'] == 100
-        assert r['dow_deduct'] == 50
+    def _r(self, ndx_actual, sp_actual=500, cfg=None):
+        return compute_dow_deduct({}, cfg or CONFIG,
+                                  sp_actual=sp_actual, ndx_actual=ndx_actual,
+                                  sp_multiplier=1.0, ndx_multiplier=1.0)
 
-    def test_ndx_overinvest(self):
-        """纳指多投1000: 实际3650, 缺口-900, 抵扣0"""
-        r = compute_beta_gap({}, CONFIG, us_actual_total=3650,
-                             sp_multiplier=0.3, ndx_multiplier=0.8)
-        assert r['gap'] == -900
+    def test_ndx_below_target_no_deduct(self):
+        """纳指2000(没买够2500): 抵扣0"""
+        r = self._r(2000)
+        assert r['sp_gap'] == 2000
+        assert r['ndx_surplus'] == 0
         assert r['dow_deduct'] == 0
 
-    def test_underinvest_more_deduct(self):
-        """都少买: 实际1850, 缺口900, 抵扣450(少买多扣)"""
-        r = compute_beta_gap({}, CONFIG, us_actual_total=1850,
-                             sp_multiplier=0.3, ndx_multiplier=0.8)
-        assert r['gap'] == 900
-        assert r['dow_deduct'] == 450
-
-    def test_all_overinvest_no_negative(self):
-        """都超额: 实际3950, 缺口-1200, 抵扣0(不返负)"""
-        r = compute_beta_gap({}, CONFIG, us_actual_total=3950,
-                             sp_multiplier=0.3, ndx_multiplier=0.8)
-        assert r['gap'] == -1200
+    def test_ndx_exact_target_no_deduct(self):
+        """纳指2500(刚够目标): 抵扣0"""
+        r = self._r(2500)
+        assert r['ndx_surplus'] == 0
         assert r['dow_deduct'] == 0
 
-    def test_exact_target_zero_deduct(self):
-        """实际=总目标: 缺口0, 抵扣0"""
-        r = compute_beta_gap({}, CONFIG, us_actual_total=2750,
-                             sp_multiplier=0.3, ndx_multiplier=0.8)
-        assert r['gap'] == 0
+    def test_ndx_surplus_500(self):
+        """纳指3000(超500): 帮标普500, 抵扣500"""
+        r = self._r(3000)
+        assert r['ndx_surplus'] == 500
+        assert r['ndx_help_sp'] == 500
+        assert r['dow_deduct'] == 500
+
+    def test_ndx_surplus_fills_leg(self):
+        """纳指3500(超1000): 帮标普满1000, 抵扣1000"""
+        r = self._r(3500)
+        assert r['ndx_surplus'] == 1000
+        assert r['dow_deduct'] == 1000
+        assert r['ndx_extra_surplus'] == 0
+
+    def test_ndx_surplus_over_leg(self):
+        """纳指4000(超1500): 帮标普封顶1000, 抵扣1000, 额外超配500"""
+        r = self._r(4000)
+        assert r['ndx_surplus'] == 1500
+        assert r['ndx_help_sp'] == 1000
+        assert r['dow_deduct'] == 1000
+        assert r['ndx_extra_surplus'] == 500
+
+    def test_sp_fully_bought_no_deduct(self):
+        """标普买满(实际2500, 缺口0): 纳指腿额度0, 不管纳指多超抵扣都0"""
+        r = self._r(4000, sp_actual=2500)
+        assert r['sp_gap'] == 0
+        assert r['ndx_leg_needed'] == 0
         assert r['dow_deduct'] == 0
 
     def test_configurable_ratio(self):
-        """dow_ratio=0.4: 缺口900 → 抵扣360"""
+        """dow_ratio=0.4: 标普缺口2000 → 纳指腿额度800; 纳指超1500 → 帮标普封顶800"""
         cfg = dict(CONFIG)
         cfg['synthetic_split'] = {'dow': 0.4, 'jianxin_ndx': 0.6}
-        r = compute_beta_gap({}, cfg, us_actual_total=1850,
-                             sp_multiplier=0.3, ndx_multiplier=0.8)
-        assert r['gap'] == 900
-        assert r['dow_deduct'] == 360  # 900*0.4
+        r = self._r(4000, cfg=cfg)
+        assert r['ndx_leg_needed'] == 800
+        assert r['dow_deduct'] == 800
 
-    def test_us_actual_echoed(self):
-        """us_actual 原样回显"""
-        r = compute_beta_gap({}, CONFIG, us_actual_total=2650,
-                             sp_multiplier=0.3, ndx_multiplier=0.8)
-        assert r['us_actual'] == 2650
+    def test_round_to_10(self):
+        """抵扣取整到10"""
+        r = self._r(3255)  # 超755 → 帮标普755 → 取整760
+        assert r['dow_deduct'] == 760
+

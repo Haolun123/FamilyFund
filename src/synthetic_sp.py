@@ -168,32 +168,32 @@ def estimate_coverage(balance: float, dow_weekly: float) -> int:
     return int(balance // dow_weekly)
 
 
-def compute_beta_gap(market_data: dict, config: dict, us_actual_total: float,
-                     sp_multiplier: float = None, ndx_multiplier: float = None) -> dict:
-    """整体美股β缺口模型：按本周美股类实际投入算道指应抵扣额。
+def compute_dow_deduct(market_data: dict, config: dict,
+                       sp_actual: float, ndx_actual: float,
+                       sp_multiplier: float = None, ndx_multiplier: float = None) -> dict:
+    """纳指类超额镜像模型：道指抵扣 = 纳指买够自己目标后、用于帮标普的超额部分。
 
-    背景：建信纳指身兼两职（纳指腿 + 类标普纳指腿），短信只能把它归一类。
-    若按标普/纳指分别算缺口会产生循环依赖。故把标普+纳指合并成一个「美股β」
-    缺口箱，建信全额算进实际投入，消除循环。
+    核心约束（用户真实情况）：标普比纳指难买得多。整体缺口模型会让纳指普通投入
+    "填平"标普缺口，导致道指抵扣偏少、标普长期欠配。此模型让道指精确盯标普缺口：
+    只有纳指"买够自己目标之后的超额"才算帮标普拼，道指 1:1 镜像这个帮补量。
+
+    分层直觉：纳指的钱分三层——
+      ① 前段填自己目标（不碰道指）
+      ② 超额中用于帮标普的部分（触发道指等量抵扣，封顶纳指腿额度）
+      ③ 超过帮标普额度的部分（"额外超配"，默认记纯纳指超配，道指不再多扣）
+
+    纳指类 = US_Growth_Fund 全体（建信+南方+摩根+未来任何纳指），按类别聚合，
+    不认具体基金。这天然消除建信双重身份的循环——建信永远算纳指。
 
     Args:
-        market_data:     market_monitor.get_market_data()（取矩阵倍数）
-        config:          dca_prepaid.json 的 'config' 段
-        us_actual_total: 本周美股类（US_Blend_Fund + US_Growth_Fund）实际投入合计，
-                         含建信全额。通常来自短信解析累加。
+        market_data: market_monitor.get_market_data()（取矩阵倍数）
+        config:      dca_prepaid.json 的 'config' 段
+        sp_actual:   本周 US_Blend_Fund 类实际投入合计（纯标普：博时/摩根标普等）
+        ndx_actual:  本周 US_Growth_Fund 类实际投入合计（所有纳指基金）
         sp_multiplier / ndx_multiplier: 可选，直接指定倍数（便于测试）
 
     Returns:
-        {
-            'sp_multiplier', 'ndx_multiplier',
-            'total_target',   # 美股β总目标 = 标普目标 + 纳指目标
-            'us_actual',      # 本周美股实际投入（回显）
-            'gap',            # 缺口 = 总目标 − 实际（可负）
-            'dow_deduct',     # 道指应抵扣 = max(0, 缺口 × dow_ratio)，取整到10
-        }
-
-    语义：缺口 ≤ 0（实际超额）→ 抵扣 0，不负扣、不回冲预付池余额。
-    超额部分记为美股β超配，不由本模块处理。
+        见下方 dict。dow_deduct 取整到 10，语义为"本周应从道指预付池抵扣的金额"。
     """
     sp_mult  = sp_multiplier  if sp_multiplier  is not None else _matrix_multiplier(market_data, 'sp500')
     ndx_mult = ndx_multiplier if ndx_multiplier is not None else _matrix_multiplier(market_data, 'ndx100')
@@ -206,17 +206,29 @@ def compute_beta_gap(market_data: dict, config: dict, us_actual_total: float,
     def _round10(x):
         return round(x / 10) * 10
 
-    total_target = _round10(sp_base * sp_mult) + _round10(ndx_base * ndx_mult)
-    gap = total_target - us_actual_total
-    dow_deduct = _round10(max(0.0, gap) * dow_ratio)
+    sp_target  = _round10(sp_base * sp_mult)
+    ndx_target = _round10(ndx_base * ndx_mult)
+
+    sp_gap         = max(0.0, sp_target - sp_actual)      # 标普缺口
+    ndx_leg_needed = sp_gap * dow_ratio                   # 拼标普时纳指该出的那半（=道指腿额度）
+    ndx_surplus    = max(0.0, ndx_actual - ndx_target)    # 纳指超出自己目标的部分
+    ndx_help_sp    = min(ndx_surplus, ndx_leg_needed)     # 其中用于帮标普的（封顶额度内）
+    dow_deduct     = _round10(ndx_help_sp)                # 道指 1:1 镜像
+    ndx_extra      = max(0.0, ndx_surplus - ndx_leg_needed)  # 超过帮标普额度的部分（自主定义）
 
     return {
-        'sp_multiplier':  sp_mult,
-        'ndx_multiplier': ndx_mult,
-        'total_target':   total_target,
-        'us_actual':      us_actual_total,
-        'gap':            gap,
-        'dow_deduct':     dow_deduct,
+        'sp_multiplier':     sp_mult,
+        'ndx_multiplier':    ndx_mult,
+        'sp_target':         sp_target,
+        'ndx_target':        ndx_target,
+        'sp_actual':         sp_actual,
+        'ndx_actual':        ndx_actual,
+        'sp_gap':            sp_gap,
+        'ndx_leg_needed':    ndx_leg_needed,
+        'ndx_surplus':       ndx_surplus,
+        'ndx_help_sp':       ndx_help_sp,
+        'dow_deduct':        dow_deduct,
+        'ndx_extra_surplus': ndx_extra,
     }
 
 
