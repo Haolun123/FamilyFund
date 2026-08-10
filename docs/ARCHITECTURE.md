@@ -295,7 +295,7 @@ FamilyFund/
 │   ├── fundamentals.py                # 个股基本面 + PE历史分位（265行）
 │   ├── notifier.py                    # 企业微信每日推送（247行）
 │   ├── dca_manager.py                 # 定投计划管理（246行）
-│   ├── synthetic_sp.py                # 合成标普β定投：建信纳指+道指预付池拆腿
+│   ├── synthetic_sp.py                # 合成标普β定投：建信纳指+道指预付池，整体美股β缺口动态抵扣
 │   ├── ah_monitor.py                  # AH 溢价监测（207行）
 │   ├── ai_weekly.py                   # AI 周度评估（181行）
 │   ├── fi_engine.py                   # 财务独立测算 & 储蓄率（169行）

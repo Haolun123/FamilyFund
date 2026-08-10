@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from synthetic_sp import (  # noqa: E402
     compute_synthetic_dca,
+    compute_beta_gap,
     estimate_coverage,
     load_prepaid,
     save_prepaid,
@@ -164,3 +165,60 @@ class TestPrepaidState:
         topup_prepaid(d, '2026-08-24', 5000)               # 累加到9000
         data = load_prepaid(d)
         assert data['dow_prepaid']['balance'] == 9000.0
+
+
+class TestBetaGap:
+    """整体美股β缺口模型（道指动态抵扣）。
+    当前 标普750/纳指2000 → 美股β总目标 2750。dow_ratio=0.5。
+    """
+
+    def test_normal(self):
+        """正常按矩阵: 标普550+纳指2100=2650, 缺口100, 抵扣50"""
+        r = compute_beta_gap({}, CONFIG, us_actual_total=2650,
+                             sp_multiplier=0.3, ndx_multiplier=0.8)
+        assert r['total_target'] == 2750
+        assert r['gap'] == 100
+        assert r['dow_deduct'] == 50
+
+    def test_ndx_overinvest(self):
+        """纳指多投1000: 实际3650, 缺口-900, 抵扣0"""
+        r = compute_beta_gap({}, CONFIG, us_actual_total=3650,
+                             sp_multiplier=0.3, ndx_multiplier=0.8)
+        assert r['gap'] == -900
+        assert r['dow_deduct'] == 0
+
+    def test_underinvest_more_deduct(self):
+        """都少买: 实际1850, 缺口900, 抵扣450(少买多扣)"""
+        r = compute_beta_gap({}, CONFIG, us_actual_total=1850,
+                             sp_multiplier=0.3, ndx_multiplier=0.8)
+        assert r['gap'] == 900
+        assert r['dow_deduct'] == 450
+
+    def test_all_overinvest_no_negative(self):
+        """都超额: 实际3950, 缺口-1200, 抵扣0(不返负)"""
+        r = compute_beta_gap({}, CONFIG, us_actual_total=3950,
+                             sp_multiplier=0.3, ndx_multiplier=0.8)
+        assert r['gap'] == -1200
+        assert r['dow_deduct'] == 0
+
+    def test_exact_target_zero_deduct(self):
+        """实际=总目标: 缺口0, 抵扣0"""
+        r = compute_beta_gap({}, CONFIG, us_actual_total=2750,
+                             sp_multiplier=0.3, ndx_multiplier=0.8)
+        assert r['gap'] == 0
+        assert r['dow_deduct'] == 0
+
+    def test_configurable_ratio(self):
+        """dow_ratio=0.4: 缺口900 → 抵扣360"""
+        cfg = dict(CONFIG)
+        cfg['synthetic_split'] = {'dow': 0.4, 'jianxin_ndx': 0.6}
+        r = compute_beta_gap({}, cfg, us_actual_total=1850,
+                             sp_multiplier=0.3, ndx_multiplier=0.8)
+        assert r['gap'] == 900
+        assert r['dow_deduct'] == 360  # 900*0.4
+
+    def test_us_actual_echoed(self):
+        """us_actual 原样回显"""
+        r = compute_beta_gap({}, CONFIG, us_actual_total=2650,
+                             sp_multiplier=0.3, ndx_multiplier=0.8)
+        assert r['us_actual'] == 2650

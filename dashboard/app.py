@@ -1377,17 +1377,17 @@ with tab_update:
 
     st.divider()
 
-    # ─── 合成标普β定投建议（道指预付池 + 动态矩阵拆腿）───
+    # ─── 合成标普β定投建议（道指预付池 + 整体美股β缺口动态抵扣）───
     with st.expander("🔀 合成标普β定投建议（建信纳指 + 道指预付池）", expanded=False):
         st.caption(
-            "QDII 额度受限 + 场内溢价 8-12% 的替代方案：用「场外建信纳指 + 场内道指ETF」"
-            "按可配置比例拼类标普β。标普/纳指缺口 = 矩阵目标 − 已有场外额度。"
-            "道指走预付池（一次性买入避开最低手续费墙，每周按矩阵配额虚拟消耗）。"
+            "QDII 额度受限 + 场内溢价 8-12% 的替代方案：用「场外建信纳指 + 场内道指ETF」拼类标普β。"
+            "道指走预付池（一次性买入避开最低手续费墙），每周抵扣按【整体美股β缺口】= "
+            "（标普矩阵目标 + 纳指矩阵目标）−（本周美股类实际投入）动态计算。"
         )
         try:
             from synthetic_sp import (
-                load_prepaid, compute_synthetic_dca, estimate_coverage,
-                consume_prepaid, topup_prepaid,
+                load_prepaid, compute_synthetic_dca, compute_beta_gap,
+                estimate_coverage, consume_prepaid, topup_prepaid,
             )
             _syn_data_dir = os.path.dirname(csv_path)
             _syn_md = get_market_data()
@@ -1395,55 +1395,69 @@ with tab_update:
             _syn_cfg = _syn_state['config']
             _syn = compute_synthetic_dca(_syn_md, _syn_cfg)
             _syn_balance = _syn_state['dow_prepaid'].get('balance', 0.0)
-            _syn_cover = estimate_coverage(_syn_balance, _syn['dow_weekly'])
 
-            _c1, _c2, _c3 = st.columns(3)
-            _c1.metric("建信纳指本周买入", f"¥{_syn['jianxin_weekly']:,.0f}",
-                       help=f"纳指腿 ¥{_syn['jianxin_ndx_leg']:,.0f} + 类标普纳指腿 ¥{_syn['jianxin_sp_leg']:,.0f}")
-            _c2.metric("道指本周配额", f"¥{_syn['dow_weekly']:,.0f}",
-                       help="从预付池虚拟扣除，不实际下单")
-            _c3.metric("道指预付池余额", f"¥{_syn_balance:,.0f}",
-                       help=f"标普 {_syn['sp_multiplier']}x / 纳指 {_syn['ndx_multiplier']}x")
+            # 从短信解析结果自动读取本周美股类（标普+纳指）实际投入
+            _us_classes = {'US_Blend_Fund', 'US_Growth_Fund'}
+            _code2class = dict(zip(raw_df['Code'].astype(str), raw_df['Asset_Class']))
+            _us_actual_auto = 0.0
+            for _p in st.session_state.get('sms_parsed', []):
+                if _p.get('parse_error') or not _p.get('matched_code') or not _p.get('amount'):
+                    continue
+                if _code2class.get(str(_p['matched_code'])) in _us_classes:
+                    _us_actual_auto += float(_p['amount'])
 
-            if _syn_cover >= 0:
+            _has_sms = _us_actual_auto > 0
+            if not _has_sms:
+                st.info("尚未解析到美股类定投短信。可在步骤一先解析短信，或在下方手动输入本周美股实际投入。")
+
+            _us_actual = st.number_input(
+                "本周美股类实际投入（标普+纳指，含建信全额）",
+                min_value=0.0, value=float(_us_actual_auto), step=100.0, key="syn_us_actual",
+                help="自动从短信解析累加；可手动修正。整体美股β缺口 = 矩阵总目标 − 此值",
+            )
+
+            _beta = compute_beta_gap(_syn_md, _syn_cfg, us_actual_total=_us_actual)
+            _syn_cover = estimate_coverage(_syn_balance, _beta['dow_deduct'])
+
+            _c1, _c2, _c3, _c4 = st.columns(4)
+            _c1.metric("美股β总目标", f"¥{_beta['total_target']:,.0f}",
+                       help=f"标普 {_beta['sp_multiplier']}x + 纳指 {_beta['ndx_multiplier']}x")
+            _c2.metric("本周美股实际", f"¥{_us_actual:,.0f}",
+                       help="来自短信解析（可手改）")
+            _c3.metric("美股β缺口", f"¥{_beta['gap']:,.0f}",
+                       help="总目标 − 实际；负数表示超额，道指不抵扣")
+            _c4.metric("道指预付池余额", f"¥{_syn_balance:,.0f}")
+
+            if _beta['gap'] < 0:
+                st.info(f"本周美股投入超额 ¥{-_beta['gap']:,.0f}，道指无需抵扣（超额部分记为美股β超配）")
+            elif _syn_cover >= 0:
                 if _syn_cover <= 2:
-                    st.error(f"⚠️ 预付池按当前配额仅够 {_syn_cover} 周，需尽快补仓道指ETF")
+                    st.error(f"⚠️ 预付池按本周抵扣仅够 {_syn_cover} 周，需尽快补仓道指ETF")
                 else:
-                    st.info(f"预付池按当前配额可覆盖约 {_syn_cover} 周")
-            else:
-                st.info("当前标普缺口为 0，道指本周无需消耗")
+                    st.info(f"预付池按本周抵扣可覆盖约 {_syn_cover} 周")
 
             st.markdown(
-                f"**拆腿明细**：标普目标 ¥{_syn['sp_target']:,.0f}（缺口 ¥{_syn['sp_gap']:,.0f}）· "
-                f"纳指目标 ¥{_syn['ndx_target']:,.0f}（缺口 ¥{_syn['ndx_gap']:,.0f}）"
+                f"**建信纳指本周参考**：¥{_syn['jianxin_weekly']:,.0f}"
+                f"（照此去基金APP下单，实际以短信解析登记为准）"
             )
 
             _b1, _b2 = st.columns(2)
             with _b1:
-                if st.button("✅ 确认本周道指消耗", key="syn_consume",
-                             disabled=(_syn['dow_weekly'] <= 0)):
+                _dow_deduct = st.number_input(
+                    "本周道指抵扣（默认按缺口算，可手改）",
+                    min_value=0.0, value=float(_beta['dow_deduct']), step=10.0, key="syn_dow_deduct",
+                )
+                if st.button("✅ 确认本周道指抵扣", key="syn_consume",
+                             disabled=(_dow_deduct <= 0)):
                     from datetime import date as _date
                     _r = consume_prepaid(
                         _syn_data_dir, _date.today().strftime('%Y-%m-%d'),
-                        dow_weekly=_syn['dow_weekly'], sp_multiplier=_syn['sp_multiplier'],
+                        dow_weekly=_dow_deduct, sp_multiplier=_beta['sp_multiplier'],
                     )
                     if _r['need_topup']:
                         st.warning(f"已扣减 ¥{_r['consumed']:,.0f}，余额 ¥{_r['balance_after']:,.0f}。预付池将耗尽，请补仓！")
                     else:
                         st.success(f"已扣减 ¥{_r['consumed']:,.0f}，预付池余额 ¥{_r['balance_after']:,.0f}")
-                    st.rerun()
-                if st.button("📥 建信纳指填入调仓辅助器", key="syn_to_rebal",
-                             disabled=(_syn['jianxin_weekly'] <= 0)):
-                    _jx_code = _syn_cfg.get('jianxin_code', '')
-                    st.session_state.setdefault('rebalance_entries', []).append({
-                        'type': '买入',
-                        'asset_name': '建信纳斯达克100',
-                        'asset_label': f"建信纳斯达克100 ({_jx_code})" if _jx_code else '建信纳斯达克100',
-                        'amount': float(_syn['jianxin_weekly']),
-                        'price': 0.0, 'fee': 0.0, 'shares': 0.0,
-                        'is_new': not bool(_jx_code), 'new_asset': {},
-                    })
-                    st.success(f"已把建信纳指 ¥{_syn['jianxin_weekly']:,.0f} 填入步骤二调仓辅助器")
                     st.rerun()
             with _b2:
                 _topup_amt = st.number_input("道指补仓金额（券商实际买入后登记）",
