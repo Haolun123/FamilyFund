@@ -37,6 +37,7 @@
 | Weekly Update 自动化（净值刷新 + 短信解析）| 见 `DESIGN_AUTO_WEEKLY.md` |
 | 财务独立测算 + 储蓄率追踪 | 见 `DESIGN_ANALYTICS.md` |
 | HTML/PDF 报告全面切换 | Portfolio / Quarterly / 10th Man |
+| 合成标普β定投（建信纳指+道指预付池，绕开QDII溢价）| `src/synthetic_sp.py` + `dashboard/app.py` Tab2 步骤一后，见 `vault/essays/synthetic_sp500_ndx_dow_qdii_premium.md` |
 | 仓位管理与组合架构（P1-P12）| 见 `DESIGN_PORTFOLIO_ARCHITECTURE.md`,2026-05-22 完成 |
 | F4 PB/PE 历史分位（A 股 akshare + 港股 eniu 长期参考）| `src/position_percentile.py`,2026-05-23 |
 | 组合压力测试 + What-If 动态目标 | Tab1 Section7,2026-05-23 |

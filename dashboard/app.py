@@ -1377,6 +1377,90 @@ with tab_update:
 
     st.divider()
 
+    # ─── 合成标普β定投建议（道指预付池 + 动态矩阵拆腿）───
+    with st.expander("🔀 合成标普β定投建议（建信纳指 + 道指预付池）", expanded=False):
+        st.caption(
+            "QDII 额度受限 + 场内溢价 8-12% 的替代方案：用「场外建信纳指 + 场内道指ETF」"
+            "按可配置比例拼类标普β。标普/纳指缺口 = 矩阵目标 − 已有场外额度。"
+            "道指走预付池（一次性买入避开最低手续费墙，每周按矩阵配额虚拟消耗）。"
+        )
+        try:
+            from synthetic_sp import (
+                load_prepaid, compute_synthetic_dca, estimate_coverage,
+                consume_prepaid, topup_prepaid,
+            )
+            _syn_data_dir = os.path.dirname(csv_path)
+            _syn_md = get_market_data()
+            _syn_state = load_prepaid(_syn_data_dir)
+            _syn_cfg = _syn_state['config']
+            _syn = compute_synthetic_dca(_syn_md, _syn_cfg)
+            _syn_balance = _syn_state['dow_prepaid'].get('balance', 0.0)
+            _syn_cover = estimate_coverage(_syn_balance, _syn['dow_weekly'])
+
+            _c1, _c2, _c3 = st.columns(3)
+            _c1.metric("建信纳指本周买入", f"¥{_syn['jianxin_weekly']:,.0f}",
+                       help=f"纳指腿 ¥{_syn['jianxin_ndx_leg']:,.0f} + 类标普纳指腿 ¥{_syn['jianxin_sp_leg']:,.0f}")
+            _c2.metric("道指本周配额", f"¥{_syn['dow_weekly']:,.0f}",
+                       help="从预付池虚拟扣除，不实际下单")
+            _c3.metric("道指预付池余额", f"¥{_syn_balance:,.0f}",
+                       help=f"标普 {_syn['sp_multiplier']}x / 纳指 {_syn['ndx_multiplier']}x")
+
+            if _syn_cover >= 0:
+                if _syn_cover <= 2:
+                    st.error(f"⚠️ 预付池按当前配额仅够 {_syn_cover} 周，需尽快补仓道指ETF")
+                else:
+                    st.info(f"预付池按当前配额可覆盖约 {_syn_cover} 周")
+            else:
+                st.info("当前标普缺口为 0，道指本周无需消耗")
+
+            st.markdown(
+                f"**拆腿明细**：标普目标 ¥{_syn['sp_target']:,.0f}（缺口 ¥{_syn['sp_gap']:,.0f}）· "
+                f"纳指目标 ¥{_syn['ndx_target']:,.0f}（缺口 ¥{_syn['ndx_gap']:,.0f}）"
+            )
+
+            _b1, _b2 = st.columns(2)
+            with _b1:
+                if st.button("✅ 确认本周道指消耗", key="syn_consume",
+                             disabled=(_syn['dow_weekly'] <= 0)):
+                    from datetime import date as _date
+                    _r = consume_prepaid(
+                        _syn_data_dir, _date.today().strftime('%Y-%m-%d'),
+                        dow_weekly=_syn['dow_weekly'], sp_multiplier=_syn['sp_multiplier'],
+                    )
+                    if _r['need_topup']:
+                        st.warning(f"已扣减 ¥{_r['consumed']:,.0f}，余额 ¥{_r['balance_after']:,.0f}。预付池将耗尽，请补仓！")
+                    else:
+                        st.success(f"已扣减 ¥{_r['consumed']:,.0f}，预付池余额 ¥{_r['balance_after']:,.0f}")
+                    st.rerun()
+                if st.button("📥 建信纳指填入调仓辅助器", key="syn_to_rebal",
+                             disabled=(_syn['jianxin_weekly'] <= 0)):
+                    _jx_code = _syn_cfg.get('jianxin_code', '')
+                    st.session_state.setdefault('rebalance_entries', []).append({
+                        'type': '买入',
+                        'asset_name': '建信纳斯达克100',
+                        'asset_label': f"建信纳斯达克100 ({_jx_code})" if _jx_code else '建信纳斯达克100',
+                        'amount': float(_syn['jianxin_weekly']),
+                        'price': 0.0, 'fee': 0.0, 'shares': 0.0,
+                        'is_new': not bool(_jx_code), 'new_asset': {},
+                    })
+                    st.success(f"已把建信纳指 ¥{_syn['jianxin_weekly']:,.0f} 填入步骤二调仓辅助器")
+                    st.rerun()
+            with _b2:
+                _topup_amt = st.number_input("道指补仓金额（券商实际买入后登记）",
+                                             min_value=0.0, value=5000.0, step=1000.0, key="syn_topup_amt")
+                if st.button("🔺 登记道指补仓", key="syn_topup"):
+                    from datetime import date as _date
+                    _r = topup_prepaid(_syn_data_dir, _date.today().strftime('%Y-%m-%d'), _topup_amt)
+                    st.success(f"预付池已补至 ¥{_r['balance']:,.0f}")
+                    st.rerun()
+
+            if not _syn_cfg.get('jianxin_code') or not _syn_cfg.get('dow_code'):
+                st.caption("⚙️ 提示：`dca_prepaid.json` 的 jianxin_code / dow_code 尚未配置具体基金代码。")
+        except Exception as _syn_e:
+            st.warning(f"合成标普β模块加载失败：{_syn_e}")
+
+    st.divider()
+
     # ─── 调仓辅助器（步骤二）───
     with st.expander("⚖️ 步骤二：调仓辅助器（登记所有买卖 / 外部入金）", expanded=True):
         st.caption(

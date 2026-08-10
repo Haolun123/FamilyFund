@@ -290,6 +290,7 @@ docker exec familyfund grep -n "关键词" /app/dashboard/app.py
 | `src/nav_engine.py` | 核心计算引擎（NAV、XIRR、Sharpe、Calmar） | 改算法逻辑在这里 |
 | `dashboard/app.py` | 展示层（所有 Tab 的 UI） | 改展示逻辑只改这里，不动 nav_engine |
 | `src/market_monitor.py` | 市场温度计（PE/VIX/QVIX 矩阵） | EC2 每日推送依赖此模块 |
+| `src/synthetic_sp.py` | 合成标普β定投（建信纳指+道指预付池拆腿，绕开QDII溢价）| 状态存 `dca_prepaid.json`；拆腿守恒必须一腿取整另一腿反推 |
 | `src/quarterly_engine.py` | 季度财报引擎（balance_sheet + 净资产 + 资产配置变化）| `save_balance_sheet` 走原子写入 |
 | `src/cashflow_engine.py` | 现金流分析引擎（鲨鱼记账解析 + 净资产核对 + 桑基图）| 净资产核对设计见 `DESIGN_NET_WORTH_RECONCILIATION.md` |
 | `src/pdf_report.py` | PDF 报告生成 | 使用 matplotlib PdfPages，零新增依赖 |
