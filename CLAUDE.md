@@ -466,8 +466,22 @@ portfolio.csv
 ### Step 2: 数据采集
 
 1. **读取财报 PDF**：用 Read 工具取最新 1-2 期 PDF 的关键页（首页 + 财务数据章节，通常前 5-10 页）
+
+   **⚠️ 财报三表必查清单（2026-08-13 加入，强制过一遍，不许只看利润表）**：
+
+   起因：SAP、腾讯 2026Q2 分析连续两次只盯利润表（收入/利润/毛利率），漏了**现金流量表**。腾讯 Q2 财报发布后大跌，主因正是我们漏掉的 **FCF 转负 + 资本开支 +210%**。教训：**利润表好看时，杀伤力往往藏在现金流量表里。**
+
+   | 报表 | 必查指标 | 为什么 |
+   |------|---------|--------|
+   | **利润表** | 收入/利润增速、毛利率、分部收入、Non-IFRS vs IFRS 差异来源 | 基本盘 |
+   | **现金流量表** | **经营现金流、资本开支(capex)、自由现金流(FCF)、FCF同比、派息/回购** | **最易漏、杀伤力最大**。FCF 转负要拆：是一次性预付(脉冲)还是常态化(重估) |
+   | **资产负债表** | 现金净额、有息负债、投资组合公允价值 | 财务韧性 + 隐藏资产 |
+
+   查 FCF 时必答三问：① FCF 同比方向？② 若转负/骤降，是 capex 脉冲还是新常态？③ 对"FCF yield / 现金奶牛"这类估值锚是否构成动摇？
+   查 SBC（股权激励）：股价波动会让 SBC 费用变动，进而"美化/恶化"利润，需剔除看真实经营（见 SAP Q2 体检）。
+
 2. **拉取实时数据**：必须先 `setproxy` 配置代理（参考 `~/.zshrc` 中的 alias）。然后用 Python + yfinance 获取：
-   - 主代码：`currentPrice`、`trailingPE`、`forwardPE`、`priceToBook`、`dividendYield`、`returnOnEquity`、`marketCap`、`bookValue`、`trailingEps`、`beta`
+   - 主代码：`currentPrice`、`trailingPE`、`forwardPE`、`priceToBook`、`dividendYield`、`returnOnEquity`、`marketCap`、`bookValue`、`trailingEps`、`beta`、`freeCashflow`、`operatingCashflow`
    - 同业对比：行业内 5-8 家可比公司同样字段
 3. **港 A 双上市判定**：如果标的同时有 A 股代码（`.SS` / `.SZ`）和 H 股代码（`.HK`），必须**同时**拉取双市场数据 + `HKDCNY=X` 汇率，并在分析中加入"A 股 vs H 股决策"章节
 
