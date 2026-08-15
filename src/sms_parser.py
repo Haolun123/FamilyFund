@@ -5,6 +5,7 @@
   B: 南方基金定投格式（定投关键词，不含年份）
   D: 招商银行黄金积存金
   E: 摩根基金（申购/定期定额申购，不含年份，确认日从"持有时间从X月X日"推算）
+  F: 建信基金（定期定额申购，日期为8位数字 YYYYMMDD，无净值需反算）
 
 返回结构：
     [
@@ -95,6 +96,17 @@ _PAT_E = re.compile(
     r'.*?成交净值([\d.]+)'                    # 净值
     r'.*?确认份额([\d,]+\.?\d*)份'            # 份额
     r'.*?持有时间从(\d{1,2})月(\d{1,2})日',  # 持有起始月日（确认日+1天）
+    re.DOTALL,
+)
+
+
+# 格式F：建信基金，日期为8位 YYYYMMDD，无净值（需从金额/份额反算）
+_PAT_F = re.compile(
+    r'【建信基金】.*?于(\d{8})提交的'
+    r'(.+?)'                              # 基金名称
+    r'([\d,]+\.?\d*)\s*元'               # 金额
+    r'定期定额申购申请已确认成功'
+    r'.*?确认份额([\d,]+\.?\d*)份',      # 份额（支持千分位逗号）
     re.DOTALL,
 )
 
@@ -230,6 +242,28 @@ def _parse_one(sms: str) -> dict | None:
     result = _parse_jpmorgan(sms)
     if result:
         return result
+
+    # 格式F：建信基金（无净值，反算）
+    m = _PAT_F.search(sms)
+    if m:
+        date_str  = m.group(1)  # '20260812'
+        y, mo, d_ = int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8])
+        fund_name = m.group(2).strip()
+        amount    = _parse_amount(m.group(3))
+        shares    = _parse_amount(m.group(4))
+        nav       = round(amount / shares, 4) if shares > 0 else 0.0
+        return {
+            'confirm_date': f'{y:04d}-{mo:02d}-{d_:02d}',
+            'action':       '买入',
+            'fund_name':    fund_name,
+            'amount':       amount,
+            'shares':       shares,
+            'nav':          nav,
+            'is_gold':      False,
+            'raw':          sms,
+            'matched_code': None,
+            'matched_name': None,
+        }
 
     return None
 

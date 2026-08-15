@@ -12,6 +12,7 @@ HOLDINGS = [
     {'code': 'GOLD',   'name': '黄金'},
     {'code': '017641', 'name': '摩根标普500 A类'},
     {'code': '019172', 'name': '摩根纳指100 A类'},
+    {'code': '539001', 'name': '建信纳指100 A类'},
 ]
 
 SMS_BOSHI = """【博时基金】尊敬的严浩伦，您于2026年05月06日通过博时直销申购博时标普500ETF联接E  240元05月08日确认成功，份额为44.19份，净值为5.4308。温馨提示：若赎回请先查询了解基金赎回费。详询95105568。"""
@@ -313,3 +314,46 @@ class TestJPMorganMergedSms:
         assert sp[0]['nav'] == pytest.approx(1.6718)
         assert sp[0]['shares'] == pytest.approx(178.38)
         assert sp[0]['confirm_date'] == '2026-07-22'  # 持有 7/23 - 1 天
+
+
+# ── 回归测试: 建信基金格式 F (2026-08-14 新增) ──────────────────
+# 建信基金短信无净值字段，日期为 YYYYMMDD 8位数字格式，净值需从金额/份额反算。
+
+SMS_JIANXIN_DCA = "【建信基金】您于20260812提交的建信纳斯达克100指数(QDII)A人民币500.00元定期定额申购申请已确认成功,确认份额143.78份。拒收请回复R"
+
+
+class TestParseJianXin:
+    """建信基金格式（格式F）回归测试。净值 = 金额 / 份额（反算）。"""
+
+    def test_confirm_date(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JIANXIN_DCA, HOLDINGS)[0]
+        assert not r.get('parse_error'), "应解析成功"
+        assert r['confirm_date'] == '2026-08-12'
+
+    def test_amount(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JIANXIN_DCA, HOLDINGS)[0]
+        assert r['amount'] == pytest.approx(500.0)
+
+    def test_shares(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JIANXIN_DCA, HOLDINGS)[0]
+        assert r['shares'] == pytest.approx(143.78)
+
+    def test_nav_computed(self):
+        """净值 = 500 / 143.78 ≈ 3.4776"""
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JIANXIN_DCA, HOLDINGS)[0]
+        assert r['nav'] == pytest.approx(500.0 / 143.78, rel=1e-3)
+
+    def test_matched_code(self):
+        """新建仓时 holdings 里还没有该基金，matched_code 为 None 是正常的"""
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JIANXIN_DCA, HOLDINGS)[0]
+        assert r['matched_code'] is None
+
+    def test_action_is_buy(self):
+        from sms_parser import parse_sms
+        r = parse_sms(SMS_JIANXIN_DCA, HOLDINGS)[0]
+        assert r['action'] == '买入'

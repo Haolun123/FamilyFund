@@ -54,6 +54,7 @@
 | 1 | **鲨鱼记账解析 + 季度现金流分析** | `DESIGN_CASHFLOW.md` | Q2 数据(2026-07 启动) |
 | 2 | **F5 商品价格抓取**(Brent + 黄金 + 铜 + WTI + 铁矿石)| `DESIGN_PORTFOLIO_ARCHITECTURE.md` F5 节 | 中海油接近建仓窗口(Brent < 60 + PB < 1.0)时再做,当前不需要 |
 | 3 | **短信解析 UX 改进**(防"幽灵漏加")| 见下方"已知隐患"详述 | 当前靠对账纪律兜底,可缓行 |
+| 3b | **短信解析支持新建仓**（未匹配条目 UI 内完成建仓）| 见下方详述 | 依赖格式F(建信)等新格式已合并 |
 | 4 | **修复 7 个 stale tests** | — | 2026-06-09 跑全量发现:5 个 SAP 测试(`test_sap_stock.py`)与 commit `05164eb` 后的"分红复投排除成本基准"实际行为不一致;2 个矩阵阈值测试(`test_market_monitor.py::test_sp500_watch_high_pe_mid_vix` / `test_ndx100_watch`)与现行观望/暂停阈值不一致。本次 mcp_server bug 修复无关,但应尽快修齐让 suite 100% 绿 |
 | 5 | **Dashboard 首次加载慢优化（tabs → 条件渲染）** | 见下方"已知隐患"详述 | 当前 10+ 秒首次加载，每次切换正常；评估后决定暂不实施 |
 | 6 | ~~净资产核对公式：区分经营性 vs 资本性现金流 + 补 SAP 归属薪酬~~ | ✅ 2026-07-01 完成 v3，残差从 -1.27% 收敛到 +0.04%；设计见 `DESIGN_NET_WORTH_RECONCILIATION.md` | — |
@@ -280,6 +281,25 @@
 **修复优先级：** 高 — 影响 Quarterly Tab 现金流分析的可信度。明天上手即可,工程量小（~30 分钟）。
 
 ---
+
+### 短信解析支持新建仓（对应 P2-#3b）
+
+**问题描述：**
+新建仓时 portfolio.csv 里还没有该基金的持仓行，短信解析 `matched_code=None`，无法自动建仓。当前 workaround 是提前在 portfolio.csv 加 0 份额占位行。
+
+**建仓 vs 追加买入的区别：**
+- **第一条短信**（`matched_code=None`）：建仓操作，`NCF = Total_Value = 金额`，需要用户填写 Code / Name / Asset_Class
+- **后续短信**（已有占位行，正常匹配）：正常买入逻辑，`NCF += 金额`，Shares 累加
+
+**期望的 UI 设计：**
+1. 解析完所有短信后，把 `matched_code=None` 的条目单独列出，显示"以下基金未找到匹配持仓，请填写：Code / Name / Asset_Class"
+2. 用户填完后，该条目自动作为**建仓行**处理（同时在 portfolio.csv 写入 0 份额占位行，以后可自动匹配）
+3. 后续同一基金的短信（同一次 Weekly Update 里）按正常买入处理
+
+**临时 workaround（当前已落地）：**
+- 新建仓前手动在 portfolio.csv 加一行 0 份额占位行（2026-08-14 建信纳指100 A类即用此法）
+
+**修复优先级：** 中 — workaround 可用，但每次新建仓多一个手动步骤
 
 ## 设计决策记录
 
