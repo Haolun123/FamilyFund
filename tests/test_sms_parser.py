@@ -348,10 +348,9 @@ class TestParseJianXin:
         assert r['nav'] == pytest.approx(500.0 / 143.78, rel=1e-3)
 
     def test_matched_code(self):
-        """新建仓时 holdings 里还没有该基金，matched_code 为 None 是正常的"""
         from sms_parser import parse_sms
         r = parse_sms(SMS_JIANXIN_DCA, HOLDINGS)[0]
-        assert r['matched_code'] is None
+        assert r['matched_code'] == '539001'
 
     def test_action_is_buy(self):
         from sms_parser import parse_sms

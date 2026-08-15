@@ -104,6 +104,7 @@ _PAT_E = re.compile(
 _PAT_F = re.compile(
     r'【建信基金】.*?于(\d{8})提交的'
     r'(.+?)'                              # 基金名称
+    r'(?:人民币)?'                        # 可选的"人民币"前缀（不计入基金名）
     r'([\d,]+\.?\d*)\s*元'               # 金额
     r'定期定额申购申请已确认成功'
     r'.*?确认份额([\d,]+\.?\d*)份',      # 份额（支持千分位逗号）
@@ -263,6 +264,7 @@ def _parse_one(sms: str) -> dict | None:
             'raw':          sms,
             'matched_code': None,
             'matched_name': None,
+            '_brand':        '建信',  # 用于匹配时限定发行方，避免跨公司误匹配
         }
 
     return None
@@ -377,10 +379,18 @@ def parse_sms(text: str, holdings: list[dict] | None = None) -> list[dict]:
     def _attach_match(parsed: dict) -> dict:
         """为解析结果附加持仓匹配。"""
         if holdings and not parsed['is_gold']:
-            code, name = _match_holding(parsed['fund_name'], holdings)
+            # _brand 字段存在时，先过滤同品牌持仓再匹配，避免跨公司误匹配
+            brand = parsed.pop('_brand', None)
+            candidate_holdings = holdings
+            if brand:
+                branded = [h for h in holdings if brand in h.get('name', '')]
+                if branded:
+                    candidate_holdings = branded
+            code, name = _match_holding(parsed['fund_name'], candidate_holdings)
             parsed['matched_code'] = code
             parsed['matched_name'] = name
         elif parsed['is_gold'] and holdings:
+            parsed.pop('_brand', None)
             gold = [h for h in holdings if 'GOLD' in h.get('code', '').upper()
                     or '黄金' in h.get('name', '')]
             if gold:
