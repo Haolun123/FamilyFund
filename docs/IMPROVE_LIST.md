@@ -1,6 +1,6 @@
 # FamilyFund 功能改进清单
 
-> **最后更新**：2026-05-27
+> **最后更新**：2026-08-17
 >
 > 本文件只做状态跟踪和优先级排序。详细设计见各 `DESIGN_XXX.md` 文件。
 
@@ -38,6 +38,11 @@
 | 财务独立测算 + 储蓄率追踪 | 见 `DESIGN_ANALYTICS.md` |
 | HTML/PDF 报告全面切换 | Portfolio / Quarterly / 10th Man |
 | 合成标普β定投（建信纳指+道指预付池，绕开QDII溢价）| `src/synthetic_sp.py` + `dashboard/app.py` Tab2 步骤一后，见 `vault/essays/synthetic_sp500_ndx_dow_qdii_premium.md` |
+| 短信解析格式A-F（博时/南方/招行黄金/摩根/建信）| `src/sms_parser.py` 2026-08-14 |
+| SAP.DE 刷新净值同步更新 EUR/CNY 汇率 | `src/price_fetcher.py::_fetch_sap_with_fx` 2026-08-17 |
+| 新建仓 transaction.csv 写入占位名 bug 修复 | `dashboard/app.py` Weekly Update 步骤三 2026-08-17 |
+| Weekly Update 保存快照后自动生成 MD 周报 | `src/weekly_report.py` 2026-08-17 |
+| 合成标普β抵扣强制检查（纳指超额时 block 保存）| `dashboard/app.py` 保存逻辑 2026-08-17 |
 | 仓位管理与组合架构（P1-P12）| 见 `DESIGN_PORTFOLIO_ARCHITECTURE.md`,2026-05-22 完成 |
 | F4 PB/PE 历史分位（A 股 akshare + 港股 eniu 长期参考）| `src/position_percentile.py`,2026-05-23 |
 | 组合压力测试 + What-If 动态目标 | Tab1 Section7,2026-05-23 |

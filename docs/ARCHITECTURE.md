@@ -1,9 +1,9 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v2.0  
+> **版本**: v2.1
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
-> **最后更新**: 2026-05-08  
+> **最后更新**: 2026-08-17  
 > **状态**: 活跃迭代中
 
 ---
@@ -277,6 +277,7 @@ FamilyFund/
 │   ├── backtest_cache.json            # [程序生成] 回测数据缓存
 │   ├── yf_symbols.json                # 个股基本面 YF Symbol 映射 + 缓存
 │   ├── ah_config.json                 # AH 溢价关注标的 + 历史快照
+│   ├── dca_prepaid.json               # 合成标普β预付池状态（道指余额/抵扣日志）
 │   ├── dca_config.json                # 定投计划配置
 │   ├── fi_config.json                 # 财务独立 & 储蓄率配置
 │   ├── life_stages.json               # 人生阶段里程碑配置
@@ -284,24 +285,30 @@ FamilyFund/
 │   ├── tenth_man_config_deepseek.json # 第十人 DeepSeek 配置
 │   └── tenth_man_config_minimax.json  # 第十人 MiniMax 配置
 │
-├── src/                               # 核心逻辑层（16 个模块，~5800 行）
-│   ├── nav_engine.py                  # ★ 多级净值核算引擎（850行）
-│   ├── market_monitor.py              # 市场温度计：PE/VIX/QVIX/乖离率矩阵（626行）
-│   ├── backtest.py                    # DCA 回测引擎（527行）
-│   ├── pdf_report.py                  # PDF 报告生成（415行）
-│   ├── tenth_man.py                   # 第十人：三 Agent LLM 审查（366行）
-│   ├── benchmark.py                   # 基准对比（7个基准，含CNY换算）（353行）
-│   ├── quarterly_engine.py            # 季度财报引擎（283行）
-│   ├── fundamentals.py                # 个股基本面 + PE历史分位（265行）
-│   ├── notifier.py                    # 企业微信每日推送（247行）
-│   ├── dca_manager.py                 # 定投计划管理（246行）
+├── src/                               # 核心逻辑层（19 个模块）
+│   ├── nav_engine.py                  # ★ 多级净值核算引擎
+│   ├── market_monitor.py              # 市场温度计：PE/VIX/QVIX/乖离率矩阵
+│   ├── backtest.py                    # DCA 回测引擎
+│   ├── pdf_report.py                  # PDF 报告生成
+│   ├── tenth_man.py                   # 第十人：三 Agent LLM 审查
+│   ├── benchmark.py                   # 基准对比（7个基准，含CNY换算）
+│   ├── quarterly_engine.py            # 季度财报引擎
+│   ├── fundamentals.py                # 个股基本面 + PE历史分位
+│   ├── notifier.py                    # 企业微信每日推送
+│   ├── dca_manager.py                 # 定投计划管理
 │   ├── synthetic_sp.py                # 合成标普β定投：建信纳指+道指预付池，纳指类超额镜像抵扣
-│   ├── ah_monitor.py                  # AH 溢价监测（207行）
-│   ├── ai_weekly.py                   # AI 周度评估（181行）
-│   ├── fi_engine.py                   # 财务独立测算 & 储蓄率（169行）
-│   ├── life_stages_engine.py          # 人生阶段支出曲线（133行）
-│   ├── fx_service.py                  # 实时汇率/股价
+│   ├── weekly_report.py               # ★ 周报自动生成（保存快照后写入 weekly_reports/）
+│   ├── sms_parser.py                  # 短信解析引擎（格式A-F，含建信YYYYMMDD格式）
+│   ├── price_fetcher.py               # 实时价格/汇率拉取（含 SAP EUR/CNY 同步）
+│   ├── ah_monitor.py                  # AH 溢价监测
+│   ├── ai_weekly.py                   # AI 周度评估
+│   ├── fi_engine.py                   # 财务独立测算 & 储蓄率
+│   ├── life_stages_engine.py          # 人生阶段支出曲线
+│   ├── fx_service.py                  # 实时汇率服务
 │   ├── sap_stock.py                   # SAP 股票成本核算
+│   ├── cashflow_engine.py             # 现金流分析引擎
+│   ├── research_library.py            # 研报库管理
+│   ├── position_percentile.py         # 仓位历史分位
 │   ├── fund_calculator.py             # [历史] 旧版净值核算
 │   ├── asset_breakdown.py             # [历史] XLSX 资产配置解析
 │   ├── import_sap_xlsx.py             # XLSX → SAP CSV 迁移工具
@@ -316,7 +323,7 @@ FamilyFund/
 │   ├── daily_push.py                  # EC2 每日推送 + PE历史快照入口
 │   └── test_ec2_akshare.py            # EC2 akshare 可达性测试
 │
-└── tests/                             # 测试（13个文件，57个用例，全部通过）
+└── tests/                             # 测试（15个文件）
     ├── test_nav_engine.py
     ├── test_new_features.py           # 收益归因/目标配置/第十人/AI周评
     ├── test_market_monitor.py
@@ -329,7 +336,9 @@ FamilyFund/
     ├── test_fi_engine.py
     ├── test_life_stages_engine.py
     ├── test_pe_percentile.py
-    └── test_backtest_enhancements.py
+    ├── test_backtest_enhancements.py
+    ├── test_sms_parser.py             # 短信解析（格式A-F，44个用例）
+    └── test_weekly_report.py          # 周报生成（10个用例）
 ```
 
 ### 6.2 文件职责矩阵

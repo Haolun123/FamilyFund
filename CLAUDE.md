@@ -291,6 +291,9 @@ docker exec familyfund grep -n "关键词" /app/dashboard/app.py
 | `dashboard/app.py` | 展示层（所有 Tab 的 UI） | 改展示逻辑只改这里，不动 nav_engine |
 | `src/market_monitor.py` | 市场温度计（PE/VIX/QVIX 矩阵） | EC2 每日推送依赖此模块 |
 | `src/synthetic_sp.py` | 合成标普β定投（建信纳指+道指预付池，绕开QDII溢价）| 道指抵扣走【纳指类超额镜像】模型（纳指买够自己目标后的超额才帮标普，道指1:1镜像；标普难买/纳指易满→道指精确盯标普缺口不被稀释）；纳指类=US_Growth_Fund全体，天然避开建信双重身份循环；状态存 `dca_prepaid.json`；预付池余额=物理道指库存，只减不因超额增 |
+| `src/sms_parser.py` | 短信解析引擎（格式A-F）| 格式F=建信基金（YYYYMMDD日期，无净值反算）；`_brand` 字段过滤同品牌持仓避免跨公司误匹配 |
+| `src/price_fetcher.py` | 实时价格/汇率拉取 | SAP.DE 走 `_fetch_sap_with_fx()`，同步更新 EUR/CNY；港股走 `_fetch_hk_with_fx()` |
+| `src/weekly_report.py` | 周报自动生成（保存快照后触发）| 写入 `$FAMILYFUND_DATA/weekly_reports/YYYY-MM-DD.md`；SAP 独立节拆分价格涨跌/ESPP归属/汇率影响 |
 | `src/quarterly_engine.py` | 季度财报引擎（balance_sheet + 净资产 + 资产配置变化）| `save_balance_sheet` 走原子写入 |
 | `src/cashflow_engine.py` | 现金流分析引擎（鲨鱼记账解析 + 净资产核对 + 桑基图）| 净资产核对设计见 `DESIGN_NET_WORTH_RECONCILIATION.md` |
 | `src/pdf_report.py` | PDF 报告生成 | 使用 matplotlib PdfPages，零新增依赖 |
