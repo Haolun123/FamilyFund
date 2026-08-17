@@ -2180,26 +2180,46 @@ with tab_update:
     st.divider()
 
     # 检查合成标普β抵扣是否已完成
+    # 触发条件：本周纳指类（US_Growth_Fund）实际买入 > ndx_target_base × 实时ndx_multiplier
+    # 即纳指有超额，才需要抵扣；没有超额则不 block
     _dca_block = False
     _dca_block_msg = ''
-    _dca_codes = {'513400', '539001'}  # 道指ETF / 建信纳指
-    _has_synthetic_buy = any(
-        str(t.get('Code', '')) in _dca_codes and t.get('Type') == '买入'
-        for t in _pending_tx
-    )
-    if _has_synthetic_buy:
-        try:
-            import json as _json
-            _dca_path = os.path.join(os.path.dirname(csv_path), 'dca_prepaid.json')
-            with open(_dca_path, encoding='utf-8') as _f:
-                _dca_data = _json.load(_f)
+    try:
+        import json as _json
+        _dca_path = os.path.join(os.path.dirname(csv_path), 'dca_prepaid.json')
+        with open(_dca_path, encoding='utf-8') as _f:
+            _dca_data = _json.load(_f)
+        _dca_cfg = _dca_data.get('config', {})
+        _ndx_base = float(_dca_cfg.get('ndx_target_base', 2500))
+
+        # 本周纳指类实际买入（从 pending_transactions 里算）
+        _code2class = dict(zip(raw_df['Code'].astype(str), raw_df['Asset_Class']))
+        _ndx_actual_week = sum(
+            float(t.get('Amount_CNY', 0))
+            for t in _pending_tx
+            if t.get('Type') == '买入' and _code2class.get(str(t.get('Code', ''))) == 'US_Growth_Fund'
+        )
+
+        # 实时 ndx_multiplier（从市场温度计查表）
+        from synthetic_sp import _matrix_multiplier
+        _syn_md = st.session_state.get('market_data_cache', {})
+        _ndx_mult = _matrix_multiplier(_syn_md, 'ndx100') if _syn_md else 1.0
+        _ndx_target_week = _ndx_base * _ndx_mult
+
+        _ndx_surplus = _ndx_actual_week - _ndx_target_week
+        if _ndx_surplus > 0:
+            # 纳指有超额，检查本周是否已抵扣
             _log = _dca_data.get('dow_prepaid', {}).get('consumption_log', [])
             _week_deducted = any(x['date'] >= last_snapshot_date for x in _log)
             if not _week_deducted:
                 _dca_block = True
-                _dca_block_msg = '⚠️ 本周买入了道指ETF / 建信纳指，请先到**步骤一「合成标普β」**完成抵扣，再保存快照。'
-        except Exception:
-            pass  # 读取失败不阻断
+                _dca_block_msg = (
+                    f'⚠️ 本周纳指类买入 ¥{_ndx_actual_week:,.0f}，'
+                    f'超出目标 ¥{_ndx_target_week:,.0f}（超额 ¥{_ndx_surplus:,.0f}），'
+                    f'请先到**步骤一「合成标普β」**完成抵扣，再保存快照。'
+                )
+    except Exception:
+        pass  # 读取/计算失败不阻断
 
     if _dca_block:
         st.warning(_dca_block_msg)
