@@ -2179,8 +2179,33 @@ with tab_update:
     # ─── Save ───
     st.divider()
 
-    if errors:
-        st.button("保存到 CSV", disabled=True, help="请先修正错误")
+    # 检查合成标普β抵扣是否已完成
+    _dca_block = False
+    _dca_block_msg = ''
+    _dca_codes = {'513400', '539001'}  # 道指ETF / 建信纳指
+    _has_synthetic_buy = any(
+        str(t.get('Code', '')) in _dca_codes and t.get('Type') == '买入'
+        for t in _pending_tx
+    )
+    if _has_synthetic_buy:
+        try:
+            import json as _json
+            _dca_path = os.path.join(os.path.dirname(csv_path), 'dca_prepaid.json')
+            with open(_dca_path, encoding='utf-8') as _f:
+                _dca_data = _json.load(_f)
+            _log = _dca_data.get('dow_prepaid', {}).get('consumption_log', [])
+            _week_deducted = any(x['date'] >= last_snapshot_date for x in _log)
+            if not _week_deducted:
+                _dca_block = True
+                _dca_block_msg = '⚠️ 本周买入了道指ETF / 建信纳指，请先到**步骤一「合成标普β」**完成抵扣，再保存快照。'
+        except Exception:
+            pass  # 读取失败不阻断
+
+    if _dca_block:
+        st.warning(_dca_block_msg)
+
+    if errors or _dca_block:
+        st.button("保存到 CSV", disabled=True, help="请先修正错误" if errors else "请先完成合成标普β抵扣")
     else:
         confirm = st.checkbox("我已确认数据无误")
         if st.button("保存到 CSV", type="primary", disabled=not confirm):
