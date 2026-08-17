@@ -1829,30 +1829,41 @@ with tab_update:
                 for e in entries:
                     if e['type'] not in ('买入', '卖出') or not e['asset_name']:
                         continue
-                    asset_mask = template['Name'] == e['asset_name']
-                    asset_row = template[asset_mask].iloc[0] if asset_mask.any() else None
+                    # 新增标的：从 new_asset 字典取真实字段，不从 template 查（template 里是真实名字，asset_name 是'新增标的'）
+                    if e.get('is_new') and e.get('new_asset'):
+                        na = e['new_asset']
+                        tx_name        = na.get('Name', '')
+                        tx_code        = na.get('Code', '')
+                        tx_asset_class = na.get('Asset_Class', '')
+                        tx_platform    = na.get('Platform', '')
+                        tx_price_ccy   = na.get('Currency', 'CNY')
+                        asset_row      = None
+                    else:
+                        asset_mask = template['Name'] == e['asset_name']
+                        asset_row = template[asset_mask].iloc[0] if asset_mask.any() else None
+                        tx_name        = e['asset_name']
+                        tx_code        = asset_row['Code']        if asset_row is not None else ''
+                        tx_asset_class = asset_row['Asset_Class'] if asset_row is not None else ''
+                        tx_platform    = asset_row['Platform']    if asset_row is not None else ''
+                        tx_price_ccy   = str(asset_row.get('Currency', '') or '').strip() if asset_row is not None else ''
                     price_val = e.get('price', 0.0)
                     if not price_val or price_val <= 0:
                         price_val = float(asset_row['Current_Price']) if asset_row is not None else 0.0
-                    _price_ccy = ''
-                    if asset_row is not None:
-                        _price_ccy = str(asset_row.get('Currency', '') or '').strip()
-                    if not _price_ccy:
+                    if not tx_price_ccy:
                         from fundamentals import infer_currency
-                        _price_ccy = infer_currency(
-                            str(asset_row['Code']) if asset_row is not None else '',
-                            str(asset_row['Asset_Class']) if asset_row is not None else '',
-                        )
+                        _code_for_ccy = tx_code or (str(asset_row['Code']) if asset_row is not None else '')
+                        _cls_for_ccy  = tx_asset_class or (str(asset_row['Asset_Class']) if asset_row is not None else '')
+                        tx_price_ccy  = infer_currency(_code_for_ccy, _cls_for_ccy)
                     st.session_state['pending_transactions'].append({
                         'Date':           new_date_str,
-                        'Asset_Class':    asset_row['Asset_Class'] if asset_row is not None else '',
-                        'Platform':       asset_row['Platform']    if asset_row is not None else '',
-                        'Name':           e['asset_name'],
-                        'Code':           asset_row['Code']        if asset_row is not None else '',
+                        'Asset_Class':    tx_asset_class,
+                        'Platform':       tx_platform,
+                        'Name':           tx_name,
+                        'Code':           tx_code,
                         'Type':           e['type'],
                         'Amount_CNY':     round(e['amount'], 2),
                         'Price':          round(price_val, 4),
-                        'Price_Currency': _price_ccy,
+                        'Price_Currency': tx_price_ccy,
                         'Fee_CNY':        round(e.get('fee', 0.0), 2),
                     })
 

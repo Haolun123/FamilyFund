@@ -141,8 +141,34 @@ def _fetch_hk_with_fx(symbol: str, label: str = '') -> dict:
     except Exception as e:
         return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)}
 
+def _fetch_sap_with_fx() -> dict:
+    """SAP.DE：法兰克福股价（EUR）+ EUR/CNY 实时汇率。"""
+    try:
+        from market_monitor import _fetch_yfinance
+        from fx_service import get_exchange_rate
+        series = _fetch_yfinance('SAP.DE', period='5d')
+        if series is None or series.empty:
+            return {'price': None, 'date': None, 'status': 'error', 'msg': 'SAP.DE 无数据'}
+        price_eur = float(series.iloc[-1])
+        nav_date  = str(series.index[-1])[:10]
+        try:
+            eur_cny = float(get_exchange_rate('EUR', 'CNY'))
+        except Exception as fx_err:
+            return {'price': None, 'date': None, 'status': 'error',
+                    'msg': f'SAP EUR/CNY 汇率获取失败: {fx_err}'}
+        return {
+            'price':    price_eur,
+            'currency': 'EUR',
+            'fx_rate':  eur_cny,
+            'date':     nav_date,
+            'status':   'ok',
+            'msg':      f'SAP.DE (EUR × {eur_cny:.4f})',
+        }
+    except Exception as e:
+        return {'price': None, 'date': None, 'status': 'error', 'msg': str(e)}
 
-# ── 路由 ──────────────────────────────────────────────────
+
+
 
 def _route(code: str) -> dict:
     """单个 Code 路由到对应数据源。"""
@@ -172,9 +198,9 @@ def _route(code: str) -> dict:
     if re.match(r'^\d+\.HK$', code, re.IGNORECASE):
         return _fetch_hk_with_fx(code, f'港股 {code}')
 
-    # SAP：价格用法兰克福 SAP.DE（EUR），基本面另走 yf_symbols.json 中的 SAP ADR
+    # SAP：价格用法兰克福 SAP.DE（EUR）+ EUR/CNY 汇率
     if code == 'SAP.DE':
-        return _fetch_yf('SAP.DE', 'SAP 法兰克福 (EUR)')
+        return _fetch_sap_with_fx()
 
     # 无法自动拉取（固定收益等）
     return {
