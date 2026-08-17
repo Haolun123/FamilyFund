@@ -2219,6 +2219,17 @@ with tab_update:
             st.success(f"已保存 {len(save_df)} 条记录 (日期: {new_date_str}) 到 {os.path.basename(csv_path)}")
             st.balloons()
 
+            # ─── 自动生成 MD 周报 ───
+            try:
+                from weekly_report import generate_weekly_report
+                _report_path = generate_weekly_report(
+                    data_dir=os.path.dirname(csv_path),
+                    this_week=new_date_str,
+                )
+                st.info(f"📝 周报已生成：{os.path.basename(_report_path)}")
+            except Exception as _rpt_err:
+                st.warning(f"周报生成失败（不影响数据）：{_rpt_err}")
+
             # 检测新建仓标的是否有研报，暂存到 session_state，等用户确认后再 rerun
             _new_entries = [
                 e for e in st.session_state.get('rebalance_entries', [])
