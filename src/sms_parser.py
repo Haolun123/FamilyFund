@@ -360,14 +360,48 @@ def _match_holding(fund_name: str, holdings: list[dict]) -> tuple[str | None, st
     return None, None
 
 
+# ── sms_code_map：持久化精确匹配 ────────────────────────────
+
+def load_sms_map(data_dir: str) -> dict:
+    """读取 sms_code_map.json，返回 {fund_name: code} 字典。"""
+    import json, os
+    path = os.path.join(data_dir, 'sms_code_map.json')
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_sms_map(data_dir: str, sms_map: dict) -> None:
+    """写入 sms_code_map.json（原子写入，覆盖全量）。"""
+    import json, os
+    path = os.path.join(data_dir, 'sms_code_map.json')
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(sms_map, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def add_sms_mapping(data_dir: str, fund_name: str, code: str, name: str) -> None:
+    """添加一条 fund_name → code 映射并持久化。"""
+    sms_map = load_sms_map(data_dir)
+    sms_map[fund_name] = {'code': code, 'name': name}
+    save_sms_map(data_dir, sms_map)
+
+
 # ── 公开 API ──────────────────────────────────────────────
 
-def parse_sms(text: str, holdings: list[dict] | None = None) -> list[dict]:
+def parse_sms(text: str, holdings: list[dict] | None = None,
+              data_dir: str | None = None) -> list[dict]:
     """解析短信文本（支持多条，用空行分隔）。
 
     Args:
         text:     粘贴的短信内容（多条用空行分隔）
         holdings: 持仓列表 [{'code': str, 'name': str}]，用于基金名称匹配
+        data_dir: $FAMILYFUND_DATA 路径，用于读取 sms_code_map.json 精确匹配
 
     Returns:
         解析结果列表，每条对应一条短信
@@ -376,26 +410,43 @@ def parse_sms(text: str, holdings: list[dict] | None = None) -> list[dict]:
     blocks = [b.strip() for b in re.split(r'\n\s*\n', text) if b.strip()]
     results = []
 
+    # 加载持久化精确匹配 map（优先于模糊匹配）
+    sms_map = load_sms_map(data_dir) if data_dir else {}
+
     def _attach_match(parsed: dict) -> dict:
         """为解析结果附加持仓匹配。"""
-        if holdings and not parsed['is_gold']:
-            # _brand 字段存在时，先过滤同品牌持仓再匹配，避免跨公司误匹配
-            brand = parsed.pop('_brand', None)
+        if parsed['is_gold']:
+            parsed.pop('_brand', None)
+            if holdings:
+                gold = [h for h in holdings if 'GOLD' in h.get('code', '').upper()
+                        or '黄金' in h.get('name', '')]
+                if gold:
+                    parsed['matched_code'] = gold[0]['code']
+                    parsed['matched_name'] = gold[0]['name']
+            return parsed
+
+        brand = parsed.pop('_brand', None)
+
+        # 1. 优先走精确 map 匹配（不依赖 holdings）
+        fund_name = parsed['fund_name']
+        if fund_name in sms_map:
+            entry = sms_map[fund_name]
+            parsed['matched_code'] = entry['code']
+            parsed['matched_name'] = entry['name']
+            return parsed
+
+        # 2. 模糊匹配（需要 holdings）
+        if holdings:
             candidate_holdings = holdings
             if brand:
                 branded = [h for h in holdings if brand in h.get('name', '')]
                 if branded:
                     candidate_holdings = branded
-            code, name = _match_holding(parsed['fund_name'], candidate_holdings)
+            code, name = _match_holding(fund_name, candidate_holdings)
             parsed['matched_code'] = code
             parsed['matched_name'] = name
-        elif parsed['is_gold'] and holdings:
-            parsed.pop('_brand', None)
-            gold = [h for h in holdings if 'GOLD' in h.get('code', '').upper()
-                    or '黄金' in h.get('name', '')]
-            if gold:
-                parsed['matched_code'] = gold[0]['code']
-                parsed['matched_name'] = gold[0]['name']
+
+        return parsed
         return parsed
 
     for block in blocks:

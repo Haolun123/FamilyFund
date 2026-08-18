@@ -1310,7 +1310,7 @@ with tab_update:
                 ].iterrows()
                 if pd.notna(row['Name']) and pd.notna(row['Code'])
             ]
-            _parsed = parse_sms(sms_text, _holdings)
+            _parsed = parse_sms(sms_text, _holdings, data_dir=os.path.dirname(csv_path))
             st.session_state['sms_parsed'] = _parsed
             st.rerun()
         else:
@@ -1352,6 +1352,9 @@ with tab_update:
                         _parsed[i]['matched_name'] = _name
                         _parsed[i]['_is_new_position'] = False
                         st.session_state['sms_parsed'] = _parsed
+                        # 自动保存映射，下次同名短信精确匹配
+                        from sms_parser import add_sms_mapping
+                        add_sms_mapping(os.path.dirname(csv_path), r['fund_name'], _code, _name)
 
                 with _tab_new:
                     st.caption("填写新标的信息，系统会验证 Code 并查询基金名称确认无误后建仓。")
@@ -1424,6 +1427,10 @@ with tab_update:
                                 'Currency':    _new_ccy,
                                 'yf_symbol':   _new_yf.strip(),
                             }
+                            # 保存映射，下次同名短信精确匹配
+                            from sms_parser import add_sms_mapping
+                            add_sms_mapping(os.path.dirname(csv_path),
+                                            r['fund_name'], _new_code.strip(), _new_name.strip())
                             # 后续同 fund_name 的未匹配条目自动关联为追加买入
                             _auto_linked = 0
                             for j in range(i + 1, len(_parsed)):
@@ -1474,6 +1481,26 @@ with tab_update:
             st.rerun()
 
     st.divider()
+
+    # ─── 短信匹配 Map 管理 ───
+    with st.expander("🗂️ 短信匹配记录（sms_code_map）", expanded=False):
+        from sms_parser import load_sms_map, save_sms_map
+        _sms_map = load_sms_map(os.path.dirname(csv_path))
+        if _sms_map:
+            st.caption(f"共 {len(_sms_map)} 条精确匹配记录，下次解析同名短信自动命中，无需手动匹配。")
+            _del_key = None
+            for _fn, _entry in _sms_map.items():
+                _mc1, _mc2, _mc3 = st.columns([5, 3, 1])
+                _mc1.markdown(f"`{_fn}`")
+                _mc2.markdown(f"→ **{_entry['name']}** `{_entry['code']}`")
+                if _mc3.button("删除", key=f"del_smsmap_{_fn}"):
+                    _del_key = _fn
+            if _del_key:
+                del _sms_map[_del_key]
+                save_sms_map(os.path.dirname(csv_path), _sms_map)
+                st.rerun()
+        else:
+            st.caption("暂无记录。手动匹配或新建仓确认后自动保存。")
 
     # ─── 合成标普β定投建议（道指预付池 + 纳指类超额镜像抵扣）───
     with st.expander("🔀 合成标普β定投建议（建信纳指 + 道指预付池）", expanded=False):
