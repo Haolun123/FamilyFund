@@ -26,6 +26,32 @@ from datetime import date
 
 # ── 天天基金 ──────────────────────────────────────────────
 
+def lookup_fund_name(code: str) -> str | None:
+    """通过天天基金搜索接口查询基金名称（用于新建仓验证）。
+
+    Returns:
+        基金名称字符串，或 None（查询失败 / 无精确匹配）
+    """
+    try:
+        import requests
+        url = (
+            f'https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx'
+            f'?callback=&m=1&key={code}'
+        )
+        r = requests.get(
+            url,
+            headers={'Referer': 'https://fund.eastmoney.com/'},
+            timeout=5,
+        )
+        datas = r.json().get('Datas', [])
+        for d in datas:
+            if d.get('CODE') == code:
+                return d.get('NAME')
+        return None
+    except Exception:
+        return None
+
+
 def _fetch_eastmoney(code: str) -> dict:
     """拉取天天基金最新净值。"""
     try:

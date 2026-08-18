@@ -1333,20 +1333,103 @@ with tab_update:
                 f"金额 ¥{r['amount']:,.2f}{_gold_str} · 净值 {r['nav']:.4f} · 份额 {r['shares']}"
             )
             if not r['matched_code']:
-                _options = [''] + [
-                    f"{row['Name']} ({row['Code']})"
-                    for _, row in st.session_state['update_template'][
-                        st.session_state['update_template']['Asset_Class'] != 'Cash'
-                    ].iterrows()
-                    if pd.notna(row['Name'])
-                ]
-                _sel = st.selectbox(f"手动选择持仓（第{i+1}条）", _options, key=f"sms_match_{i}")
-                if _sel:
-                    _name, _code = _sel.rsplit(' (', 1)
-                    _code = _code.rstrip(')')
-                    _parsed[i]['matched_code'] = _code
-                    _parsed[i]['matched_name'] = _name
-                    st.session_state['sms_parsed'] = _parsed
+                # 未匹配：提供两种处理方式
+                _tab_match, _tab_new = st.tabs(["🔗 匹配现有持仓", "🆕 新建仓"])
+
+                with _tab_match:
+                    _options = [''] + [
+                        f"{row['Name']} ({row['Code']})"
+                        for _, row in st.session_state['update_template'][
+                            st.session_state['update_template']['Asset_Class'] != 'Cash'
+                        ].iterrows()
+                        if pd.notna(row['Name'])
+                    ]
+                    _sel = st.selectbox(f"选择持仓", _options, key=f"sms_match_{i}")
+                    if _sel:
+                        _name, _code = _sel.rsplit(' (', 1)
+                        _code = _code.rstrip(')')
+                        _parsed[i]['matched_code'] = _code
+                        _parsed[i]['matched_name'] = _name
+                        _parsed[i]['_is_new_position'] = False
+                        st.session_state['sms_parsed'] = _parsed
+
+                with _tab_new:
+                    st.caption("填写新标的信息，系统会验证 Code 并查询基金名称确认无误后建仓。")
+                    _nc1, _nc2 = st.columns(2)
+                    _new_code = _nc1.text_input("Code", key=f"new_code_{i}",
+                        placeholder="如 513400 / HK9992 / 600309.SS")
+                    _new_cls  = _nc2.selectbox("Asset_Class", options=sorted(VALID_ASSET_CLASSES),
+                        key=f"new_cls_{i}")
+                    _nc3, _nc4 = st.columns(2)
+                    _new_name = _nc3.text_input("Name（持仓显示名）", key=f"new_name_{i}",
+                        placeholder="如 道指ETF")
+                    _new_platform = _nc4.text_input("Platform", key=f"new_platform_{i}",
+                        placeholder="如 标普场外")
+                    _nc5, _nc6 = st.columns(2)
+                    _new_ccy = _nc5.selectbox("Currency", options=["CNY","HKD","EUR","USD"],
+                        key=f"new_ccy_{i}")
+                    _new_yf  = _nc6.text_input("yf_symbol（可选，个股用）", key=f"new_yf_{i}",
+                        placeholder="如 0700.HK / SAP.DE")
+
+                    # 验证按钮：拉取净值 + 查询基金名称
+                    if st.button(f"🔍 验证 Code 并拉取净值", key=f"verify_code_{i}"):
+                        if not _new_code.strip():
+                            st.warning("请先填写 Code")
+                        else:
+                            from price_fetcher import _route, lookup_fund_name
+                            import re as _re
+                            _vcode = _new_code.strip()
+                            with st.spinner(f"验证 {_vcode}..."):
+                                _vres = _route(_vcode)
+                            st.session_state[f'_verify_{i}'] = {
+                                'code': _vcode,
+                                'result': _vres,
+                                'fund_name': lookup_fund_name(_vcode) if _re.match(r'^\d{6}$', _vcode) else None,
+                            }
+                            st.rerun()
+
+                    # 显示验证结果
+                    if f'_verify_{i}' in st.session_state:
+                        _v = st.session_state[f'_verify_{i}']
+                        _vres = _v['result']
+                        if _vres['status'] == 'ok':
+                            _vname = _v.get('fund_name')
+                            _vname_str = f"\n\n   天天基金名称：**{_vname}**" if _vname else ""
+                            st.success(
+                                f"✅ 验证成功\n\n"
+                                f"   Code：`{_v['code']}`{_vname_str}\n\n"
+                                f"   最新净值：**{_vres['price']:.4f}**（{_vres.get('date','')}）\n\n"
+                                f"   请确认与您要建仓的标的一致"
+                            )
+                        else:
+                            st.error(f"❌ 拉取失败：{_vres['msg']}，请检查 Code 是否正确")
+
+                    # 确认建仓按钮（需要验证成功才能点）
+                    _verify_ok = (
+                        f'_verify_{i}' in st.session_state and
+                        st.session_state[f'_verify_{i}']['result']['status'] == 'ok' and
+                        st.session_state[f'_verify_{i}']['code'] == _new_code.strip()
+                    )
+                    if st.button(f"✅ 确认新建仓", key=f"confirm_new_{i}",
+                                 type="primary", disabled=not _verify_ok):
+                        if _new_name.strip() and _new_cls:
+                            _parsed[i]['matched_code'] = _new_code.strip()
+                            _parsed[i]['matched_name'] = _new_name.strip()
+                            _parsed[i]['_is_new_position'] = True
+                            _parsed[i]['_new_asset'] = {
+                                'Code':        _new_code.strip(),
+                                'Name':        _new_name.strip(),
+                                'Asset_Class': _new_cls,
+                                'Platform':    _new_platform.strip() or '场外',
+                                'Currency':    _new_ccy,
+                                'yf_symbol':   _new_yf.strip(),
+                            }
+                            # 清理验证缓存
+                            st.session_state.pop(f'_verify_{i}', None)
+                            st.session_state['sms_parsed'] = _parsed
+                            st.rerun()
+                        else:
+                            st.warning("Name 和 Asset_Class 为必填项")
 
         if not _any_error:
             if st.button("✅ 应用解析结果", key="sms_apply", type="primary"):
@@ -1354,19 +1437,23 @@ with tab_update:
                 for r in _parsed:
                     if r.get('parse_error') or not r['matched_code']:
                         continue
-                    # 填入调仓辅助器（Shares / NCF / Cash 统一由调仓辅助器"应用"派生）
+                    _is_new = r.get('_is_new_position', False)
+                    _new_asset = r.get('_new_asset', {})
                     st.session_state['rebalance_entries'].append({
                         'type':        r['action'],
-                        'asset_name':  r['matched_name'],
+                        'asset_name':  r['matched_name'] if not _is_new else '新增标的',
                         'asset_label': f"{r['matched_name']} ({r['matched_code']})",
                         'amount':      r['amount'],
-                        'price':       r['nav'],   # 成本净值，只进 transaction.csv
+                        'price':       r['nav'],
                         'fee':         0.0,
-                        'shares':      float(r['shares']),  # 确认份额，由调仓辅助器写入 Shares
-                        'is_new':      False,
-                        'new_asset':   {},
+                        'shares':      float(r['shares']),
+                        'is_new':      _is_new,
+                        'new_asset':   _new_asset if _is_new else {},
                     })
                     _applied += 1
+                # 清理验证缓存
+                for i in range(len(_parsed)):
+                    st.session_state.pop(f'_verify_{i}', None)
                 del st.session_state['sms_parsed']
                 st.success(f"✅ 已登记 {_applied} 条交易到调仓辅助器，请在步骤二确认后点「应用到持仓表」")
                 st.rerun()
