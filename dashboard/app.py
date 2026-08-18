@@ -1424,9 +1424,20 @@ with tab_update:
                                 'Currency':    _new_ccy,
                                 'yf_symbol':   _new_yf.strip(),
                             }
+                            # 后续同 fund_name 的未匹配条目自动关联为追加买入
+                            _auto_linked = 0
+                            for j in range(i + 1, len(_parsed)):
+                                if (not _parsed[j].get('matched_code') and
+                                        _parsed[j].get('fund_name') == r['fund_name']):
+                                    _parsed[j]['matched_code'] = _new_code.strip()
+                                    _parsed[j]['matched_name'] = _new_name.strip()
+                                    _parsed[j]['_is_new_position'] = False  # 追加买入
+                                    _auto_linked += 1
                             # 清理验证缓存
                             st.session_state.pop(f'_verify_{i}', None)
                             st.session_state['sms_parsed'] = _parsed
+                            if _auto_linked:
+                                st.toast(f"已自动关联后续 {_auto_linked} 条同标的短信为追加买入")
                             st.rerun()
                         else:
                             st.warning("Name 和 Asset_Class 为必填项")
