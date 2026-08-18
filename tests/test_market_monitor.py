@@ -160,7 +160,7 @@ class TestLookupMultiplier:
         assert lookup_multiplier(30, 20, 'sp500') == '0.3x'
 
     def test_sp500_watch_high_pe_mid_vix(self):
-        assert lookup_multiplier(33, 27, 'sp500') == '观望'
+        assert lookup_multiplier(33, 27, 'sp500') == '暂停'
 
     def test_sp500_03x_high_pe_high_vix(self):
         assert lookup_multiplier(33, 36, 'sp500') == '0.3x'
@@ -194,7 +194,7 @@ class TestLookupMultiplier:
         assert lookup_multiplier(15, 32, 'ndx100') == '顶格'
 
     def test_ndx100_watch(self):
-        assert lookup_multiplier(38, 27, 'ndx100') == '观望'
+        assert lookup_multiplier(38, 27, 'ndx100') == '暂停'
 
     # 边界
     def test_none_pe(self):

@@ -75,13 +75,13 @@ class TestOwnSapSummary:
     def test_total_cost(self, own_sap_csv):
         df = load_own_sap(own_sap_csv)
         s = own_sap_summary(df, fx_rate=8.0)
-        # 400 + 3000 + 400 + 3000 + 880 - 3680 = 4000
-        assert s['total_cost'] == 4000.0
+        # 400 + 3000 + 400 + 3000 - 3680 = 3120 (Dividend 排除成本基准，只计份额)
+        assert s['total_cost'] == 3120.0
 
     def test_avg_cost(self, own_sap_csv):
         df = load_own_sap(own_sap_csv)
         s = own_sap_summary(df, fx_rate=8.0)
-        assert s['avg_cost_cny'] == round(4000.0 / 5.33, 2)
+        assert s['avg_cost_cny'] == round(3120.0 / 5.33, 2)
 
     def test_break_even(self, own_sap_csv):
         df = load_own_sap(own_sap_csv)
@@ -107,8 +107,8 @@ class TestMoveSapSummary:
     def test_total_cost(self, move_sap_csv):
         df = load_move_sap(move_sap_csv)
         s = move_sap_summary(df, fx_rate=8.0)
-        # 8640 + 5760 + 456 = 14856
-        assert s['total_cost'] == 14856.0
+        # 8640 + 5760 = 14400 (Dividend 456 排除成本基准)
+        assert s['total_cost'] == 14400.0
 
 
 # ─── Own SAP Edge Cases ───
@@ -136,9 +136,9 @@ class TestCombinedCostBasis:
         result = compute_sap_cost_basis(own_sap_csv, move_sap_csv)
         assert 'own_sap' in result
         assert 'move_sap' in result
-        assert result['own_sap']['total_cost'] == 4000.0
+        assert result['own_sap']['total_cost'] == 3120.0
         assert result['own_sap']['total_shares'] == 5.33
-        assert result['move_sap']['total_cost'] == 14856.0
+        assert result['move_sap']['total_cost'] == 14400.0
         assert result['move_sap']['total_shares'] == 10.3
 
     def test_compute_with_only_own(self, own_sap_csv):
@@ -178,11 +178,11 @@ class TestNavEngineIntegration:
 
         own_row = cb[cb['Name'] == 'Own SAP']
         assert len(own_row) == 1
-        assert own_row.iloc[0]['Cost_Basis'] == 4000.0
+        assert own_row.iloc[0]['Cost_Basis'] == 3120.0
 
         move_row = cb[cb['Name'] == 'Move SAP']
         assert len(move_row) == 1
-        assert move_row.iloc[0]['Cost_Basis'] == 14856.0
+        assert move_row.iloc[0]['Cost_Basis'] == 14400.0
 
     def test_cost_basis_without_sap(self, tmp_path):
         """Without SAP CSVs, Company_Stock uses regular NCF-based cost."""
