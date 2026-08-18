@@ -1706,6 +1706,7 @@ with tab_update:
 
             if st.button("✅ 应用到持仓表", type="primary", key="rb_apply"):
                 template = st.session_state['update_template'].copy()
+                _template_before = template.copy()  # 应用前快照，用于 diff 高亮
 
                 # 预检警告（不阻断）
                 if new_cash_tv < 0:
@@ -1869,6 +1870,36 @@ with tab_update:
 
                 st.session_state['update_template'] = template
                 st.session_state['rebalance_entries'] = []
+
+                # 记录 diff：Shares / NCF 有变化的标的
+                _diff_items = []
+                for _, row in template.iterrows():
+                    name = row.get('Name', '')
+                    code = str(row.get('Code', ''))
+                    before_row = _template_before[_template_before['Name'] == name]
+                    if before_row.empty:
+                        # 新增标的
+                        _diff_items.append({
+                            'name': name, 'code': code,
+                            'shares_before': 0.0, 'shares_after': float(row.get('Shares', 0)),
+                            'ncf_delta': float(row.get('Net_Cash_Flow', 0)),
+                            'is_new': True,
+                        })
+                    else:
+                        b = before_row.iloc[0]
+                        s_before = float(b.get('Shares', 0))
+                        s_after  = float(row.get('Shares', 0))
+                        ncf_delta = float(row.get('Net_Cash_Flow', 0)) - float(b.get('Net_Cash_Flow', 0))
+                        if abs(s_after - s_before) > 0.001 or abs(ncf_delta) > 0.01:
+                            _diff_items.append({
+                                'name': name, 'code': code,
+                                'shares_before': s_before, 'shares_after': s_after,
+                                'ncf_delta': ncf_delta,
+                                'is_new': False,
+                            })
+                if _diff_items:
+                    st.session_state['_apply_diff'] = _diff_items
+
                 st.rerun()
 
         if entries and st.button("清空所有条目", key="rb_clear", type="secondary"):
@@ -1878,6 +1909,28 @@ with tab_update:
     # ─── Editable table ───
     st.subheader("步骤三：确认持仓数据 / 刷新净值")
     st.caption("调仓辅助器应用后，Shares / NCF 已自动更新。点「刷新净值」拉取最新 Current_Price，固定收益如拉取失败请手动填写，最后重算市值。")
+
+    # 调仓辅助器应用后的 diff 高亮
+    if '_apply_diff' in st.session_state:
+        _diff = st.session_state['_apply_diff']
+        _diff_col, _diff_close = st.columns([10, 1])
+        with _diff_col:
+            _diff_lines = []
+            for d in _diff:
+                if d['is_new']:
+                    _diff_lines.append(f"🆕 **{d['name']}** 新建仓 {d['shares_after']:.2f}份（NCF +¥{d['ncf_delta']:,.0f}）")
+                else:
+                    _delta = d['shares_after'] - d['shares_before']
+                    _sign = '+' if _delta >= 0 else ''
+                    _diff_lines.append(
+                        f"📊 **{d['name']}** {d['shares_before']:.2f} → {d['shares_after']:.2f}份 "
+                        f"（**{_sign}{_delta:.2f}份**，NCF {'+' if d['ncf_delta']>=0 else ''}{d['ncf_delta']:,.0f}）"
+                    )
+            st.info("**本次应用变更：**\n\n" + "\n\n".join(_diff_lines))
+        with _diff_close:
+            if st.button("✕", key="close_apply_diff", help="关闭"):
+                del st.session_state['_apply_diff']
+                st.rerun()
 
     edited_df = st.data_editor(
         st.session_state['update_template'],
@@ -2037,19 +2090,68 @@ with tab_update:
         st.session_state['_refresh_summary'] = {'ok': _ok, 'manual': _manual, 'err': _err, 'results': _price_results}
         st.rerun()
 
+    # 单标的重试：_retry_code 标志触发
+    if st.session_state.get('_retry_code'):
+        _retry_code = st.session_state.pop('_retry_code')
+        from price_fetcher import fetch_latest_prices
+        with st.spinner(f"重试拉取 {_retry_code}..."):
+            _retry_result = fetch_latest_prices(raw_df, os.path.dirname(csv_path))
+        _res = _retry_result.get(_retry_code)
+        if _res and _res['status'] == 'ok' and _res['price'] is not None:
+            _template = st.session_state['update_template'].copy()
+            for i, row in _template.iterrows():
+                if str(row.get('Code', '')) == _retry_code:
+                    _template.at[i, 'Current_Price'] = _res['price']
+                    if _res.get('currency') and _res.get('fx_rate'):
+                        _template.at[i, 'Currency'] = _res['currency']
+                        _template.at[i, 'Exchange_Rate'] = _res['fx_rate']
+            st.session_state['update_template'] = _template
+            # 更新持久摘要里该 code 的状态
+            if '_refresh_summary' in st.session_state:
+                st.session_state['_refresh_summary']['results'][_retry_code] = _res
+                st.session_state['_refresh_summary']['ok'] += 1
+                old_status = st.session_state['_refresh_summary'].get('_retry_prev_status', {}).get(_retry_code)
+                if old_status == 'error':
+                    st.session_state['_refresh_summary']['err'] = max(0, st.session_state['_refresh_summary']['err'] - 1)
+                elif old_status == 'manual':
+                    st.session_state['_refresh_summary']['manual'] = max(0, st.session_state['_refresh_summary']['manual'] - 1)
+        st.rerun()
+
     if '_refresh_summary' in st.session_state:
-        _s = st.session_state.pop('_refresh_summary')
+        _s = st.session_state['_refresh_summary']  # 不再 pop，持久显示
         _ok, _manual, _err = _s['ok'], _s['manual'], _s['err']
-        st.success(f"已刷新 {_ok} 个标的  |  {_manual} 个需手动确认  |  {_err} 个失败")
-        # 展示详情
-        with st.expander("刷新详情", expanded=False):
+        _summary_col, _close_col = st.columns([10, 1])
+        with _summary_col:
+            if _err > 0:
+                st.warning(f"已刷新 {_ok} 个  |  ⚠️ {_manual} 个需手动  |  ❌ {_err} 个失败（可单独重试）")
+            else:
+                st.success(f"已刷新 {_ok} 个标的  |  {_manual} 个需手动确认")
+        with _close_col:
+            if st.button("✕", key="close_refresh_summary", help="关闭"):
+                del st.session_state['_refresh_summary']
+                st.rerun()
+        with st.expander("刷新详情", expanded=(_err > 0)):
             for code, res in _s['results'].items():
                 if res['status'] == 'ok':
                     st.markdown(f"✅ `{code}` — {res['price']:.4f}（{res['msg']}，{res.get('date','')}）")
                 elif res['status'] == 'manual':
-                    st.markdown(f"⚠️ `{code}` — {res['msg']}")
+                    _m_col1, _m_col2 = st.columns([6, 1])
+                    _m_col1.markdown(f"⚠️ `{code}` — {res['msg']}")
+                    if _m_col2.button("重试", key=f"retry_{code}_manual"):
+                        st.session_state['_retry_code'] = code
+                        if '_retry_prev_status' not in st.session_state['_refresh_summary']:
+                            st.session_state['_refresh_summary']['_retry_prev_status'] = {}
+                        st.session_state['_refresh_summary']['_retry_prev_status'][code] = 'manual'
+                        st.rerun()
                 else:
-                    st.markdown(f"❌ `{code}` — {res['msg']}")
+                    _e_col1, _e_col2 = st.columns([6, 1])
+                    _e_col1.markdown(f"❌ `{code}` — {res['msg']}")
+                    if _e_col2.button("重试", key=f"retry_{code}_err"):
+                        st.session_state['_retry_code'] = code
+                        if '_retry_prev_status' not in st.session_state['_refresh_summary']:
+                            st.session_state['_refresh_summary']['_retry_prev_status'] = {}
+                        st.session_state['_refresh_summary']['_retry_prev_status'][code] = 'error'
+                        st.rerun()
     # ─── Validation ───
 
     def validate_snapshot(df, prev_df, new_date_str, last_date_str):
