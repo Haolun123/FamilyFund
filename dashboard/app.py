@@ -2750,6 +2750,9 @@ with tab_sap:
             if combined_pl_pct is not None:
                 st.metric("总盈亏%", f"{combined_pl_pct:+.2f}%")
             st.caption(f"当前股价: {sap_price_eur:.2f} EUR")
+            if combined_shares > 0 and combined_cost > 0 and sap_fx_rate > 0:
+                combined_break_even = combined_cost / combined_shares / sap_fx_rate
+                st.caption(f"盈亏平衡价: {combined_break_even:.2f} EUR")
 
         st.divider()
 
