@@ -82,6 +82,7 @@
 |---|----|-------|
 | 1 | 能力圈定义填充 | 用户主动提议时(`memory/user_capability_circle.md` stub)|
 | 2 | ~~Memory → GitHub 私有 repo 迁移~~ ✅ 2026-06-04 完成 | ~/.claude/projects/ 整体作为 git repo,4 项目共 23 memory,见 memory/project_memory_sync_plan.md |
+| 3 | **合成标普β框架重新评估**（QDII额度受限导致框架失效）| 9月观察QDII额度是否放出；若纳指长期买不满目标，考虑放弃合成框架，改为道指+纳指各自独立定投（见 `qdii_premium_analysis_2026.md` 第十一节）|
 
 ---
 
