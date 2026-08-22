@@ -79,6 +79,7 @@ def generate_weekly_report(
     nav_tw = float(nav_row_tw['NAV'].iloc[0]) if not nav_row_tw.empty else 0.0
     nav_lw = float(nav_row_lw['NAV'].iloc[0]) if not nav_row_lw.empty else 0.0
     ncf_tw = float(nav_row_tw['Net_Cash_Flow'].iloc[0]) if not nav_row_tw.empty else 0.0
+    ncf_lw = float(nav_row_lw['Net_Cash_Flow'].iloc[0]) if not nav_row_lw.empty else 0.0
 
     # 本周交易
     cutoff = last_week + 'T' if last_week else '1970-01-01'
@@ -134,7 +135,9 @@ def generate_weekly_report(
         lines += [f'| 单位净值 | {nav_tw:.4f} | {nav_lw:.4f} | {nav_tw-nav_lw:+.4f} ({(nav_tw/nav_lw-1)*100:+.2f}%) |']
     else:
         lines += [f'| 单位净值 | {nav_tw:.4f} | — | — |']
-    lines += [f'| 本周外部入金（Cash+SAP口径） | {_fmt(ncf_tw)} | — | — |']
+    _ncf_delta = ncf_tw - ncf_lw
+    _ncf_lw_str = _fmt(ncf_lw) if ncf_lw else '—'
+    lines += [f'| 外部入金（Cash+SAP口径） | {_fmt(ncf_tw)} | {_ncf_lw_str} | {_ncf_delta:+,.0f} |']
     lines += [f'| 本周主动买入 | {_fmt(tx_buy)} | — | — |']
     if tx_sell > 0:
         lines += [f'| 本周卖出 | {_fmt(tx_sell)} | — | — |']
