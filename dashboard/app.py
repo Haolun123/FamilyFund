@@ -2195,12 +2195,16 @@ with tab_update:
         # 写入 session_state 的编辑模板
         _template = st.session_state['update_template'].copy()
         _ok, _manual, _err = 0, 0, 0
+        import math as _math
         for i, row in _template.iterrows():
             code = str(row.get('Code', ''))
             res = _price_results.get(code)
             if res is None:
                 continue
-            if res['status'] == 'ok' and res['price'] is not None:
+            _price_ok = (res['status'] == 'ok'
+                         and res['price'] is not None
+                         and not _math.isnan(float(res['price'])))
+            if _price_ok:
                 _template.at[i, 'Current_Price'] = res['price']
                 # 港股等带外币的资产：同步更新 Currency / Exchange_Rate
                 if res.get('currency') and res.get('fx_rate'):
@@ -2218,11 +2222,17 @@ with tab_update:
     # 单标的重试：_retry_code 标志触发
     if st.session_state.get('_retry_code'):
         _retry_code = st.session_state.pop('_retry_code')
+        # 先把用户在表格里手动编辑的内容 sync 回 update_template，避免覆盖
+        st.session_state['update_template'] = edited_df.copy()
         from price_fetcher import fetch_latest_prices
+        import math as _math
         with st.spinner(f"重试拉取 {_retry_code}..."):
             _retry_result = fetch_latest_prices(raw_df, os.path.dirname(csv_path))
         _res = _retry_result.get(_retry_code)
-        if _res and _res['status'] == 'ok' and _res['price'] is not None:
+        _retry_price_ok = (_res and _res['status'] == 'ok'
+                           and _res['price'] is not None
+                           and not _math.isnan(float(_res['price'])))
+        if _retry_price_ok:
             _template = st.session_state['update_template'].copy()
             for i, row in _template.iterrows():
                 if str(row.get('Code', '')) == _retry_code:
@@ -2240,6 +2250,18 @@ with tab_update:
                     st.session_state['_refresh_summary']['err'] = max(0, st.session_state['_refresh_summary']['err'] - 1)
                 elif old_status == 'manual':
                     st.session_state['_refresh_summary']['manual'] = max(0, st.session_state['_refresh_summary']['manual'] - 1)
+        else:
+            # 拉取失败或返回 NaN：保留 update_template 不变（已 sync），更新摘要状态
+            if _res and '_refresh_summary' in st.session_state:
+                _res_fail = dict(_res)
+                if _res_fail.get('price') is not None:
+                    try:
+                        if _math.isnan(float(_res_fail['price'])):
+                            _res_fail['status'] = 'error'
+                            _res_fail['msg'] = f"返回 NaN（{_res_fail.get('msg', '')}）"
+                    except Exception:
+                        pass
+                st.session_state['_refresh_summary']['results'][_retry_code] = _res_fail
         st.rerun()
 
     if '_refresh_summary' in st.session_state:
