@@ -42,7 +42,8 @@ def load_historical_cost(data_dir: str) -> dict:
 
 
 def save_historical_cost(data_dir: str, cost_map: dict) -> None:
-    """写入 historical_cost.json（保留元信息字段，原子写入）。"""
+    """写入 historical_cost.json（保留元信息字段，原子写入，写前备份到 backups/，保留10份）。"""
+    import shutil
     path = _json_path(data_dir)
     existing = {}
     if os.path.exists(path):
@@ -51,6 +52,22 @@ def save_historical_cost(data_dir: str, cost_map: dict) -> None:
                 existing = json.load(f)
         except Exception:
             pass
+        # 写前备份
+        try:
+            backup_dir = os.path.join(data_dir, 'backups')
+            os.makedirs(backup_dir, exist_ok=True)
+            ts = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+            shutil.copy2(path, os.path.join(backup_dir, f'historical_cost_{ts}.json'))
+            # 只保留最近10份
+            all_bk = sorted([
+                f for f in os.listdir(backup_dir)
+                if f.startswith('historical_cost_') and f.endswith('.json')
+            ])
+            for old in all_bk[:-10]:
+                os.remove(os.path.join(backup_dir, old))
+        except Exception:
+            pass  # 备份失败不阻断写入
+
     meta = {k: v for k, v in existing.items() if k.startswith('_')}
     meta['_updated'] = pd.Timestamp.now().strftime('%Y-%m-%d')
     tmp = path + '.tmp'
