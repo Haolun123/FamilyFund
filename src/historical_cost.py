@@ -140,10 +140,10 @@ def roll_historical_cost(data_dir: str, portfolio_df: pd.DataFrame) -> dict:
         cur_fx = float(cur_rows.iloc[0].get('Exchange_Rate', 1.0))
         if currency == 'CNY':
             entry['avg_cost'] = round(new_avg_cny, 6)
+            entry.pop('_avg_cost_cny', None)  # CNY 标的不需要，avg_cost 即人民币均价
         else:
             entry['avg_cost'] = round(new_avg_cny / cur_fx, 6) if cur_fx > 0 else avg_cost_raw
-
-        entry['_avg_cost_cny'] = round(new_avg_cny, 6)  # 缓存人民币均价，展示用
+            entry['_avg_cost_cny'] = round(new_avg_cny, 6)  # 仅非 CNY 标的缓存人民币均价
         entry['current_shares'] = round(current_shares, 6)  # 当前份额，冗余存储供外部使用
 
     save_historical_cost(data_dir, cost_map)
@@ -214,18 +214,23 @@ def compute_historical_pl(
             continue
 
         entry = cost_map[code]
-        # 优先用缓存的人民币均价
-        avg_cost_cny = entry.get('_avg_cost_cny')
-        if avg_cost_cny is None:
-            avg_cost_raw = entry.get('avg_cost')
-            if avg_cost_raw is None:
+        avg_cost_raw = entry.get('avg_cost')
+        if avg_cost_raw is None:
+            continue
+        try:
+            avg_cost_raw = float(avg_cost_raw)
+            if math.isnan(avg_cost_raw) or avg_cost_raw <= 0:
                 continue
-            try:
-                avg_cost_raw = float(avg_cost_raw)
-            except (TypeError, ValueError):
-                continue
-            currency = entry.get('currency', 'CNY')
-            avg_cost_cny = avg_cost_raw * exchange_rate if currency != 'CNY' else avg_cost_raw
+        except (TypeError, ValueError):
+            continue
+
+        currency = entry.get('currency', 'CNY')
+        if currency == 'CNY':
+            avg_cost_cny = avg_cost_raw
+        else:
+            # 非 CNY：优先用缓存的 _avg_cost_cny，没有则用 avg_cost × 实时汇率
+            cached = entry.get('_avg_cost_cny')
+            avg_cost_cny = float(cached) if cached is not None else avg_cost_raw * exchange_rate
 
         try:
             avg_cost_cny = float(avg_cost_cny)
