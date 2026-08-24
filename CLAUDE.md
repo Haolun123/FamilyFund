@@ -172,18 +172,21 @@ Cash 仅在**基金总览**的总资产 KPI 中体现。代码中通过 `all_cla
 
 ---
 
-## 资产类别（8 种）
+## 资产类别（9 种）
 
 ```
-US_Blend_Fund   美股宽基基金（标普500 QDII）
-US_Growth_Fund  美股成长基金（纳指100 QDII）
-CN_Index_Fund   A股指数基金（沪深300、中证A500）
-ETF_Stock       ETF与股票（红利ETF、A股个股、港股）
-Fixed_Income    固定收益（银行理财、短债基金）
-Gold            黄金（实物、纸黄金）
-Company_Stock   公司股票（SAP ESPP + RSU）
-Cash            现金储备（约10万，不追踪日常消费账户）
+US_Blend_Fund     美股宽基基金（标普500 QDII、道指ETF、场内标普/纳指ETF）
+US_Growth_Fund    美股成长基金（纳指100 QDII）
+CN_Index_Fund     A股指数基金（沪深300、中证A500）
+Smart_Beta        Smart Beta（红利低波ETF 512890）
+Individual_Stock  个股（成都银行、腾讯、万华化学、泡泡玛特等）
+Fixed_Income      固定收益（银行理财、短债基金）
+Gold              黄金（实物、纸黄金）
+Company_Stock     公司股票（SAP ESPP + RSU）
+Cash              现金储备（约10万，不追踪日常消费账户）
 ```
+
+> 2026-08-24 重分类：原 `ETF_Stock`（ETF与股票）拆分为 `Smart_Beta` 和 `Individual_Stock`，历史数据全量回溯更新。场内美股ETF（道指513400等）归入 `US_Blend_Fund`。
 
 ---
 
