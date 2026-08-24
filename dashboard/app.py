@@ -2567,6 +2567,15 @@ with tab_update:
             except Exception as _rpt_err:
                 st.warning(f"周报生成失败（不影响数据）：{_rpt_err}")
 
+            # ─── 滚动更新历史成本均价 ───
+            try:
+                from historical_cost import roll_historical_cost
+                _updated_df = pd.read_csv(csv_path)
+                _updated_df['Date'] = pd.to_datetime(_updated_df['Date']).dt.strftime('%Y-%m-%d')
+                roll_historical_cost(os.path.dirname(csv_path), _updated_df)
+            except Exception:
+                pass  # 静默失败，不影响主流程
+
             # 检测新建仓标的是否有研报，暂存到 session_state，等用户确认后再 rerun
             _new_entries = [
                 e for e in st.session_state.get('rebalance_entries', [])
