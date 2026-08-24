@@ -20,19 +20,21 @@ OUTPUT_CLASS_CHART = os.path.join(BASE_DIR, 'output', 'class_nav_trend.png')
 OUTPUT_PIE_CHART = os.path.join(BASE_DIR, 'output', 'asset_allocation.png')
 
 VALID_ASSET_CLASSES = {
-    'US_Blend_Fund', 'US_Growth_Fund', 'CN_Index_Fund', 'ETF_Stock',
+    'US_Blend_Fund', 'US_Growth_Fund', 'CN_Index_Fund',
+    'Smart_Beta', 'Individual_Stock',
     'Fixed_Income', 'Gold', 'Company_Stock', 'Cash',
 }
 
 CLASS_DISPLAY_NAMES = {
-    'US_Blend_Fund':  '美股宽基基金',
-    'US_Growth_Fund': '美股成长基金',
-    'CN_Index_Fund':  'A股指数基金',
-    'ETF_Stock':      'ETF与股票',
-    'Fixed_Income':   '固定收益',
-    'Gold':           '黄金',
-    'Company_Stock':  '公司股票',
-    'Cash':           '现金',
+    'US_Blend_Fund':    '美股宽基基金',
+    'US_Growth_Fund':   '美股成长基金',
+    'CN_Index_Fund':    'A股指数基金',
+    'Smart_Beta':       'Smart Beta',
+    'Individual_Stock': '个股',
+    'Fixed_Income':     '固定收益',
+    'Gold':             '黄金',
+    'Company_Stock':    '公司股票',
+    'Cash':             '现金',
 }
 
 REQUIRED_COLUMNS = [
@@ -578,14 +580,15 @@ def compute_attribution(
 
 
 _TARGET_ALLOC_DEFAULT = {
-    'US_Blend_Fund':  0.20,
-    'US_Growth_Fund': 0.10,
-    'CN_Index_Fund':  0.15,
-    'ETF_Stock':      0.15,
-    'Gold':           0.15,
-    'Fixed_Income':   0.10,
-    'Company_Stock':  0.10,
-    'Cash':           0.05,
+    'US_Blend_Fund':    0.20,
+    'US_Growth_Fund':   0.10,
+    'CN_Index_Fund':    0.15,
+    'Smart_Beta':       0.05,
+    'Individual_Stock': 0.10,
+    'Gold':             0.15,
+    'Fixed_Income':     0.10,
+    'Company_Stock':    0.10,
+    'Cash':             0.05,
 }
 
 

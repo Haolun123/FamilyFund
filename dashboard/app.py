@@ -365,14 +365,16 @@ with tab_dashboard:
 
     # 固定颜色映射：保证折线图和饼图颜色一致
     CLASS_COLORS = {
-        'US_Blend_Fund':   '#2196F3',  # 蓝
-        'US_Growth_Fund':  '#9C27B0',  # 紫
-        'CN_Index_Fund':   '#FF9800',  # 橙
-        'ETF_Stock':       '#4CAF50',  # 绿
-        'Fixed_Income':    '#00BCD4',  # 青
-        'Gold':            '#FFC107',  # 金
-        'Company_Stock':   '#F44336',  # 红
-        'Cash':            '#9E9E9E',  # 灰（通常不显示）
+        'US_Blend_Fund':    '#2196F3',  # 蓝
+        'US_Growth_Fund':   '#9C27B0',  # 紫
+        'CN_Index_Fund':    '#FF9800',  # 橙
+        'Smart_Beta':       '#4CAF50',  # 绿
+        'Individual_Stock': '#8BC34A',  # 浅绿
+        'Fixed_Income':     '#00BCD4',  # 青
+        'Gold':             '#FFC107',  # 金
+        'Company_Stock':    '#F44336',  # 红
+        'Cash':             '#9E9E9E',  # 灰（通常不显示）
+        'ETF_Stock':        '#4CAF50',  # 历史兼容
     }
 
     col_chart, col_pie = st.columns([3, 2])
@@ -853,13 +855,14 @@ with tab_dashboard:
         _rb_gold_bias = (_rb_gold_entry['price'] - _rb_gold_entry['ma200']) / _rb_gold_entry['ma200'] * 100
 
     _CLASS_SIGNAL = {
-        'US_Blend_Fund':  lookup_multiplier(_rb_pe_sp,  _rb_vix, 'sp500'),
-        'US_Growth_Fund': lookup_multiplier(_rb_pe_ndx, _rb_vxn, 'ndx100'),
-        'CN_Index_Fund':  lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
-        'ETF_Stock':      lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
-        'Gold':           lookup_gold_multiplier(_rb_gold_bias, _rb_vix),
-        'Fixed_Income':   '—',
-        'Company_Stock':  '—',
+        'US_Blend_Fund':    lookup_multiplier(_rb_pe_sp,  _rb_vix, 'sp500'),
+        'US_Growth_Fund':   lookup_multiplier(_rb_pe_ndx, _rb_vxn, 'ndx100'),
+        'CN_Index_Fund':    lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
+        'Smart_Beta':       lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
+        'Individual_Stock': lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
+        'Gold':             lookup_gold_multiplier(_rb_gold_bias, _rb_vix),
+        'Fixed_Income':     '—',
+        'Company_Stock':    '—',
         'Cash':           '—',
     }
 
@@ -1172,7 +1175,7 @@ with tab_dashboard:
 
                 st.caption(
                     "ℹ️ **不是预测**：历史回测告诉你「如果用这个配置」会怎样。"
-                    "**ETF_Stock 类用沪深300代理**——主动选股 alpha 不在回测里。"
+                    "**Smart_Beta / Individual_Stock 类用沪深300代理**——个股 alpha 不在回测里。"
                     "**滑块即时**：拖动后立即看到对比变化（数据已缓存，无需重拉）。"
                 )
 

@@ -18,14 +18,15 @@ import pandas as pd
 
 
 CLASS_LABEL = {
-    'US_Blend_Fund':  '美股宽基',
-    'US_Growth_Fund': '美股成长',
-    'CN_Index_Fund':  'A股宽基',
-    'Gold':           '黄金',
-    'Fixed_Income':   '固定收益',
-    'ETF_Stock':      '个股/ETF',
-    'Company_Stock':  '公司股票',
-    'Cash':           '现金',
+    'US_Blend_Fund':    '美股宽基',
+    'US_Growth_Fund':   '美股成长',
+    'CN_Index_Fund':    'A股宽基',
+    'Smart_Beta':       'Smart Beta',
+    'Individual_Stock': '个股',
+    'Fixed_Income':     '固定收益',
+    'ETF_Stock':        '个股/ETF',   # 历史兼容，新数据已无此类
+    'Company_Stock':    '公司股票',
+    'Cash':             '现金',
 }
 
 

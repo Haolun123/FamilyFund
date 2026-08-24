@@ -21,20 +21,22 @@ _ASSET_CLASSES = [
     'US_Blend_Fund',
     'US_Growth_Fund',
     'CN_Index_Fund',
-    'ETF_Stock',
+    'Smart_Beta',
+    'Individual_Stock',
     'Gold',
     'Fixed_Income',
     'Company_Stock',
 ]
 
 _ASSET_CLASS_LABELS = {
-    'US_Blend_Fund':  '美股宽基（标普500）',
-    'US_Growth_Fund': '美股成长（纳指100）',
-    'CN_Index_Fund':  'A股指数（沪深300/A500）',
-    'ETF_Stock':      'ETF/个股',
-    'Gold':           '黄金',
-    'Fixed_Income':   '固定收益',
-    'Company_Stock':  '公司股票',
+    'US_Blend_Fund':    '美股宽基（标普500）',
+    'US_Growth_Fund':   '美股成长（纳指100）',
+    'CN_Index_Fund':    'A股指数（沪深300/A500）',
+    'Smart_Beta':       'Smart Beta（红利低波）',
+    'Individual_Stock': '个股',
+    'Gold':             '黄金',
+    'Fixed_Income':     '固定收益',
+    'Company_Stock':    '公司股票',
 }
 
 _FREQUENCIES = ['weekly', 'biweekly', 'monthly']
@@ -175,7 +177,7 @@ def compute_suggestion(plan: dict, market_data: dict) -> dict:
         pe_csi300 = (market_data.get('pe_csi300') or {}).get('value')
         mult_str = lookup_a_share_multiplier(pe_csi300, qvix, 'csi300')
 
-    elif asset_class == 'ETF_Stock':
+    elif asset_class in ('Smart_Beta', 'Individual_Stock'):
         pe_csi300 = (market_data.get('pe_csi300') or {}).get('value')
         mult_str = lookup_a_share_multiplier(pe_csi300, qvix, 'csi300')
 

@@ -36,7 +36,9 @@ PROXY_MAP = {
     'US_Blend_Fund':   {'type': 'yfinance', 'symbol': '^GSPC', 'name': '标普500'},
     'US_Growth_Fund':  {'type': 'yfinance', 'symbol': '^NDX', 'name': '纳指100'},
     'CN_Index_Fund':   {'type': 'akshare_index', 'symbol': 'sh000300', 'name': '沪深300'},
-    'ETF_Stock':       {'type': 'akshare_index', 'symbol': 'sh000300', 'name': '沪深300（个股混合代理）'},
+    'Smart_Beta':      {'type': 'akshare_index', 'symbol': 'sh000300', 'name': '沪深300（Smart Beta代理）'},
+    'Individual_Stock':{'type': 'akshare_index', 'symbol': 'sh000300', 'name': '沪深300（个股代理）'},
+    'ETF_Stock':       {'type': 'akshare_index', 'symbol': 'sh000300', 'name': '沪深300（历史兼容）'},
     'Gold':            {'type': 'gold_cny', 'name': '黄金（GC=F × USD/CNY）'},
     'Company_Stock':   {'type': 'yfinance', 'symbol': 'SAP.DE', 'name': 'SAP'},
     'Cash':            {'type': 'fixed_yield', 'rate': 0.015, 'name': '货币基金'},
@@ -385,17 +387,19 @@ def compute_target_weights(raw_df, reports_dir: str,
     except Exception:
         pool_target_cny = 0
 
-    # 3. ETF_Stock 类目标 = 个股池 + Smart Beta
+    # 3. Smart_Beta + Individual_Stock 合计目标 = 个股池 + Smart Beta
     etf_stock_target = pool_target_cny + smart_beta_target_cny
 
-    # 4. 算资金缺口：ETF_Stock 增加多少 → 从 Fixed_Income 抽多少
-    etf_stock_current = current_value_by_class.get('ETF_Stock', 0)
+    # 4. 算资金缺口：两类合计增加多少 → 从 Fixed_Income 抽多少
+    etf_stock_current = (current_value_by_class.get('Smart_Beta', 0)
+                         + current_value_by_class.get('Individual_Stock', 0))
     fi_current = current_value_by_class.get('Fixed_Income', 0)
     delta = etf_stock_target - etf_stock_current
 
-    # 5. 构造目标值
+    # 5. 构造目标值（按6:4拆分Smart_Beta和Individual_Stock，可后续调整）
     target_value_by_class = dict(current_value_by_class)
-    target_value_by_class['ETF_Stock'] = etf_stock_target
+    target_value_by_class['Smart_Beta'] = etf_stock_target * 0.4
+    target_value_by_class['Individual_Stock'] = etf_stock_target * 0.6
     target_value_by_class['Fixed_Income'] = max(0, fi_current - delta)
 
     # 6. 归一化为权重
