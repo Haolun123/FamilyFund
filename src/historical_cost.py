@@ -183,8 +183,8 @@ def compute_historical_pl(
             Hist_PL_CNY,          历史浮盈（人民币）
             Hist_PL_Rate,         历史浮盈率（%）
     """
-    # 先滚动更新均价
-    cost_map = roll_historical_cost(data_dir, portfolio_df)
+    # 只读取，不触发滚动更新（roll_historical_cost 由 Weekly Update 保存快照时统一触发）
+    cost_map = load_historical_cost(data_dir)
     if not cost_map:
         return pd.DataFrame()
 
