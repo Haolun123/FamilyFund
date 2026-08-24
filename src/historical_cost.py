@@ -133,7 +133,7 @@ def roll_historical_cost(data_dir: str, portfolio_df: pd.DataFrame) -> dict:
         if current_shares <= 0:
             continue
 
-        # 建仓日后所有正 NCF（买入净额，人民币口径）
+        # 建仓日后所有正 NCF（买入净额，人民币口径，不含卖出）
         after_baseline = portfolio_df[
             (portfolio_df['Code'] == code) &
             (portfolio_df['Date'] > BASELINE_DATE) &
@@ -147,11 +147,25 @@ def roll_historical_cost(data_dir: str, portfolio_df: pd.DataFrame) -> dict:
         else:
             baseline_cost_cny = avg_cost_raw * baseline_fx * baseline_shares
 
-        # 当前历史总成本（人民币）
+        # 历史累计买入总成本（均价法：卖出不影响均价，分母用累计买入份额）
         total_cost_cny = baseline_cost_cny + post_ncf_cny
 
-        # 当前均价（人民币）
-        new_avg_cny = total_cost_cny / current_shares if current_shares > 0 else avg_cost_raw
+        # 累计买入份额（baseline + 4月10日后每次买入的份额增量）
+        # 通过每次快照的份额变化推算：只取份额增加的周
+        df_code = portfolio_df[portfolio_df['Code'] == code].sort_values('Date')
+        df_code_after = df_code[df_code['Date'] > BASELINE_DATE].copy()
+        df_code_after['shares_delta'] = df_code_after['Shares'].diff().fillna(0)
+        # 第一行 delta 用当前 Shares - baseline_shares
+        if not df_code_after.empty:
+            first_idx = df_code_after.index[0]
+            df_code_after.at[first_idx, 'shares_delta'] = (
+                float(df_code_after.at[first_idx, 'Shares']) - baseline_shares
+            )
+        buy_shares_after = float(df_code_after[df_code_after['shares_delta'] > 0]['shares_delta'].sum())
+        total_buy_shares = baseline_shares + buy_shares_after
+
+        # 均价 = 总买入成本 / 总买入份额（卖出不影响均价）
+        new_avg_cny = total_cost_cny / total_buy_shares if total_buy_shares > 0 else avg_cost_raw
 
         # 存回原币种均价
         cur_fx = float(cur_rows.iloc[0].get('Exchange_Rate', 1.0))
