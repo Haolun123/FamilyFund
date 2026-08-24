@@ -677,20 +677,60 @@ with tab_dashboard:
             'Asset_Class': '资产类别',
             'Platform': '平台',
             'Name': '名称',
-            'Cost_Basis': '成本',
+            'Code': 'Code',
+            'Cost_Basis': '4月10日成本',
             'Market_Value': '市值',
-            'Profit_Loss': '盈亏',
-            'Profit_Loss_Rate': '收益率(%)',
+            'Profit_Loss': '4月10日盈亏',
+            'Profit_Loss_Rate': '4月10日收益率(%)',
         })
+
+        # 加载历史真实浮盈
+        try:
+            from historical_cost import compute_historical_pl
+            from sap_stock import own_sap_summary, move_sap_summary, load_own_sap, load_move_sap
+            _sap_be = None
+            if os.path.exists(OWN_SAP_CSV) or os.path.exists(MOVE_SAP_CSV):
+                _own_df = load_own_sap(OWN_SAP_CSV) if os.path.exists(OWN_SAP_CSV) else None
+                _move_df = load_move_sap(MOVE_SAP_CSV) if os.path.exists(MOVE_SAP_CSV) else None
+                _sap_fx = st.session_state.get('sap_fx_rate', 7.9)
+                _own_s = own_sap_summary(_own_df, fx_rate=_sap_fx) if _own_df is not None else None
+                _move_s = move_sap_summary(_move_df, fx_rate=_sap_fx) if _move_df is not None else None
+                if _own_s and _move_s:
+                    _total_shares = _own_s['total_shares'] + _move_s['total_shares']
+                    _total_cost = _own_s['total_cost'] + _move_s['total_cost']
+                    _sap_be = (_total_cost / _total_shares / _sap_fx) if _total_shares > 0 else None
+            hist_pl_df = compute_historical_pl(
+                os.path.dirname(csv_path), raw_df, sap_break_even_eur=_sap_be
+            )
+            if not hist_pl_df.empty:
+                pl_display = pl_display.merge(
+                    hist_pl_df[['Code','Hist_Total_Cost_CNY','Hist_PL_CNY','Hist_PL_Rate']],
+                    on='Code', how='left'
+                )
+                pl_display = pl_display.rename(columns={
+                    'Hist_Total_Cost_CNY': '历史成本',
+                    'Hist_PL_CNY': '历史浮盈',
+                    'Hist_PL_Rate': '历史收益率(%)',
+                })
+        except Exception:
+            pass
+
+        _hist_cols = {}
+        if '历史成本' in pl_display.columns:
+            _hist_cols['历史成本'] = st.column_config.NumberColumn(format="¥%.2f")
+            _hist_cols['历史浮盈'] = st.column_config.NumberColumn(format="¥%.2f")
+            _hist_cols['历史收益率(%)'] = st.column_config.NumberColumn(format="%.2f%%")
+
         st.dataframe(
             pl_display,
             use_container_width=True,
             hide_index=True,
             column_config={
-                '成本': st.column_config.NumberColumn(format="¥%.2f"),
+                '4月10日成本': st.column_config.NumberColumn(format="¥%.2f"),
                 '市值': st.column_config.NumberColumn(format="¥%.2f"),
-                '盈亏': st.column_config.NumberColumn(format="¥%.2f"),
-                '收益率(%)': st.column_config.NumberColumn(format="%.2f%%"),
+                '4月10日盈亏': st.column_config.NumberColumn(format="¥%.2f"),
+                '4月10日收益率(%)': st.column_config.NumberColumn(format="%.2f%%"),
+                **_hist_cols,
             },
         )
 
@@ -2526,6 +2566,15 @@ with tab_update:
                 st.info(f"📝 周报已生成：{os.path.basename(_report_path)}")
             except Exception as _rpt_err:
                 st.warning(f"周报生成失败（不影响数据）：{_rpt_err}")
+
+            # ─── 滚动更新历史成本均价 ───
+            try:
+                from historical_cost import roll_historical_cost
+                _updated_df = pd.read_csv(csv_path)
+                _updated_df['Date'] = pd.to_datetime(_updated_df['Date']).dt.strftime('%Y-%m-%d')
+                roll_historical_cost(os.path.dirname(csv_path), _updated_df)
+            except Exception:
+                pass  # 静默失败，不影响主流程
 
             # 检测新建仓标的是否有研报，暂存到 session_state，等用户确认后再 rerun
             _new_entries = [
