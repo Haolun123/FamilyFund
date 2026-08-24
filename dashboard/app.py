@@ -859,7 +859,7 @@ with tab_dashboard:
         'US_Growth_Fund':   lookup_multiplier(_rb_pe_ndx, _rb_vxn, 'ndx100'),
         'CN_Index_Fund':    lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
         'Smart_Beta':       lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
-        'Individual_Stock': lookup_a_share_multiplier(_rb_pe_csi300, _rb_qvix, 'csi300'),
+        'Individual_Stock': '—（主动择时）',
         'Gold':             lookup_gold_multiplier(_rb_gold_bias, _rb_vix),
         'Fixed_Income':     '—',
         'Company_Stock':    '—',
