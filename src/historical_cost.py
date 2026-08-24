@@ -144,6 +144,7 @@ def roll_historical_cost(data_dir: str, portfolio_df: pd.DataFrame) -> dict:
             entry['avg_cost'] = round(new_avg_cny / cur_fx, 6) if cur_fx > 0 else avg_cost_raw
 
         entry['_avg_cost_cny'] = round(new_avg_cny, 6)  # 缓存人民币均价，展示用
+        entry['current_shares'] = round(current_shares, 6)  # 当前份额，冗余存储供外部使用
 
     save_historical_cost(data_dir, cost_map)
     return cost_map
