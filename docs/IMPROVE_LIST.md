@@ -67,6 +67,7 @@
 | 6 | ~~净资产核对公式：区分经营性 vs 资本性现金流 + 补 SAP 归属薪酬~~ | ✅ 2026-07-01 完成 v3，残差从 -1.27% 收敛到 +0.04%；设计见 `DESIGN_NET_WORTH_RECONCILIATION.md` | — |
 | 10 | **historical_cost 均价算法：A股/场内ETF卖出后用券商均价法冲减** | 见下方详述 | transaction.csv 积累足够卖出记录后（3-6个月）再做；目前场外基金（大头）用纯均价法已正确，个股/场内ETF偏差边validate边调整 |
 | 11 | **子基金：儿子教育/安家基金（独立CSV）** | 见下方详述 | 待实现；先手动在基金App定投，时机合适再接入FamilyFund跟踪 |
+| 12 | **数据目录重构** | 见下方详述 | 子基金上线后再做；主基金稳定运行中，不急 |
 | 9 | **短信解析自定义模板**（新基金公司格式自助配置）| 见下方详述 | 待用户决策：频率低则不做，频率高则实施 |
 
 ### P3 — 需前置数据积累
@@ -456,3 +457,32 @@ parse_error 条目目前只显示红色错误，用户无法处理。应展示�
 - Dashboard 未来可增加子基金切换视图
 
 **前置条件：** 先在基金App手动定投，积累一定数据量后再接入FamilyFund跟踪
+
+---
+
+### 数据目录重构（对应 P2-#12，2026-08-25 记录）
+
+**现状问题：**
+`$FAMILYFUND_DATA/` 下所有文件平铺，portfolio.csv/transaction.csv/各种 cache/config/报告混在一起，随着子基金加入会更乱。
+
+**目标结构：**
+```
+FamilyFund/data/
+├── funds/
+│   ├── main/          ← 主基金（portfolio.csv/transaction.csv/historical_cost.json/weekly_reports/backups/...）
+│   └── son/           ← 儿子子基金（同结构）
+├── sap/               ← own_sap.csv / move_sap.csv
+├── research/          ← Finance Reports 研报库
+├── config/            ← 全局配置（dca_config/fi_config/life_stages/ah_config/tenth_man等）
+├── cache/             ← 程序生成缓存（可随时删除重建）
+└── reports/           ← 生成的报告（backtest_report/tenth_man_reports）
+```
+
+**工程量：** 中等。需要修改代码里几十处路径引用，以及 .env / docker-compose.yml。
+
+**执行顺序：**
+1. 子基金先用 `$FAMILYFUND_DATA/son/` 临时路径跑起来
+2. 子基金稳定后，专门安排一次迁移，主基金和子基金同时迁入新结构
+3. 迁移时做好备份，用脚本批量移动文件，逐步验证各功能正常
+
+**前置条件：** 子基金上线并稳定运行后再做
