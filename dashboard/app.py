@@ -160,8 +160,8 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_sap, tab_market, tab_research, tab_backtest, tab_quarterly, tab_planning, tab_tenth, tab_son = st.tabs(
-    ["Portfolio", "Ledger", "SAP", "Market", "Research", "Backtest", "Quarterly", "Planning", "10th Man", "🧒 子基金"]
+tab_dashboard, tab_update, tab_son, tab_sap, tab_market, tab_research, tab_backtest, tab_quarterly, tab_planning, tab_tenth = st.tabs(
+    ["Portfolio", "Ledger", "Son Fund", "SAP", "Market", "Research", "Backtest", "Quarterly", "Planning", "10th Man"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -6399,7 +6399,7 @@ with tab_son:
         _phase_color = '🔵'
         _phase_msg = f'距安家目标还有 **{_years_to_settle:.1f}年**'
 
-    st.header("🧒 子基金 — 教育/安家基金")
+    st.header("Son Fund — 教育/安家基金")
     st.caption(f"儿子当前 {_son_age_display} | 阶段：{_phase_color} {_phase} | {_phase_msg}")
 
     # 倒计时 KPI
