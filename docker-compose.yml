@@ -6,8 +6,11 @@ services:
       - "8501:8501"
       - "127.0.0.1:5174:5174"   # MCP SSE，只绑本机
       - "127.0.0.1:5175:5175"   # Finance Reports 静态文件服务，只绑本机
+    environment:
+      - FAMILYFUND_SON_DATA=/app/data/son
     volumes:
       - ${FAMILYFUND_DATA:-./data}:/app/data
+      - ${FAMILYFUND_SON_DATA:-./data/son}:/app/data/son
       - ./src:/app/src
       - ./dashboard:/app/dashboard
       - ./mcp_server.py:/app/mcp_server.py

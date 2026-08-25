@@ -160,8 +160,8 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_sap, tab_market, tab_research, tab_backtest, tab_quarterly, tab_planning, tab_tenth = st.tabs(
-    ["Portfolio", "Ledger", "SAP", "Market", "Research", "Backtest", "Quarterly", "Planning", "10th Man"]
+tab_dashboard, tab_update, tab_sap, tab_market, tab_research, tab_backtest, tab_quarterly, tab_planning, tab_tenth, tab_son = st.tabs(
+    ["Portfolio", "Ledger", "SAP", "Market", "Research", "Backtest", "Quarterly", "Planning", "10th Man", "🧒 子基金"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -6359,3 +6359,346 @@ with tab_research:
                             from urllib.parse import quote
                             _rl_http_url = 'http://localhost:5175/' + quote(_rl_rel)
                             st.markdown(f"📄 [{_rl_pdf_name}]({_rl_http_url})")
+
+# ═══════════════════════════════════════════════════════════
+# 子基金 Tab
+# ═══════════════════════════════════════════════════════════
+with tab_son:
+    import math as _math_son
+
+    SON_DATA_DIR = os.environ.get('FAMILYFUND_SON_DATA', os.path.join(os.path.dirname(csv_path), 'son'))
+    SON_CSV = os.path.join(SON_DATA_DIR, 'portfolio.csv')
+    SON_TX_CSV = os.path.join(SON_DATA_DIR, 'transaction.csv')
+
+    # 儿子信息
+    SON_BIRTH = '2022-09-25'
+    SON_UNIVERSITY_AGE = 18
+    SON_SETTLE_AGE = 25
+    _son_birth_dt = pd.Timestamp(SON_BIRTH)
+    _today = pd.Timestamp.now()
+    _son_age_years = (_today - _son_birth_dt).days / 365.25
+    _son_age_display = f"{int(_son_age_years)}岁{int((_son_age_years % 1) * 12)}个月"
+    _years_to_univ = max(0, SON_UNIVERSITY_AGE - _son_age_years)
+    _years_to_settle = max(0, SON_SETTLE_AGE - _son_age_years)
+
+    # 阶段判断
+    if _son_age_years < 13:
+        _phase = '积累期'
+        _phase_color = '🟢'
+        _phase_msg = f'全仓纳指定投中，距过渡期还有 **{13 - _son_age_years:.1f}年**'
+    elif _son_age_years < 18:
+        _phase = '过渡期'
+        _phase_color = '🟡'
+        _phase_msg = f'建议每年迁移 20% 至固收，距上大学还有 **{_years_to_univ:.1f}年**'
+    elif _son_age_years < 22:
+        _phase = '使用期 I（高等教育）'
+        _phase_color = '🟠'
+        _phase_msg = '按需取用学费/生活费'
+    else:
+        _phase = '使用期 II（安家积累）'
+        _phase_color = '🔵'
+        _phase_msg = f'距安家目标还有 **{_years_to_settle:.1f}年**'
+
+    st.header("🧒 子基金 — 教育/安家基金")
+    st.caption(f"儿子当前 {_son_age_display} | 阶段：{_phase_color} {_phase} | {_phase_msg}")
+
+    # 倒计时 KPI
+    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1.metric("距上大学", f"{_years_to_univ:.1f}年", f"{int(_years_to_univ * 12)}个月")
+    kpi2.metric("距安家", f"{_years_to_settle:.1f}年", f"{int(_years_to_settle * 12)}个月")
+    kpi3.metric("年度定投计划", "¥76,000", "月3000+生日10000+过年30000")
+
+    st.divider()
+
+    # 预计终值区间（基于历史回测）
+    with st.expander("📊 预计终值区间（基于QQQ历史回测，仅供参考）", expanded=False):
+        st.caption("基于QQQ 2000-2026年真实月度收益率，年投76000元，基准汇率CNY年贬0.5%")
+        _forecast_data = {
+            '投资年限': ['15年（儿子19岁）', '20年（儿子24岁）', '25年（儿子29岁）'],
+            '总投入（万）': [114, 152, 190],
+            '最差情景（万）': [297, 659, 1773],
+            'P10悲观（万）': [328, 840, 1895],
+            '中位数（万）': [482, 1107, 2232],
+            'P90乐观（万）': [630, 1357, 2542],
+            '中位数IRR': ['17.3%', '17.3%', '16.6%'],
+        }
+        st.dataframe(pd.DataFrame(_forecast_data), use_container_width=True, hide_index=True)
+        st.caption("⚠️ 历史收益不代表未来，汇率波动±1%/年会使25年终值相差约1000万")
+
+    st.divider()
+
+    # ── 加载子基金数据 ──
+    @st.cache_data(ttl=60)
+    def load_son_data(csv_path):
+        if not os.path.exists(csv_path):
+            return None, None, None, None
+        try:
+            df = load_portfolio(csv_path)
+            if df is None or df.empty:
+                return None, None, None, None
+            fund_nav = compute_fund_nav(df)
+            cost_basis = compute_cost_basis(df)
+            allocation = compute_allocation(df)
+            return df, fund_nav, cost_basis, allocation
+        except Exception:
+            return None, None, None, None
+
+    son_df, son_nav_df, son_cost_df, son_alloc_df = load_son_data(SON_CSV)
+
+    if son_df is None or son_df.empty:
+        st.info("子基金尚未建仓。在下方「Weekly Update」完成第一次快照后，数据将显示在这里。")
+    else:
+        # 基金 KPI
+        _son_latest = son_df[son_df['Date'] == son_df['Date'].max()]
+        _son_tv = _son_latest['Total_Value'].sum()
+        _son_nav_row = son_nav_df.iloc[-1] if not son_nav_df.empty else None
+        _son_nav = float(_son_nav_row['NAV']) if _son_nav_row is not None else 1.0
+        _son_ret = (_son_nav - 1.0) * 100
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("总资产", f"¥{_son_tv:,.0f}")
+        c2.metric("单位净值", f"{_son_nav:.4f}")
+        c3.metric("累计收益率", f"{_son_ret:+.2f}%")
+
+        # 净值走势
+        if len(son_nav_df) > 1:
+            fig_son = px.line(son_nav_df, x='Date', y='NAV', title='子基金净值走势')
+            fig_son.add_hline(y=1.0, line_dash='dash', line_color='gray', opacity=0.5)
+            st.plotly_chart(fig_son, use_container_width=True)
+
+        # 持仓明细
+        if not _son_latest.empty:
+            st.subheader("持仓明细")
+            _son_display = _son_latest[['Asset_Class','Name','Code','Shares','Current_Price','Total_Value']].copy()
+            _son_display['Asset_Class'] = _son_display['Asset_Class'].map(CLASS_DISPLAY_NAMES).fillna(_son_display['Asset_Class'])
+            st.dataframe(_son_display, use_container_width=True, hide_index=True)
+
+        # 盈亏分析
+        if son_cost_df is not None and not son_cost_df.empty:
+            _son_pl = son_cost_df[
+                (son_cost_df['Asset_Class'] != 'Cash') &
+                (son_cost_df['Market_Value'] > 0)
+            ].copy()
+            if not _son_pl.empty:
+                st.subheader("盈亏分析")
+                _son_total_cost = _son_pl['Cost_Basis'].sum()
+                _son_total_mv = _son_pl['Market_Value'].sum()
+                _son_pl_total = _son_total_mv - _son_total_cost
+                p1, p2 = st.columns(2)
+                p1.metric("总成本", f"¥{_son_total_cost:,.0f}")
+                p2.metric("总盈亏", f"¥{_son_pl_total:+,.0f}",
+                          f"{_son_pl_total/_son_total_cost*100:+.2f}%" if _son_total_cost > 0 else "—")
+
+    st.divider()
+
+    # ── 子基金 Weekly Update ──
+    st.subheader("📅 子基金 Weekly Update")
+
+    # 初始化 session state
+    if 'son_update_template' not in st.session_state:
+        if son_df is not None and not son_df.empty:
+            _son_last_date = son_df['Date'].max()
+            _son_template = son_df[son_df['Date'] == _son_last_date].drop(columns=['Date']).reset_index(drop=True)
+            _son_template['Net_Cash_Flow'] = 0.0
+        else:
+            _son_template = pd.DataFrame(columns=[
+                'Asset_Class','Platform','Name','Code','Currency',
+                'Exchange_Rate','Shares','Current_Price','Total_Value','Net_Cash_Flow'
+            ])
+        st.session_state['son_update_template'] = _son_template
+
+    # 快照日期
+    _son_last_snapshot = son_df['Date'].max() if son_df is not None and not son_df.empty else '（无快照）'
+    st.caption(f"上次快照：{_son_last_snapshot}")
+    _son_new_date = st.date_input("本次快照日期", value=pd.Timestamp.now().date(), key="son_new_date")
+    _son_new_date_str = str(_son_new_date)
+
+    # 步骤一：短信解析
+    with st.expander("📱 步骤一：短信解析", expanded=False):
+        _son_sms_text = st.text_area("粘贴定投确认短信（多条用空行分隔）", height=120, key="son_sms_input")
+        if st.button("🔍 解析短信", key="son_sms_parse"):
+            if _son_sms_text.strip():
+                from sms_parser import parse_sms
+                _son_holdings = []
+                if son_df is not None and not son_df.empty:
+                    _son_latest2 = son_df[son_df['Date'] == son_df['Date'].max()]
+                    _son_holdings = [{'code': str(r['Code']), 'name': r['Name']}
+                                     for _, r in _son_latest2.iterrows() if pd.notna(r['Name'])]
+                st.session_state['son_sms_parsed'] = parse_sms(
+                    _son_sms_text, _son_holdings, data_dir=SON_DATA_DIR)
+                st.rerun()
+
+        if 'son_sms_parsed' in st.session_state:
+            _son_parsed = st.session_state['son_sms_parsed']
+            for i, r in enumerate(_son_parsed):
+                if r.get('parse_error'):
+                    st.error(f"第{i+1}条无法解析")
+                    continue
+                _match = f"{r['matched_code']} ({r['matched_name']})" if r['matched_code'] else "❓未匹配"
+                st.markdown(f"**{i+1}.** {r['confirm_date']} · {r['fund_name']} → {_match} · ¥{r['amount']:,.0f} · {r['shares']}份")
+
+            if st.button("✅ 应用解析结果", key="son_sms_apply", type="primary"):
+                _son_template = st.session_state['son_update_template'].copy()
+                _applied = 0
+                for r in _son_parsed:
+                    if r.get('parse_error') or not r['matched_code']:
+                        continue
+                    _mask = _son_template['Code'].astype(str) == str(r['matched_code'])
+                    if _mask.any():
+                        idx = _son_template[_mask].index[0]
+                        _son_template.at[idx, 'Shares'] = round(
+                            float(_son_template.at[idx, 'Shares'] or 0) + float(r['shares']), 6)
+                        _son_template.at[idx, 'Current_Price'] = float(r['nav'])
+                        _son_template.at[idx, 'Net_Cash_Flow'] = round(
+                            float(_son_template.at[idx, 'Net_Cash_Flow'] or 0) + float(r['amount']), 2)
+                    _applied += 1
+                st.session_state['son_update_template'] = _son_template
+                del st.session_state['son_sms_parsed']
+                st.success(f"已应用 {_applied} 条")
+                st.rerun()
+
+    # 步骤二：调仓辅助器（简化版：只有买入/新增标的）
+    with st.expander("⚖️ 步骤二：手动登记买入", expanded=False):
+        st.caption("子基金只有定投买入，无需复杂调仓。")
+        if st.button("＋ 买入", key="son_add_buy"):
+            if 'son_buy_entries' not in st.session_state:
+                st.session_state['son_buy_entries'] = []
+            st.session_state['son_buy_entries'].append(
+                {'code': '', 'name': '', 'asset_class': 'US_Growth_Fund',
+                 'platform': '纳指场外', 'amount': 0.0, 'shares': 0.0, 'nav': 0.0})
+            st.rerun()
+
+        _son_entries = st.session_state.get('son_buy_entries', [])
+        for i, e in enumerate(_son_entries):
+            ec1, ec2, ec3, ec4, ec5 = st.columns([2, 2, 2, 2, 1])
+            e['code']   = ec1.text_input("Code", value=e['code'], key=f"son_e_code_{i}")
+            e['name']   = ec2.text_input("Name", value=e['name'], key=f"son_e_name_{i}")
+            e['amount'] = ec3.number_input("金额(¥)", value=e['amount'], min_value=0.0, key=f"son_e_amt_{i}")
+            e['shares'] = ec4.number_input("份额", value=e['shares'], min_value=0.0, key=f"son_e_shares_{i}")
+            if ec5.button("✕", key=f"son_e_del_{i}"):
+                st.session_state['son_buy_entries'].pop(i)
+                st.rerun()
+
+        if _son_entries and st.button("✅ 应用买入", key="son_apply_buy", type="primary"):
+            _son_template = st.session_state['son_update_template'].copy()
+            for e in _son_entries:
+                if not e['code'] or not e['name']:
+                    continue
+                _mask = _son_template['Code'].astype(str) == str(e['code'])
+                if _mask.any():
+                    idx = _son_template[_mask].index[0]
+                    _son_template.at[idx, 'Shares'] = round(
+                        float(_son_template.at[idx, 'Shares'] or 0) + e['shares'], 6)
+                    _son_template.at[idx, 'Net_Cash_Flow'] = round(
+                        float(_son_template.at[idx, 'Net_Cash_Flow'] or 0) + e['amount'], 2)
+                else:
+                    _son_template = pd.concat([_son_template, pd.DataFrame([{
+                        'Asset_Class': e.get('asset_class', 'US_Growth_Fund'),
+                        'Platform': e.get('platform', '纳指场外'),
+                        'Name': e['name'], 'Code': e['code'],
+                        'Currency': 'CNY', 'Exchange_Rate': 1.0,
+                        'Shares': e['shares'], 'Current_Price': e.get('nav', 0.0),
+                        'Total_Value': 0.0, 'Net_Cash_Flow': e['amount'],
+                    }])], ignore_index=True)
+            st.session_state['son_update_template'] = _son_template
+            st.session_state['son_buy_entries'] = []
+            st.success("已应用")
+            st.rerun()
+
+    # 步骤三：刷新净值 + 编辑表格
+    st.subheader("步骤三：确认持仓数据")
+    if st.button("🔄 刷新净值", key="son_refresh"):
+        st.session_state['_son_refresh'] = True
+        st.rerun()
+
+    if st.session_state.pop('_son_refresh', False):
+        from price_fetcher import fetch_latest_prices
+        import math as _mson
+        _son_raw = load_portfolio(SON_CSV) if os.path.exists(SON_CSV) and os.path.getsize(SON_CSV) > 0 else pd.DataFrame()
+        with st.spinner("拉取净值..."):
+            _son_prices = fetch_latest_prices(
+                st.session_state['son_update_template'] if not st.session_state['son_update_template'].empty else _son_raw,
+                SON_DATA_DIR)
+        _son_tmpl = st.session_state['son_update_template'].copy()
+        _son_ok = 0
+        for i, row in _son_tmpl.iterrows():
+            code = str(row.get('Code', ''))
+            res = _son_prices.get(code)
+            if res and res['status'] == 'ok' and res['price'] is not None:
+                try:
+                    if not _mson.isnan(float(res['price'])):
+                        _son_tmpl.at[i, 'Current_Price'] = res['price']
+                        _son_ok += 1
+                except Exception:
+                    pass
+        st.session_state['son_update_template'] = _son_tmpl
+        st.success(f"已刷新 {_son_ok} 个标的")
+        st.rerun()
+
+    _son_edited = st.data_editor(
+        st.session_state['son_update_template'],
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        key="son_weekly_editor",
+        column_config={
+            "Asset_Class": st.column_config.SelectboxColumn("Asset_Class", options=sorted(VALID_ASSET_CLASSES)),
+            "Currency": st.column_config.SelectboxColumn("Currency", options=["CNY","HKD","EUR","USD"]),
+            "Exchange_Rate": st.column_config.NumberColumn("Exchange_Rate", format="%.4f", default=1.0),
+            "Shares": st.column_config.NumberColumn("Shares", format="%.4f"),
+            "Current_Price": st.column_config.NumberColumn("Current_Price", format="%.4f"),
+            "Total_Value": st.column_config.NumberColumn("Total_Value", format="%.2f"),
+            "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", format="%.2f", default=0.0),
+        },
+    )
+
+    # 重算市值
+    if st.button("🔄 重算市值", key="son_recalc", type="secondary"):
+        _son_r = _son_edited.copy()
+        for i, row in _son_r.iterrows():
+            if str(row.get('Code', '')) != 'CASH' and float(row.get('Shares', 0) or 0) > 0:
+                _son_r.at[i, 'Total_Value'] = round(
+                    float(row['Shares']) * float(row['Current_Price'] or 0) * float(row['Exchange_Rate'] or 1), 2)
+        st.session_state['son_update_template'] = _son_r
+        st.rerun()
+
+    # 保存快照
+    st.divider()
+    _son_confirm = st.checkbox("确认子基金数据无误", key="son_confirm")
+    if st.button("💾 保存子基金快照", type="primary", disabled=not _son_confirm, key="son_save"):
+        _son_save_df = _son_edited.copy()
+        _son_save_df.insert(0, 'Date', _son_new_date_str)
+        _son_save_df['Code'] = _son_save_df['Code'].fillna('')
+
+        if os.path.exists(SON_CSV) and os.path.getsize(SON_CSV) > 50:
+            _son_existing = pd.read_csv(SON_CSV)
+            _son_combined = pd.concat([_son_existing, _son_save_df], ignore_index=True)
+        else:
+            _son_combined = _son_save_df
+
+        _atomic_write_csv(_son_combined, SON_CSV)
+
+        # 写入 transaction_son.csv
+        _son_pending_tx = st.session_state.get('son_pending_transactions', [])
+        if _son_pending_tx:
+            _son_tx_df = pd.DataFrame(_son_pending_tx)
+            if os.path.exists(SON_TX_CSV):
+                _son_existing_tx = pd.read_csv(SON_TX_CSV)
+                _son_tx_df = pd.concat([_son_existing_tx, _son_tx_df], ignore_index=True)
+            _son_tx_df.to_csv(SON_TX_CSV, index=False)
+            st.session_state['son_pending_transactions'] = []
+
+        # 生成子基金周报
+        try:
+            from weekly_report import generate_weekly_report
+            _son_report = generate_weekly_report(data_dir=SON_DATA_DIR, this_week=_son_new_date_str)
+            st.info(f"📝 子基金周报已生成：{os.path.basename(_son_report)}")
+        except Exception:
+            pass
+
+        # 重置模板
+        del st.session_state['son_update_template']
+        load_son_data.clear()
+        st.success(f"✅ 子基金快照已保存（{_son_new_date_str}）")
+        st.balloons()
+        st.rerun()
