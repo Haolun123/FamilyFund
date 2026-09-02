@@ -241,12 +241,18 @@ def _build_snapshot_frontmatter(
     # 各类别占比
     alloc = {}
     if allocation_df is not None and not allocation_df.empty:
-        total_mv = allocation_df['Market_Value'].sum()
-        if total_mv > 0:
+        # 兼容 Market_Value / Total_Value 列名
+        mv_col = 'Market_Value' if 'Market_Value' in allocation_df.columns else 'Total_Value'
+        # 兼容已有百分比列（Allocation_Percent）或需自行计算
+        if 'Allocation_Percent' in allocation_df.columns:
             for _, row in allocation_df.iterrows():
-                cls = row['Asset_Class']
-                pct = round(float(row['Market_Value']) / total_mv * 100, 1)
-                alloc[cls] = pct
+                alloc[row['Asset_Class']] = round(float(row['Allocation_Percent']) * 100, 1)
+        else:
+            total_mv = allocation_df[mv_col].sum()
+            if total_mv > 0:
+                for _, row in allocation_df.iterrows():
+                    pct = round(float(row[mv_col]) / total_mv * 100, 1)
+                    alloc[row['Asset_Class']] = pct
 
     def pct(cls):
         return alloc.get(cls, 0.0)
@@ -531,12 +537,14 @@ def sync_to_obsidian(
 
             for _, row in pl_df.iterrows():
                 code = str(row.get('Code', ''))
-                name = str(row.get('Asset', code))
+                # 兼容 Name / Asset 两种列名
+                name = str(row.get('Name') or row.get('Asset') or code)
                 asset_class = str(row.get('Asset_Class', ''))
-                cost = float(row.get('Cost', 0))
+                cost = float(row.get('Cost_Basis') or row.get('Cost') or 0)
                 mv = float(row.get('Market_Value', 0))
-                pnl = mv - cost
-                pnl_pct = (pnl / cost * 100) if cost > 0 else 0.0
+                pnl = float(row.get('Profit_Loss') or (mv - cost))
+                pnl_pct = float(row.get('Profit_Loss_Rate') or
+                                ((pnl / cost * 100) if cost > 0 else 0.0))
 
                 # 匹配 decisions：先按 code 精确找，再按 name 模糊找
                 decision = {}
@@ -592,9 +600,11 @@ def sync_to_obsidian(
                     (son_cost_df['Asset_Class'] != 'Cash') &
                     (son_cost_df['Market_Value'] > 0)
                 ].copy()
-                # 按 Asset_Class 汇总
+                # 兼容 Cost_Basis / Cost 列名
+                cost_col = 'Cost_Basis' if 'Cost_Basis' in son_pl.columns else 'Cost'
+                son_pl = son_pl.rename(columns={cost_col: '_cost'})
                 son_agg = son_pl.groupby('Asset_Class').agg(
-                    Cost=('Cost', 'sum'),
+                    Cost=('_cost', 'sum'),
                     Market_Value=('Market_Value', 'sum')
                 ).reset_index()
                 for _, row in son_agg.iterrows():
