@@ -323,7 +323,7 @@ def _build_holdings_table(cost_basis_df: pd.DataFrame) -> str:
         cost  = float(row[cost_col])
         mv    = float(row['Market_Value'])
         pnl   = float(row[pnl_col]) if pnl_col else (mv - cost)
-        pct   = float(row[pct_col]) * 100 if pct_col else ((pnl / cost * 100) if cost > 0 else 0)
+        pct   = float(row[pct_col]) if pct_col else ((pnl / cost * 100) if cost > 0 else 0)
         sign  = '+' if pnl >= 0 else ''
         rows.append(
             f'| {name} | {cls} | ¥{cost:,.0f} | ¥{mv:,.0f} '
