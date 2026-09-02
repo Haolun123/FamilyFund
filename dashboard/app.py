@@ -1504,6 +1504,7 @@ with tab_update:
                         'type':        r['action'],
                         'asset_name':  r['matched_name'] if not _is_new else '新增标的',
                         'asset_label': f"{r['matched_name']} ({r['matched_code']})",
+                        'asset_code':  r['matched_code'] if not _is_new else '',
                         'amount':      r['amount'],
                         'price':       r['nav'],
                         'fee':         0.0,
@@ -1705,6 +1706,9 @@ with tab_update:
         # Keep a mapping from label back to Name (for NCF writing)
         asset_label_to_name = {_asset_label(r): r['Name'] for _, r in asset_rows.iterrows()}
         asset_label_to_name['新增标的'] = '新增标的'
+        # label → Code（用于同名资产的精确匹配，如 GOLD / GOLD.P）
+        asset_label_to_code = {_asset_label(r): str(r.get('Code', '')) for _, r in asset_rows.iterrows()}
+        asset_label_to_code['新增标的'] = ''
 
         # 标签 → 原始货币（用于 Price 字段币种标签）
         # 优先看持仓表 Currency 字段；若为 CNY 但 Code 形如港股，强制识别为 HKD
@@ -1732,6 +1736,10 @@ with tab_update:
             with c2:
                 if entry['type'] in ('买入', '卖出'):
                     current_label = entry.get('asset_label', '')
+                    # 短信新建仓进来时 asset_label 是具体基金名（不在 options 里），
+                    # 需映射到"新增标的"让 selectbox 正确选中
+                    if entry.get('is_new') and current_label not in ([''] + asset_options_labels):
+                        current_label = '新增标的'
                     selected_label = st.selectbox(
                         "资产标的",
                         options=[''] + asset_options_labels,
@@ -1742,6 +1750,7 @@ with tab_update:
                     )
                     entry['asset_label'] = selected_label
                     entry['asset_name'] = asset_label_to_name.get(selected_label, selected_label)
+                    entry['asset_code'] = asset_label_to_code.get(selected_label, '')
                     entry['is_new'] = (selected_label == '新增标的')
                 else:
                     st.markdown("*外部资金*")
@@ -1907,7 +1916,12 @@ with tab_update:
                 for e in entries:
                     if e['type'] not in ('买入', '卖出') or not e['asset_name'] or e['is_new']:
                         continue
-                    mask = template['Name'] == e['asset_name']
+                    # 优先用 Code 精确匹配（避免同名资产如 GOLD/GOLD.P 混淆）
+                    _e_code = e.get('asset_code', '')
+                    if _e_code:
+                        mask = template['Code'].astype(str) == _e_code
+                    else:
+                        mask = template['Name'] == e['asset_name']
                     if not mask.any():
                         st.warning(f"找不到资产「{e['asset_name']}」，跳过写入")
                         continue
@@ -2254,6 +2268,11 @@ with tab_update:
                     _template.at[i, 'Currency'] = res['currency']
                     _template.at[i, 'Exchange_Rate'] = res['fx_rate']
                 _ok += 1
+            elif res['status'] == 'ok':
+                # status=ok 但 price 是 NaN，归入 error 方便重试
+                _price_results[code]['status'] = 'error'
+                _price_results[code]['msg'] = f"返回 NaN（{res.get('msg', '')}）"
+                _err += 1
             elif res['status'] == 'manual':
                 _manual += 1
             else:
@@ -2575,6 +2594,62 @@ with tab_update:
                 roll_historical_cost(os.path.dirname(csv_path), _updated_df)
             except Exception:
                 pass  # 静默失败，不影响主流程
+
+            # ─── 同步到 Obsidian vault ───
+            try:
+                from obsidian_sync import sync_to_obsidian
+                # 重新加载最新数据（刚保存的快照已写入 csv）
+                _sync_df = pd.read_csv(csv_path)
+                from nav_engine import (
+                    compute_fund_nav, compute_allocation, compute_cost_basis, compute_xirr
+                )
+                _sync_nav = compute_fund_nav(_sync_df)
+                _sync_alloc = compute_allocation(_sync_df)
+                _sync_cost = compute_cost_basis(_sync_df)
+                _sync_xirr = compute_xirr(_sync_df)
+
+                # 最大回撤
+                _sync_mdd = None
+                if _sync_nav is not None and len(_sync_nav) > 1:
+                    _navs = _sync_nav['NAV'].astype(float)
+                    _peak = _navs.cummax()
+                    _sync_mdd = float(((_navs - _peak) / _peak).min())
+
+                # 儿子基金（可选）
+                _son_nav_s = _son_cost_s = _son_xirr_s = None
+                _son_csv = os.path.join(
+                    os.environ.get('FAMILYFUND_SON_DATA',
+                                   os.path.join(os.path.dirname(csv_path), 'son')),
+                    'portfolio.csv'
+                )
+                if os.path.exists(_son_csv):
+                    try:
+                        from nav_engine import compute_fund_nav as _cfn
+                        _son_df = pd.read_csv(_son_csv)
+                        _son_nav_s = _cfn(_son_df)
+                        _son_cost_s = compute_cost_basis(_son_df)
+                        _son_xirr_s = compute_xirr(_son_df)
+                    except Exception:
+                        pass
+
+                _obs_result = sync_to_obsidian(
+                    date_str=new_date_str,
+                    data_dir=os.path.dirname(csv_path),
+                    fund_nav_df=_sync_nav,
+                    allocation_df=_sync_alloc,
+                    cost_basis_df=_sync_cost,
+                    xirr=_sync_xirr,
+                    max_drawdown=_sync_mdd,
+                    son_nav_df=_son_nav_s,
+                    son_cost_df=_son_cost_s,
+                    son_xirr=_son_xirr_s,
+                )
+                if _obs_result['ok']:
+                    st.info(f"📱 Obsidian 已同步：{_obs_result['files_written']} 个文件")
+                else:
+                    st.warning(f"Obsidian 同步失败（不影响数据）：{_obs_result['error']}")
+            except Exception as _obs_err:
+                st.warning(f"Obsidian 同步失败（不影响数据）：{_obs_err}")
 
             # 检测新建仓标的是否有研报，暂存到 session_state，等用户确认后再 rerun
             _new_entries = [
@@ -6525,7 +6600,8 @@ with tab_son:
                     _son_holdings = [{'code': str(r['Code']), 'name': r['Name']}
                                      for _, r in _son_latest2.iterrows() if pd.notna(r['Name'])]
                 st.session_state['son_sms_parsed'] = parse_sms(
-                    _son_sms_text, _son_holdings, data_dir=SON_DATA_DIR)
+                    _son_sms_text, _son_holdings, data_dir=SON_DATA_DIR,
+                    fallback_data_dir=os.path.dirname(csv_path))
                 st.rerun()
 
         if 'son_sms_parsed' in st.session_state:
@@ -6539,6 +6615,20 @@ with tab_son:
 
             if st.button("✅ 应用解析结果", key="son_sms_apply", type="primary"):
                 _son_template = st.session_state['son_update_template'].copy()
+                # 建立 code→asset_class 查询表：dca_config 优先，快照兜底
+                _son_code2class = {}
+                if son_df is not None and not son_df.empty:
+                    _latest = son_df[son_df['Date'] == son_df['Date'].max()]
+                    _son_code2class = {str(r['Code']): r['Asset_Class']
+                                       for _, r in _latest.iterrows() if pd.notna(r['Code'])}
+                try:
+                    from dca_manager import load_dca_config as _load_dca
+                    _son_dca_plans = _load_dca(SON_DATA_DIR).get('plans', [])
+                    for _p in _son_dca_plans:
+                        if _p.get('code') and _p.get('asset_class'):
+                            _son_code2class[str(_p['code'])] = _p['asset_class']
+                except Exception:
+                    pass
                 _applied = 0
                 for r in _son_parsed:
                     if r.get('parse_error') or not r['matched_code']:
@@ -6551,6 +6641,18 @@ with tab_son:
                         _son_template.at[idx, 'Current_Price'] = float(r['nav'])
                         _son_template.at[idx, 'Net_Cash_Flow'] = round(
                             float(_son_template.at[idx, 'Net_Cash_Flow'] or 0) + float(r['amount']), 2)
+                    else:
+                        _ac = _son_code2class.get(str(r['matched_code']), 'US_Growth_Fund')
+                        _son_template = pd.concat([_son_template, pd.DataFrame([{
+                            'Asset_Class': _ac,
+                            'Platform': '纳指场外',
+                            'Name': r['matched_name'], 'Code': r['matched_code'],
+                            'Currency': 'CNY', 'Exchange_Rate': 1.0,
+                            'Shares': float(r['shares']),
+                            'Current_Price': float(r['nav']),
+                            'Total_Value': 0.0,
+                            'Net_Cash_Flow': float(r['amount']),
+                        }])], ignore_index=True)
                     _applied += 1
                 st.session_state['son_update_template'] = _son_template
                 del st.session_state['son_sms_parsed']
@@ -6617,7 +6719,7 @@ with tab_son:
         _son_raw = load_portfolio(SON_CSV) if os.path.exists(SON_CSV) and os.path.getsize(SON_CSV) > 0 else pd.DataFrame()
         with st.spinner("拉取净值..."):
             _son_prices = fetch_latest_prices(
-                st.session_state['son_update_template'] if not st.session_state['son_update_template'].empty else _son_raw,
+                son_df if son_df is not None and not son_df.empty else _son_raw,
                 SON_DATA_DIR)
         _son_tmpl = st.session_state['son_update_template'].copy()
         _son_ok = 0
