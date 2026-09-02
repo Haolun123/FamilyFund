@@ -164,13 +164,12 @@ def test_sync_snapshot_is_appended_not_overwritten(tmp_path):
     assert os.path.exists(os.path.join(snap_dir, '2026-09-01.md'))
 
 
-def test_sync_dashboard_not_overwritten(tmp_path):
-    """主看板文件用户自定义后，第二次同步不应覆盖。"""
+def test_sync_dashboard_overwritten_each_run(tmp_path):
+    """_dashboard.md 每次同步都应被覆盖（含最新图表数据）。"""
     vault = str(tmp_path / 'vault')
     data_dir = str(tmp_path / 'data')
     os.makedirs(data_dir)
 
-    # 第一次同步（生成看板）
     sync_to_obsidian(
         date_str='2026-08-25', data_dir=data_dir,
         fund_nav_df=_make_nav_df(), allocation_df=_make_allocation_df(),
@@ -178,22 +177,19 @@ def test_sync_dashboard_not_overwritten(tmp_path):
         xirr=None, max_drawdown=None, vault_path=vault,
     )
 
-    # 用户修改看板
-    dash_path = os.path.join(vault, 'familyfund', '_dashboard.md')
-    with open(dash_path, 'w') as f:
-        f.write('# 我的自定义看板\n')
+    first_content = open(os.path.join(vault, 'familyfund', '_dashboard.md')).read()
 
-    # 第二次同步
+    # 第二次同步（不同日期）
     sync_to_obsidian(
         date_str='2026-09-01', data_dir=data_dir,
-        fund_nav_df=_make_nav_df(), allocation_df=_make_allocation_df(),
+        fund_nav_df=_make_nav_df(rows=5), allocation_df=_make_allocation_df(),
         cost_basis_df=_make_cost_basis_df(),
         xirr=None, max_drawdown=None, vault_path=vault,
     )
 
-    with open(dash_path) as f:
-        content = f.read()
-    assert '我的自定义看板' in content
+    second_content = open(os.path.join(vault, 'familyfund', '_dashboard.md')).read()
+    assert 'updated: 2026-09-01' in second_content
+    assert second_content != first_content
 
 
 def test_sync_holdings_overwritten_on_second_run(tmp_path):

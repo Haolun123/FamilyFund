@@ -2632,6 +2632,24 @@ with tab_update:
                     except Exception:
                         pass
 
+                # class_nav、sharpe、calmar、total_invested
+                from nav_engine import compute_class_nav, compute_sharpe, compute_calmar
+                _sync_class_nav = compute_class_nav(_sync_df)
+                _sync_sharpe = compute_sharpe(_sync_nav) if _sync_nav is not None else None
+                _sync_calmar = compute_calmar(_sync_nav) if _sync_nav is not None else None
+                _first_date = _sync_df['Date'].min()
+                _sync_invested = float(
+                    _sync_df[_sync_df['Date'] == _first_date]['Total_Value'].sum()
+                )
+                _sync_inflows = float(
+                    _sync_df[
+                        (_sync_df['Date'] > _first_date) &
+                        (_sync_df['Asset_Class'].isin(['Cash', 'Company_Stock'])) &
+                        (_sync_df['Net_Cash_Flow'] > 0)
+                    ]['Net_Cash_Flow'].sum()
+                )
+                _sync_total_invested = _sync_invested + _sync_inflows
+
                 _obs_result = sync_to_obsidian(
                     date_str=new_date_str,
                     data_dir=os.path.dirname(csv_path),
@@ -2640,6 +2658,10 @@ with tab_update:
                     cost_basis_df=_sync_cost,
                     xirr=_sync_xirr,
                     max_drawdown=_sync_mdd,
+                    class_nav_dict=_sync_class_nav,
+                    sharpe=_sync_sharpe,
+                    calmar=_sync_calmar,
+                    total_invested=_sync_total_invested,
                     son_nav_df=_son_nav_s,
                     son_cost_df=_son_cost_s,
                     son_xirr=_son_xirr_s,
