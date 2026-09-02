@@ -2658,6 +2658,7 @@ with tab_update:
                     cost_basis_df=_sync_cost,
                     xirr=_sync_xirr,
                     max_drawdown=_sync_mdd,
+                    raw_df=_sync_df,
                     class_nav_dict=_sync_class_nav,
                     sharpe=_sync_sharpe,
                     calmar=_sync_calmar,

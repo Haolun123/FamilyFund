@@ -333,6 +333,289 @@ def _build_holdings_table(cost_basis_df: pd.DataFrame) -> str:
     return '\n'.join(rows) + '\n'
 
 
+# ── 风险集中度 ────────────────────────────────────────────────────────────────
+
+def _build_concentration_section(raw_df: pd.DataFrame) -> str:
+    if raw_df is None or raw_df.empty or 'Date' not in raw_df.columns:
+        return ''
+    latest_date = raw_df['Date'].max()
+    latest = raw_df[raw_df['Date'] == latest_date].copy()
+    grand_total = latest['Total_Value'].sum()
+    if grand_total <= 0:
+        return ''
+
+    CLASS_THRESHOLD   = 40.0  # %
+    HOLDING_THRESHOLD = 20.0  # %
+
+    # 类别集中度
+    cls_grp = latest.groupby('Asset_Class')['Total_Value'].sum().reset_index()
+    cls_grp['Pct'] = (cls_grp['Total_Value'] / grand_total * 100).round(1)
+    cls_grp = cls_grp.sort_values('Pct', ascending=False)
+
+    # 单标的集中度（排除 Cash）
+    hld_grp = latest[latest['Asset_Class'] != 'Cash'].groupby('Name')['Total_Value'].sum().reset_index()
+    hld_grp['Pct'] = (hld_grp['Total_Value'] / grand_total * 100).round(1)
+    hld_grp = hld_grp[hld_grp['Pct'] >= 1.0].sort_values('Pct', ascending=False)
+
+    lines = ['## ⚠️ 风险集中度\n']
+
+    # 警告
+    over_cls = cls_grp[cls_grp['Pct'] > CLASS_THRESHOLD]
+    over_hld = hld_grp[hld_grp['Pct'] > HOLDING_THRESHOLD]
+    if not over_cls.empty:
+        for _, r in over_cls.iterrows():
+            disp = CLASS_DISPLAY.get(r['Asset_Class'], r['Asset_Class'])
+            lines.append(f'> ⚠️ **{disp}** 占比 {r["Pct"]:.1f}%，超过类别阈值 {CLASS_THRESHOLD:.0f}%')
+    if not over_hld.empty:
+        for _, r in over_hld.iterrows():
+            lines.append(f'> ⚠️ **{r["Name"]}** 占比 {r["Pct"]:.1f}%，超过单标的阈值 {HOLDING_THRESHOLD:.0f}%')
+    if over_cls.empty and over_hld.empty:
+        lines.append('> ✅ 集中度正常：无类别超过 40%，无单持仓超过 20%')
+    lines.append('')
+
+    # 类别集中度表
+    lines.append('**类别集中度**\n')
+    lines.append('| 类别 | 市值 | 占比 | 状态 |')
+    lines.append('|------|------|------|------|')
+    for _, r in cls_grp.iterrows():
+        disp   = CLASS_DISPLAY.get(r['Asset_Class'], r['Asset_Class'])
+        flag   = '🔴' if r['Pct'] > CLASS_THRESHOLD else ('🟡' if r['Pct'] > 30 else '🟢')
+        bar    = '█' * int(r['Pct'] / 5)
+        lines.append(f'| {disp} | ¥{int(r["Total_Value"]):,} | {r["Pct"]:.1f}% {bar} | {flag} |')
+    lines.append('')
+
+    # 单标的集中度表（只显示 ≥1%）
+    lines.append('**单标的集中度（≥1%）**\n')
+    lines.append('| 标的 | 市值 | 占比 | 状态 |')
+    lines.append('|------|------|------|------|')
+    for _, r in hld_grp.iterrows():
+        flag = '🔴' if r['Pct'] > HOLDING_THRESHOLD else ('🟡' if r['Pct'] > 10 else '🟢')
+        bar  = '█' * int(r['Pct'] / 2)
+        lines.append(f'| {r["Name"]} | ¥{int(r["Total_Value"]):,} | {r["Pct"]:.1f}% {bar} | {flag} |')
+    lines.append('')
+
+    return '\n'.join(lines)
+
+
+# ── 货币敞口 ──────────────────────────────────────────────────────────────────
+
+def _build_currency_section(raw_df: pd.DataFrame) -> str:
+    if raw_df is None or raw_df.empty or 'Date' not in raw_df.columns:
+        return ''
+    latest_date = raw_df['Date'].max()
+    latest = raw_df[raw_df['Date'] == latest_date].copy()
+
+    # 黄金单独一桶
+    latest.loc[latest['Asset_Class'] == 'Gold', 'Currency'] = 'Gold'
+    grand_total = latest['Total_Value'].sum()
+    if grand_total <= 0:
+        return ''
+
+    ccy_grp = latest.groupby('Currency').agg(
+        CNY_Value=('Total_Value', 'sum')
+    ).reset_index()
+    ccy_grp['Pct'] = (ccy_grp['CNY_Value'] / grand_total * 100).round(1)
+    ccy_grp = ccy_grp.sort_values('Pct', ascending=False)
+
+    # 最新汇率
+    rates = {}
+    for _, row in latest[latest['Currency'] != 'CNY'].iterrows():
+        ccy = row.get('Currency', 'CNY')
+        rate = row.get('Exchange_Rate', 1.0)
+        if ccy not in rates and ccy not in ('CNY', 'Gold'):
+            rates[ccy] = float(rate)
+
+    # 饼图
+    non_gold = ccy_grp[ccy_grp['Currency'] != 'Gold']
+    labels_str = ', '.join(f'"{r["Currency"]}"' for _, r in non_gold.iterrows())
+    values_str = ', '.join(str(r['Pct']) for _, r in non_gold.iterrows())
+    pie = f"""\
+```chart
+type: pie
+labels: [{labels_str}]
+series:
+  - data: [{values_str}]
+width: 60%
+labelColors: true
+```"""
+
+    lines = ['## 💱 货币敞口\n', pie, '']
+
+    lines.append('| 货币 | CNY 市值 | 占比 | 汇率 |')
+    lines.append('|------|---------|------|------|')
+    ccy_labels = {'CNY': '人民币', 'HKD': '港币', 'USD': '美元', 'EUR': '欧元', 'Gold': '黄金'}
+    for _, r in ccy_grp.iterrows():
+        ccy  = r['Currency']
+        name = ccy_labels.get(ccy, ccy)
+        rate = rates.get(ccy)
+        rate_str = f'{rate:.4f}' if rate else '—'
+        lines.append(f'| {name}（{ccy}）| ¥{int(r["CNY_Value"]):,} | {r["Pct"]:.1f}% | {rate_str} |')
+    lines.append('')
+    if rates:
+        lines.append(f'*汇率为最新快照日（{latest_date}）数值*\n')
+
+    return '\n'.join(lines)
+
+
+# ── 盈亏分析 ──────────────────────────────────────────────────────────────────
+
+def _build_pnl_section(cost_basis_df: pd.DataFrame) -> str:
+    if cost_basis_df is None or cost_basis_df.empty:
+        return ''
+
+    cost_col = 'Cost_Basis' if 'Cost_Basis' in cost_basis_df.columns else 'Cost'
+    pnl_col  = 'Profit_Loss' if 'Profit_Loss' in cost_basis_df.columns else None
+    rate_col = 'Profit_Loss_Rate' if 'Profit_Loss_Rate' in cost_basis_df.columns else None
+    name_col = 'Name' if 'Name' in cost_basis_df.columns else 'Asset'
+
+    pl_df = cost_basis_df[
+        (cost_basis_df['Asset_Class'] != 'Cash') &
+        (cost_basis_df['Market_Value'] > 0)
+    ].copy()
+    if pl_df.empty:
+        return ''
+
+    total_cost = pl_df[cost_col].sum()
+    total_mv   = pl_df['Market_Value'].sum()
+    total_pnl  = total_mv - total_cost
+    total_rate = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+
+    lines = ['## 💰 盈亏分析\n']
+
+    # KPI
+    sign = '+' if total_pnl >= 0 else ''
+    lines.append(f'| 指标 | 数值 |\n|------|------|\n'
+                 f'| 总成本 | ¥{total_cost:,.0f} |\n'
+                 f'| 总市值 | ¥{total_mv:,.0f} |\n'
+                 f'| 总盈亏 | {sign}¥{total_pnl:,.0f}（{total_rate:+.2f}%）|\n')
+
+    # 按类别汇总条形图数据
+    cls_pnl = pl_df.groupby('Asset_Class').agg(
+        cost=(cost_col, 'sum'), mv=('Market_Value', 'sum')
+    ).reset_index()
+    cls_pnl['pnl'] = cls_pnl['mv'] - cls_pnl['cost']
+    cls_pnl['rate'] = (cls_pnl['pnl'] / cls_pnl['cost'] * 100).round(2)
+    cls_pnl = cls_pnl.sort_values('pnl', ascending=False)
+
+    labels_str = ', '.join(f'"{CLASS_DISPLAY.get(r["Asset_Class"], r["Asset_Class"])}"'
+                           for _, r in cls_pnl.iterrows())
+    values_str = ', '.join(str(round(r['rate'], 2)) for _, r in cls_pnl.iterrows())
+
+    lines.append('**各类别盈亏率（%）**\n')
+    lines.append(f"""\
+```chart
+type: bar
+labels: [{labels_str}]
+series:
+  - title: 盈亏率%
+    data: [{values_str}]
+width: 100%
+labelColors: true
+beginAtZero: true
+```
+""")
+
+    # 明细表（按盈亏额排序）
+    pl_sorted = pl_df.copy()
+    pl_sorted['_pnl'] = pl_sorted['Market_Value'] - pl_sorted[cost_col]
+    pl_sorted = pl_sorted.sort_values('_pnl', ascending=False)
+
+    lines.append('**持仓盈亏明细**\n')
+    lines.append('| 标的 | 类别 | 成本 | 市值 | 盈亏 | 盈亏率 |')
+    lines.append('|------|------|------|------|------|--------|')
+    for _, row in pl_sorted.iterrows():
+        name = str(row.get(name_col, ''))
+        cls  = CLASS_DISPLAY.get(str(row['Asset_Class']), str(row['Asset_Class']))
+        cost = float(row[cost_col])
+        mv   = float(row['Market_Value'])
+        pnl  = float(row[pnl_col]) if pnl_col else (mv - cost)
+        rate = float(row[rate_col]) if rate_col else ((pnl / cost * 100) if cost > 0 else 0)
+        sign = '+' if pnl >= 0 else ''
+        lines.append(
+            f'| {name} | {cls} | ¥{cost:,.0f} | ¥{mv:,.0f} '
+            f'| {sign}¥{pnl:,.0f} | {rate:+.1f}% |'
+        )
+    lines.append('')
+    return '\n'.join(lines)
+
+
+# ── 收益归因 ──────────────────────────────────────────────────────────────────
+
+def _build_attribution_section(
+    raw_df: pd.DataFrame,
+    fund_nav_df: pd.DataFrame,
+    class_nav_dict: Dict[str, pd.DataFrame],
+) -> str:
+    try:
+        from nav_engine import compute_attribution
+    except ImportError:
+        return ''
+
+    if raw_df is None or raw_df.empty or 'Date' not in raw_df.columns:
+        return ''
+    if fund_nav_df is None or fund_nav_df.empty:
+        return ''
+
+    dates = sorted(raw_df['Date'].unique())
+    if len(dates) < 2:
+        return ''
+
+    start_date = dates[0]
+    end_date   = dates[-1]
+
+    try:
+        rows = compute_attribution(raw_df, fund_nav_df, class_nav_dict, start_date, end_date)
+    except Exception:
+        return ''
+
+    if not rows:
+        return ''
+
+    # 过滤掉 Cash（contribution_pct 为 None）
+    rows = [r for r in rows if r.get('contribution_pct') is not None]
+    rows_sorted = sorted(rows, key=lambda x: x['contribution_pct'], reverse=True)
+
+    # 条形图
+    labels_str = ', '.join(f'"{r["display_name"]}"' for r in rows_sorted)
+    contrib_str = ', '.join(str(round(float(r['contribution_pct']), 2)) for r in rows_sorted)
+    ret_str     = ', '.join(str(round(float(r['nav_return_pct']), 2)) for r in rows_sorted)
+
+    total_contrib = sum(float(r['contribution_pct']) for r in rows_sorted)
+
+    lines = [f'## 🔬 收益归因（建仓以来，{start_date} → {end_date}）\n']
+    lines.append(f'**总贡献合计：{total_contrib:+.2f}%**\n')
+
+    lines.append('**各类别贡献率（%）**\n')
+    lines.append(f"""\
+```chart
+type: bar
+labels: [{labels_str}]
+series:
+  - title: 贡献率%
+    data: [{contrib_str}]
+width: 100%
+labelColors: true
+beginAtZero: true
+```
+""")
+
+    lines.append('**归因明细**\n')
+    lines.append('| 类别 | 期初NAV | 期末NAV | 涨跌幅 | 期初权重 | 贡献率 |')
+    lines.append('|------|---------|---------|--------|---------|--------|')
+    for r in rows_sorted:
+        sign = '+' if float(r['contribution_pct']) >= 0 else ''
+        lines.append(
+            f'| {r["display_name"]} '
+            f'| {float(r["nav_start"]):.4f} '
+            f'| {float(r["nav_end"]):.4f} '
+            f'| {float(r["nav_return_pct"]):+.2f}% '
+            f'| {float(r["weight_start"]):.1f}% '
+            f'| {sign}{float(r["contribution_pct"]):.2f}% |'
+        )
+    lines.append('')
+    return '\n'.join(lines)
+
+
 # ── 主 dashboard 生成 ─────────────────────────────────────────────────────────
 
 def _build_main_dashboard(
@@ -341,6 +624,7 @@ def _build_main_dashboard(
     class_nav_dict: Dict[str, pd.DataFrame],
     allocation_df: pd.DataFrame,
     cost_basis_df: pd.DataFrame,
+    raw_df: pd.DataFrame,
     xirr: Optional[float],
     sharpe: Optional[float],
     calmar: Optional[float],
@@ -381,6 +665,18 @@ updated: {date_str}
 
     # 持仓明细表
     sections.append(_build_holdings_table(cost_basis_df))
+
+    # 风险集中度
+    sections.append(_build_concentration_section(raw_df))
+
+    # 货币敞口
+    sections.append(_build_currency_section(raw_df))
+
+    # 盈亏分析
+    sections.append(_build_pnl_section(cost_basis_df))
+
+    # 收益归因
+    sections.append(_build_attribution_section(raw_df, fund_nav_df, class_nav_dict))
 
     # 历史净值表（Dataview，从 snapshots 读）
     sections.append("""\
@@ -729,6 +1025,7 @@ def sync_to_obsidian(
     cost_basis_df: pd.DataFrame,
     xirr: Optional[float],
     max_drawdown: Optional[float],
+    raw_df: Optional[pd.DataFrame] = None,
     weekly_dca: Optional[float] = None,
     class_nav_dict: Optional[Dict[str, pd.DataFrame]] = None,
     sharpe: Optional[float] = None,
@@ -761,10 +1058,13 @@ def sync_to_obsidian(
         if total_invested is None:
             total_invested = float(fund_nav_df.iloc[0]['Total_Value']) if not fund_nav_df.empty else 0.0
 
+        # raw_df 为 None 时用空 DataFrame（集中度/货币敞口不渲染）
+        _raw = raw_df if raw_df is not None else pd.DataFrame()
+
         # ── 1. 主 dashboard（每次全量覆盖）─────────────────────────────────
         _cn_dict = class_nav_dict or {}
         dash_content = _build_main_dashboard(
-            date_str, fund_nav_df, _cn_dict, allocation_df, cost_basis_df,
+            date_str, fund_nav_df, _cn_dict, allocation_df, cost_basis_df, _raw,
             xirr, sharpe, calmar, total_invested,
         )
         _write_file(os.path.join(ff_dir, '_dashboard.md'), dash_content)
