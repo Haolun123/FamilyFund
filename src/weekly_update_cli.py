@@ -49,13 +49,15 @@ SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# ── 手动填写标的（无法自动拉取净值）───────────────────────────────────────────
+# ── 手动填写标的（API 确认无净值数据，永久无法拉取）─────────────────────────
 
 MANUAL_PRICE_ASSETS = {
-    '月月宝':  'JY040214',
-    '季季宝':  '133038A',
-    '道指ETF': '513400',   # 场内 ETF，yfinance 无法稳定拉取
+    '月月宝': 'JY040214',   # 货币基金，天天基金 API 无净值
+    '季季宝': '133038A',    # 货币基金，天天基金 API 无净值
 }
+
+# 退避重试策略：第一次失败等 30s，第二次失败等 60s，再失败交互
+RETRY_DELAYS = [30, 60]
 
 
 # ── 解析 _weekly_input.md ─────────────────────────────────────────────────────
@@ -439,61 +441,131 @@ def _adj_cash(df: pd.DataFrame, delta: float):
         )
 
 
-# ── 步骤四：净值拉取 ──────────────────────────────────────────────────────────
+# ── 步骤四：净值拉取（带退避重试） ──────────────────────────────────────────
 
-def step_prices(template_df: pd.DataFrame, manual_prices: dict
-                ) -> tuple[pd.DataFrame, list]:
-    warnings = []
-    df = template_df.copy()
+def _fetch_one_with_retry(code: str, name: str) -> tuple[Optional[dict], str]:
+    """
+    拉取单个标的价格，失败后按退避策略重试。
+    返回 (result_dict_or_None, status_msg)
+    result_dict 包含 price, exchange_rate 等字段。
+    """
+    import time
+    from price_fetcher import _route
 
-    # 自动拉取
-    try:
-        from price_fetcher import fetch_latest_prices
-        price_map = fetch_latest_prices(df, data_dir=DATA_DIR)
-        updated = 0
-        for code, info in price_map.items():
-            price = info.get('price')
-            rate  = info.get('exchange_rate')
-            if price and str(price) != 'nan':
-                mask = df['Code'] == code
-                if mask.any():
-                    df.loc[mask, 'Current_Price'] = price
-                    if rate and str(rate) != 'nan':
-                        df.loc[mask, 'Exchange_Rate'] = rate
-                    df.loc[mask, 'Total_Value'] = (
-                        df.loc[mask, 'Shares'] *
-                        df.loc[mask, 'Current_Price'] *
-                        df.loc[mask, 'Exchange_Rate']
-                    )
-                    updated += 1
-        warnings.append(f'✅ 自动拉取价格：{updated} 个标的更新')
-    except Exception as e:
-        warnings.append(f'⚠️ 价格自动拉取失败：{e}（保留上期价格）')
+    last_err = ''
+    for attempt, delay in enumerate([0] + RETRY_DELAYS):
+        if delay > 0:
+            print(f'  ⏳ {name}（{code}）拉取失败，{delay}s 后重试（第{attempt}次）...',
+                  flush=True)
+            time.sleep(delay)
 
-    # 手动固收净值覆盖
+        result = _route(code)
+        status = result.get('status', 'error')
+        price  = result.get('price')
+
+        if status == 'ok' and price is not None:
+            return result, 'ok'
+
+        if status == 'manual':
+            return None, 'manual'
+
+        last_err = result.get('msg', 'unknown error')
+
+    return None, f'重试耗尽：{last_err}'
+
+
+def step_prices(template_df: pd.DataFrame, manual_prices: dict,
+                interactive: bool = True) -> tuple[pd.DataFrame, list, list]:
+    """
+    拉取所有标的价格：
+    - 手动填写标的（月月宝/季季宝）：直接用 manual_prices
+    - 其他标的：自动拉取，失败时退避重试，最终失败可交互填写
+    返回 (updated_df, warnings, failed_codes)
+    failed_codes：仍然失败且未被填写的标的列表（供 Skill 交互提示）
+    """
+    warnings  = []
+    failed    = []  # [(name, code)] 最终失败的
+    df        = template_df.copy()
+
+    # ── 手动净值覆盖（月月宝/季季宝）────────────────────────────────────────
     for name, nav in manual_prices.items():
-        mask = df['Name'] == name
-        if not mask.any():
-            # 尝试代码匹配
-            code = MANUAL_PRICE_ASSETS.get(name, '')
-            mask = df['Code'] == code
+        code = MANUAL_PRICE_ASSETS.get(name, '')
+        mask = (df['Name'] == name) | (df['Code'] == code)
         if not mask.any():
             warnings.append(f'⚠️ 手动净值：找不到标的"{name}"，已跳过')
             continue
         df.loc[mask, 'Current_Price'] = nav
         df.loc[mask, 'Total_Value'] = (
-            df.loc[mask, 'Shares'] * nav * df.loc[mask, 'Exchange_Rate'].fillna(1.0)
+            df.loc[mask, 'Shares'] * nav *
+            df.loc[mask, 'Exchange_Rate'].fillna(1.0)
         )
         warnings.append(f'✅ 手动净值：{name} = {nav}')
 
-    # NaN 检查（排除 Cash）
-    for _, row in df[df['Asset_Class'] != 'Cash'].iterrows():
-        if pd.isna(row['Total_Value']) or row['Total_Value'] == 0:
-            warnings.append(
-                f'⚠️ {row["Name"]} Total_Value 为空或0，已保留上期价格'
-            )
+    # ── 自动拉取（排除手动标的）─────────────────────────────────────────────
+    manual_codes = set(MANUAL_PRICE_ASSETS.values())
+    latest_date  = df['Date'].max() if 'Date' in df.columns else None
 
-    return df, warnings
+    # 逐标的拉取（限速：每个标的间隔 0.3s，避免 rate limit）
+    import time
+    rows_to_fetch = df[~df['Code'].isin(manual_codes)].drop_duplicates('Code')
+
+    ok_count = 0
+    for _, row in rows_to_fetch.iterrows():
+        code = str(row['Code'])
+        name = str(row['Name'])
+
+        if code == 'CASH':
+            continue
+
+        result, status_msg = _fetch_one_with_retry(code, name)
+
+        if result is not None:
+            mask  = df['Code'] == code
+            price = result['price']
+            rate  = result.get('exchange_rate')
+            df.loc[mask, 'Current_Price'] = price
+            if rate:
+                df.loc[mask, 'Exchange_Rate'] = rate
+            df.loc[mask, 'Total_Value'] = (
+                df.loc[mask, 'Shares'] *
+                df.loc[mask, 'Current_Price'] *
+                df.loc[mask, 'Exchange_Rate'].fillna(1.0)
+            )
+            ok_count += 1
+        elif status_msg == 'manual':
+            warnings.append(f'⚠️ {name}（{code}）无自动价格来源，使用上期价格')
+        else:
+            failed.append((name, code, status_msg))
+            warnings.append(f'❌ {name}（{code}）拉取失败，使用上期价格')
+
+    warnings.insert(0, f'✅ 自动拉取价格：{ok_count} 个成功，{len(failed)} 个失败')
+
+    # ── 交互填写（仅 CLI 交互模式）──────────────────────────────────────────
+    if interactive and failed:
+        print('\n以下标的价格拉取失败，请手动输入（直接回车跳过，使用上期价格）：')
+        still_failed = []
+        for name, code, err in failed:
+            cur = float(df.loc[df['Code'] == code, 'Current_Price'].values[0])
+            val = input(f'  {name}（{code}，上期价格 {cur}）当前净值/价格：').strip()
+            if val:
+                try:
+                    price = float(val)
+                    mask = df['Code'] == code
+                    df.loc[mask, 'Current_Price'] = price
+                    df.loc[mask, 'Total_Value'] = (
+                        df.loc[mask, 'Shares'] * price *
+                        df.loc[mask, 'Exchange_Rate'].fillna(1.0)
+                    )
+                    warnings.append(f'✅ 手动输入：{name} = {price}')
+                except ValueError:
+                    warnings.append(f'⚠️ {name} 输入格式错误，使用上期价格')
+                    still_failed.append((name, code))
+            else:
+                warnings.append(f'— {name} 跳过，使用上期价格')
+                still_failed.append((name, code))
+        failed = still_failed
+
+    return df, warnings, failed
 
 
 # ── 对账校验 ──────────────────────────────────────────────────────────────────
@@ -539,7 +611,8 @@ def reconcile(snapshot_df: pd.DataFrame, transactions: list
 
 def build_preview(date_str, snapshot_df, transactions,
                   date_msgs, price_warns, sms_warns,
-                  dow_warns, trade_warns, recon_ok, recon_msgs) -> str:
+                  dow_warns, trade_warns, recon_ok, recon_msgs,
+                  failed_codes=None) -> str:
     total = snapshot_df['Total_Value'].sum()
     cash  = float(snapshot_df.loc[
         snapshot_df['Asset_Class'] == 'Cash', 'Total_Value'
@@ -597,12 +670,17 @@ def build_preview(date_str, snapshot_df, transactions,
                 f'市值 ¥{row["Total_Value"]:,.0f}'
             )
 
-    lines += ['', '---']
-    if recon_ok:
-        lines.append('**✅ 预览通过，回复"确认执行"保存快照。**')
-    else:
+    if not recon_ok:
         lines.append('**❌ 对账不平，请修正后重新运行。**')
+        return '\n'.join(lines)
 
+    if failed_codes:
+        lines.append(
+            f'**⚠️ {len(failed_codes)} 个标的使用上期价格（'
+            + '、'.join(n for n, _, _ in failed_codes)
+            + '），总资产可能略有偏差。**'
+        )
+    lines.append('**✅ 预览通过，回复"确认执行"保存快照。**')
     return '\n'.join(lines)
 
 
@@ -732,10 +810,9 @@ date:
 
 ---
 
-## 💰 步骤四：固收净值（手动填，3个标的）
+## 💰 步骤四：固收净值（手动填，2个标的）
 月月宝:
 季季宝:
-道指ETF:
 
 ---
 
@@ -801,7 +878,9 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
     all_transactions += manual_tx
 
     # 步骤四：净值拉取
-    template, price_warns = step_prices(template, inp['manual_prices'])
+    template, price_warns, failed_codes = step_prices(
+        template, inp['manual_prices'], interactive=confirm
+    )
 
     # 对账
     recon_ok, recon_msgs = reconcile(template, all_transactions)
@@ -811,6 +890,7 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
         date_str, template, all_transactions,
         date_msgs, price_warns, sms_warns,
         dow_warns, trade_warns, recon_ok, recon_msgs,
+        failed_codes=failed_codes,
     )
 
     # 写入
