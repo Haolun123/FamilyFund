@@ -1161,7 +1161,39 @@ def sync_to_obsidian(
                 _write_holding_file(fpath, content)
                 files_written += 1
 
-        # ── 6. 儿子基金（可选）──────────────────────────────────────────────
+        # ── 6. 研报同步（Finance Reports/*/analysis/*.md → vault/research/）──
+        reports_base = os.path.join(data_dir, 'Finance Reports')
+        if os.path.isdir(reports_base):
+            research_dir = os.path.join(ff_dir, 'research')
+            os.makedirs(research_dir, exist_ok=True)
+            # 遍历持仓 + 观察两层目录
+            search_roots = [reports_base]
+            watchlist = os.path.join(reports_base, '_watchlist')
+            if os.path.isdir(watchlist):
+                search_roots.append(watchlist)
+
+            for root in search_roots:
+                for folder in os.listdir(root):
+                    if folder.startswith('_'):
+                        continue
+                    analysis_dir = os.path.join(root, folder, 'analysis')
+                    if not os.path.isdir(analysis_dir):
+                        continue
+                    dest_dir = os.path.join(research_dir, folder)
+                    os.makedirs(dest_dir, exist_ok=True)
+                    for fname in os.listdir(analysis_dir):
+                        if not fname.endswith('.md'):
+                            continue
+                        src = os.path.join(analysis_dir, fname)
+                        dst = os.path.join(dest_dir, fname)
+                        # 只在源文件比目标新时复制（避免每次全量写）
+                        if not os.path.exists(dst) or \
+                                os.path.getmtime(src) > os.path.getmtime(dst):
+                            with open(src, encoding='utf-8') as f:
+                                _write_file(dst, f.read())
+                            files_written += 1
+
+        # ── 7. 儿子基金（可选）──────────────────────────────────────────────
         if son_nav_df is not None and not son_nav_df.empty:
             son_dir = os.path.join(ff_dir, 'son_fund')
 
