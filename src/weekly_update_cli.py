@@ -971,26 +971,52 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
             return preview + '\n\n❌ 对账不平，已拒绝写入，请修正后重试。'
 
         # 道指抵扣交互确认
-        dow_confirmed = False
+        actual_dow_deduct = 0.0
         if dow_suggestion['dow_deduct'] > 0:
+            suggested = dow_suggestion['dow_deduct']
+            balance   = dow_suggestion['balance_now'] + dow_suggestion.get('topup_applied', 0)
             print(f'\n📊 道指抵扣建议：{dow_suggestion["msg"]}')
-            ans = input('是否执行道指抵扣？(y/N)：').strip().lower()
-            if ans in ('y', 'yes', '是', '确认'):
-                execute_dow_deduct(dow_suggestion, date_str)
-                # 在 snapshot 里记录道指 NCF
+            print(f'   建议金额 ¥{suggested:,.0f}（取整到10元），预付池余额 ¥{balance:,.0f}')
+            print(f'   直接回车 = 接受建议金额；输入数字 = 自定义金额；0 或 n = 跳过')
+            ans = input(f'抵扣金额（建议 ¥{suggested:,.0f}）：').strip()
+
+            if ans in ('', 'y', 'yes', '是'):
+                actual_dow_deduct = suggested
+            elif ans in ('0', 'n', 'no', '否', '跳过'):
+                print('— 跳过道指抵扣')
+            else:
+                try:
+                    custom = float(ans.replace(',', ''))
+                    if custom < 0:
+                        print('⚠️ 金额不能为负，已跳过')
+                    elif custom > balance:
+                        print(f'⚠️ ¥{custom:,.0f} 超过预付池余额 ¥{balance:,.0f}，已跳过')
+                    else:
+                        actual_dow_deduct = round(custom / 10) * 10  # 取整到10元
+                        print(f'  自定义金额取整为 ¥{actual_dow_deduct:,.0f}')
+                except ValueError:
+                    print('⚠️ 输入格式错误，已跳过道指抵扣')
+
+            if actual_dow_deduct > 0:
+                # 写入 dca_prepaid.json
+                from synthetic_sp import consume_prepaid, topup_prepaid
+                if dow_suggestion.get('topup_applied', 0) > 0:
+                    topup_prepaid(DATA_DIR, date_str, dow_suggestion['topup_applied'])
+                consume_prepaid(DATA_DIR, date_str, actual_dow_deduct)
+                # 在 snapshot 里记录道指ETF NCF
                 dow_mask = template['Code'] == '513400'
                 if dow_mask.any():
                     template.loc[dow_mask, 'Net_Cash_Flow'] = (
                         template.loc[dow_mask, 'Net_Cash_Flow'].fillna(0) +
-                        dow_suggestion['dow_deduct']
+                        actual_dow_deduct
                     )
-                dow_confirmed = True
-                print(f'✅ 道指抵扣 ¥{dow_suggestion["dow_deduct"]:,.0f} 已执行')
-            else:
-                print('— 跳过道指抵扣')
+                print(f'✅ 道指抵扣 ¥{actual_dow_deduct:,.0f} 已执行')
+
         elif dow_suggestion.get('topup_applied', 0) > 0:
             # 无需抵扣，但有补仓
-            execute_dow_deduct(dow_suggestion, date_str)
+            from synthetic_sp import topup_prepaid
+            topup_prepaid(DATA_DIR, date_str, dow_suggestion['topup_applied'])
+            print(f'✅ 道指补仓 ¥{dow_suggestion["topup_applied"]:,.0f} 已写入')
 
         save_msg = save_and_reset(date_str, template, all_transactions,
                                   input_path, inp['cash_delta'])
