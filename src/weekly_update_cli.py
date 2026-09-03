@@ -70,10 +70,9 @@ def parse_weekly_input(path: str) -> dict:
         'date':           None,
         'status':         'pending',
         'sms_lines':      [],
-        'dow_deduct':     True,   # 是否执行道指抵扣
-        'dow_topup':      None,   # 道指实物补仓金额
+        'dow_topup':      None,   # 道指实物补仓金额（可选）
         'trades':         [],
-        'manual_prices':  {},     # {'月月宝': 1.0231, ...}
+        'manual_prices':  {},
         'cash_delta':     None,
         'notes':          '',
         'errors':         [],
@@ -99,12 +98,9 @@ def parse_weekly_input(path: str) -> dict:
         if line and not line.startswith('<!--') and not line.startswith('>'):
             result['sms_lines'].append(line)
 
-    # 道指抵扣
+    # 道指补仓（可选）
     dow_block = _section(content, '步骤二：道指抵扣', '步骤三：手动交易登记')
     if dow_block:
-        m = re.search(r'^道指抵扣:\s*(.+)', dow_block, re.MULTILINE)
-        if m:
-            result['dow_deduct'] = m.group(1).strip() not in ('否', 'no', 'No', 'NO', '0')
         m = re.search(r'^道指补仓:\s*([\d,.]+)', dow_block, re.MULTILINE)
         if m:
             try:
@@ -315,65 +311,136 @@ def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str
     return df, transactions, warnings
 
 
-# ── 步骤二：道指抵扣 ──────────────────────────────────────────────────────────
+# ── 步骤二：道指抵扣（计算建议，不立即执行） ────────────────────────────────
 
-def step_dow_deduct(do_deduct: bool, dow_topup: Optional[float],
-                    template_df: pd.DataFrame, date_str: str
-                    ) -> tuple[pd.DataFrame, list, list]:
-    warnings, transactions = [], []
-    df = template_df.copy()
+def compute_dow_suggestion(
+    transactions: list,
+    dow_topup: Optional[float],
+    date_str: str,
+) -> dict:
+    """
+    根据本周短信/手动交易的实际纳指/标普投入，计算道指抵扣建议。
+    只计算，不写入 dca_prepaid.json——等用户确认后才执行。
+
+    返回：
+    {
+        'dow_deduct':    float,   # 建议抵扣金额（0表示无需抵扣）
+        'sp_actual':     float,
+        'ndx_actual':    float,
+        'sp_target':     float,
+        'ndx_target':    float,
+        'ndx_surplus':   float,
+        'balance_now':   float,   # 当前预付池余额（未扣减）
+        'balance_after': float,   # 抵扣后预付池余额
+        'need_topup':    bool,
+        'topup_applied': float,   # 本次补仓金额（若有）
+        'msg':           str,     # 给用户看的说明
+        'warnings':      list,
+    }
+    """
+    warnings = []
+    result = {
+        'dow_deduct': 0.0, 'sp_actual': 0.0, 'ndx_actual': 0.0,
+        'sp_target': 0.0, 'ndx_target': 0.0, 'ndx_surplus': 0.0,
+        'balance_now': 0.0, 'balance_after': 0.0,
+        'need_topup': False, 'topup_applied': dow_topup or 0.0,
+        'msg': '', 'warnings': warnings,
+    }
 
     try:
         from synthetic_sp import (
-            load_prepaid, compute_synthetic_dca, consume_prepaid, topup_prepaid
+            load_prepaid, compute_dow_deduct as _compute_dd, topup_prepaid,
         )
         from market_monitor import get_market_data
     except ImportError as e:
-        warnings.append(f'⚠️ 道指模块加载失败：{e}，跳过道指抵扣')
-        return df, transactions, warnings
+        warnings.append(f'⚠️ 道指模块加载失败：{e}')
+        return result
 
-    # 先处理补仓（实物买入）
+    prepaid    = load_prepaid(DATA_DIR)
+    balance    = prepaid['dow_prepaid'].get('balance', 0.0)
+    result['balance_now'] = balance
+
+    # 若本次有补仓，先更新余额（但还不写入文件）
     if dow_topup and dow_topup > 0:
-        topup_prepaid(DATA_DIR, date_str, dow_topup)
-        warnings.append(f'✅ 道指预付池补仓 ¥{dow_topup:,.0f}')
+        balance += dow_topup
+        warnings.append(f'✅ 道指补仓 ¥{dow_topup:,.0f}（确认后写入）')
 
-    if not do_deduct:
-        warnings.append('— 本周跳过道指抵扣')
-        return df, transactions, warnings
+    # 从本周 transactions 汇总 sp_actual / ndx_actual
+    # 需要知道每个 Code 对应的 Asset_Class
+    raw_df = pd.read_csv(CSV_PATH)
+    latest = raw_df[raw_df['Date'] == raw_df['Date'].max()]
+    code2class = dict(zip(latest['Code'].astype(str), latest['Asset_Class']))
+
+    sp_actual  = 0.0
+    ndx_actual = 0.0
+    for t in transactions:
+        if t.get('Direction') != '买入':
+            continue
+        code = str(t.get('Code', ''))
+        cls  = code2class.get(code, '')
+        if cls == 'US_Blend_Fund':
+            sp_actual  += float(t.get('Amount_CNY', 0))
+        elif cls == 'US_Growth_Fund':
+            ndx_actual += float(t.get('Amount_CNY', 0))
+
+    result['sp_actual']  = sp_actual
+    result['ndx_actual'] = ndx_actual
+
+    if sp_actual == 0 and ndx_actual == 0:
+        result['msg'] = '本周无美股买入，无需道指抵扣'
+        return result
 
     try:
         market_data = get_market_data(DATA_DIR)
-        prepaid = load_prepaid(DATA_DIR)
-        dca = compute_synthetic_dca(market_data, prepaid['config'])
-
-        dow_weekly = dca.get('dow_weekly', 0)
-        sp_mult    = dca.get('sp_multiplier', None)
-
-        if dow_weekly <= 0:
-            warnings.append('— 本周道指配额为0（标普无需补，跳过抵扣）')
-            return df, transactions, warnings
-
-        result = consume_prepaid(DATA_DIR, date_str, dow_weekly, sp_multiplier=sp_mult)
-        balance = result['balance_after']
-        need_topup = result['need_topup']
-
-        warnings.append(
-            f'✅ 道指抵扣 ¥{dow_weekly:,.0f}，'
-            f'预付池余额 ¥{balance:,.0f}'
-            + ('  ⚠️ 余额不足，建议补仓' if need_topup else '')
+        dd = _compute_dd(
+            market_data, prepaid['config'],
+            sp_actual=sp_actual, ndx_actual=ndx_actual,
         )
+        dow_deduct = dd.get('dow_deduct', 0.0)
 
-        # 更新 道指ETF Total_Value（虚拟消耗，不改 Shares，只记 NCF）
-        dow_mask = df['Code'] == '513400'
-        if dow_mask.any():
-            df.loc[dow_mask, 'Net_Cash_Flow'] = (
-                df.loc[dow_mask, 'Net_Cash_Flow'].fillna(0) + dow_weekly
+        result.update({
+            'dow_deduct':    dow_deduct,
+            'sp_target':     dd.get('sp_target', 0),
+            'ndx_target':    dd.get('ndx_target', 0),
+            'ndx_surplus':   dd.get('ndx_surplus', 0),
+            'balance_after': round(balance - dow_deduct, 2),
+            'need_topup':    round(balance - dow_deduct, 2) <= 0,
+        })
+
+        if dow_deduct > 0:
+            result['msg'] = (
+                f'纳指实际 ¥{ndx_actual:,.0f}（目标 ¥{dd["ndx_target"]:,.0f}），'
+                f'超额 ¥{dd["ndx_surplus"]:,.0f}，'
+                f'建议道指抵扣 ¥{dow_deduct:,.0f}，'
+                f'抵扣后预付池余额 ¥{result["balance_after"]:,.0f}'
+                + ('  ⚠️ 余额不足，建议补仓' if result['need_topup'] else '')
+            )
+        else:
+            result['msg'] = (
+                f'纳指实际 ¥{ndx_actual:,.0f}（目标 ¥{dd["ndx_target"]:,.0f}），'
+                f'未超额，无需道指抵扣'
             )
 
     except Exception as e:
         warnings.append(f'⚠️ 道指抵扣计算失败：{e}')
 
-    return df, transactions, warnings
+    return result
+
+
+def execute_dow_deduct(suggestion: dict, date_str: str):
+    """
+    用户确认后，真正执行道指抵扣：写入 dca_prepaid.json。
+    """
+    from synthetic_sp import load_prepaid, consume_prepaid, topup_prepaid
+
+    # 补仓
+    if suggestion.get('topup_applied', 0) > 0:
+        topup_prepaid(DATA_DIR, date_str, suggestion['topup_applied'])
+
+    # 抵扣
+    if suggestion.get('dow_deduct', 0) > 0:
+        consume_prepaid(DATA_DIR, date_str, suggestion['dow_deduct'])
+
 
 
 # ── 步骤三：手动交易 ──────────────────────────────────────────────────────────
@@ -611,7 +678,7 @@ def reconcile(snapshot_df: pd.DataFrame, transactions: list
 
 def build_preview(date_str, snapshot_df, transactions,
                   date_msgs, price_warns, sms_warns,
-                  dow_warns, trade_warns, recon_ok, recon_msgs,
+                  dow_suggestion, trade_warns, recon_ok, recon_msgs,
                   failed_codes=None) -> str:
     total = snapshot_df['Total_Value'].sum()
     cash  = float(snapshot_df.loc[
@@ -641,7 +708,14 @@ def build_preview(date_str, snapshot_df, transactions,
     for w in sms_warns: lines.append(f'  {w}')
 
     lines += ['', '### 📊 步骤二：道指抵扣']
-    for w in dow_warns: lines.append(f'  {w}')
+    dow_deduct = dow_suggestion.get('dow_deduct', 0)
+    if dow_deduct > 0:
+        lines.append(f'  💡 {dow_suggestion["msg"]}')
+        lines.append(f'  → 确认执行时将询问是否抵扣')
+    else:
+        lines.append(f'  — {dow_suggestion.get("msg", "无需抵扣")}')
+    for w in dow_suggestion.get('warnings', []):
+        lines.append(f'  {w}')
 
     lines += ['', '### 🔄 步骤三：手动交易']
     manual_tx = [t for t in transactions if t.get('Source') == 'Manual']
@@ -707,12 +781,12 @@ def save_and_reset(date_str: str, snapshot_df: pd.DataFrame,
     combined = pd.concat([existing, snapshot_df], ignore_index=True)
     _atomic_write_csv(combined, CSV_PATH)
 
-    # transaction.csv
+    # transaction.csv — 走 _atomic_write_csv 获得备份保护
     if transactions:
         tx_df = pd.DataFrame(transactions)
         if os.path.exists(TX_PATH):
             tx_df = pd.concat([pd.read_csv(TX_PATH), tx_df], ignore_index=True)
-        tx_df.to_csv(TX_PATH, index=False)
+        _atomic_write_csv(tx_df, TX_PATH)
 
     # 归档输入文件
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
@@ -800,7 +874,8 @@ date:
 ---
 
 ## 📊 步骤二：道指抵扣
-道指抵扣: 是
+<!-- Skill 自动计算，无需手动填 -->
+<!-- 只有本周买入了道指ETF实物补仓时，填金额 -->
 道指补仓:
 
 ---
@@ -867,11 +942,8 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
     template, sms_tx, sms_warns = step_sms(inp['sms_lines'], template, date_str)
     all_transactions += sms_tx
 
-    # 步骤二：道指抵扣
-    template, dow_tx, dow_warns = step_dow_deduct(
-        inp['dow_deduct'], inp['dow_topup'], template, date_str
-    )
-    all_transactions += dow_tx
+    # 步骤二：道指抵扣——计算建议（不执行）
+    dow_suggestion = compute_dow_suggestion(all_transactions, inp['dow_topup'], date_str)
 
     # 步骤三：手动交易
     template, manual_tx, trade_warns = step_trades(inp['trades'], template, date_str)
@@ -889,7 +961,7 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
     preview = build_preview(
         date_str, template, all_transactions,
         date_msgs, price_warns, sms_warns,
-        dow_warns, trade_warns, recon_ok, recon_msgs,
+        dow_suggestion, trade_warns, recon_ok, recon_msgs,
         failed_codes=failed_codes,
     )
 
@@ -897,6 +969,29 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
     if confirm:
         if not recon_ok:
             return preview + '\n\n❌ 对账不平，已拒绝写入，请修正后重试。'
+
+        # 道指抵扣交互确认
+        dow_confirmed = False
+        if dow_suggestion['dow_deduct'] > 0:
+            print(f'\n📊 道指抵扣建议：{dow_suggestion["msg"]}')
+            ans = input('是否执行道指抵扣？(y/N)：').strip().lower()
+            if ans in ('y', 'yes', '是', '确认'):
+                execute_dow_deduct(dow_suggestion, date_str)
+                # 在 snapshot 里记录道指 NCF
+                dow_mask = template['Code'] == '513400'
+                if dow_mask.any():
+                    template.loc[dow_mask, 'Net_Cash_Flow'] = (
+                        template.loc[dow_mask, 'Net_Cash_Flow'].fillna(0) +
+                        dow_suggestion['dow_deduct']
+                    )
+                dow_confirmed = True
+                print(f'✅ 道指抵扣 ¥{dow_suggestion["dow_deduct"]:,.0f} 已执行')
+            else:
+                print('— 跳过道指抵扣')
+        elif dow_suggestion.get('topup_applied', 0) > 0:
+            # 无需抵扣，但有补仓
+            execute_dow_deduct(dow_suggestion, date_str)
+
         save_msg = save_and_reset(date_str, template, all_transactions,
                                   input_path, inp['cash_delta'])
         return preview + f'\n\n{save_msg}'
