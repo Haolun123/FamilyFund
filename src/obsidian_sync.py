@@ -873,6 +873,39 @@ def _build_son_snapshot_frontmatter(
 
 # ── Holdings 文件 ─────────────────────────────────────────────────────────────
 
+PRESERVE_MARKER = '<!-- PRESERVE: 以下内容手动维护，自动同步不会覆盖 -->'
+
+_PRESERVE_TEMPLATE = f"""\
+{PRESERVE_MARKER}
+
+## 💡 关键洞见
+> 记录对这个标的的深度理解，不在决策框架里但很重要的推理过程。
+
+## 📓 投资日志
+> 按时间记录重要观察、复盘、心态变化。
+
+"""
+
+
+def _read_preserved_content(path: str) -> str:
+    """读取已有文件中保留区的内容（PRESERVE_MARKER 之后的所有内容）。"""
+    if not os.path.exists(path):
+        return _PRESERVE_TEMPLATE
+    with open(path, encoding='utf-8') as f:
+        content = f.read()
+    idx = content.find(PRESERVE_MARKER)
+    if idx == -1:
+        return _PRESERVE_TEMPLATE
+    return content[idx:]
+
+
+def _write_holding_file(path: str, auto_content: str) -> None:
+    """写入 holding 文件：自动生成部分 + 保留区（读取旧文件或使用模板）。"""
+    preserved = _read_preserved_content(path)
+    full_content = auto_content.rstrip('\n') + '\n\n' + preserved
+    _write_file(path, full_content)
+
+
 def _build_holding_file(
     name: str, code: str, asset_class: str,
     cost: float, market_value: float, pnl: float, pnl_pct: float,
@@ -1124,7 +1157,8 @@ def sync_to_obsidian(
                 content = _build_holding_file(
                     name, code, acls, cost, mv, pnl, pnl_pct, dec, date_str, target_num
                 )
-                _write_file(os.path.join(holdings_dir, _safe_filename(name) + '.md'), content)
+                fpath = os.path.join(holdings_dir, _safe_filename(name) + '.md')
+                _write_holding_file(fpath, content)
                 files_written += 1
 
         # ── 6. 儿子基金（可选）──────────────────────────────────────────────
