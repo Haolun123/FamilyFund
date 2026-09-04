@@ -122,7 +122,7 @@ def parse_weekly_input(path: str) -> dict:
             continue
         parts = line.split()
         if len(parts) < 3:
-            result['errors'].append(f'❌ 交易格式错误（方向 标的 金额 [手续费]）：{line}')
+            result['errors'].append(f'❌ 交易格式错误（方向 标的 金额 [手续费] [成交价]）：{line}')
             continue
         direction = parts[0]
         if direction not in ('买入', '卖出', '赎回'):
@@ -131,12 +131,13 @@ def parse_weekly_input(path: str) -> dict:
         try:
             amount = float(parts[2].replace(',', ''))
             fee    = float(parts[3].replace(',', '')) if len(parts) > 3 else 0.0
+            price  = float(parts[4].replace(',', '')) if len(parts) > 4 else None
         except ValueError:
-            result['errors'].append(f'❌ 交易金额格式错误：{line}')
+            result['errors'].append(f'❌ 交易金额/价格格式错误：{line}')
             continue
         result['trades'].append({
             'direction': direction, 'code_or_name': parts[1],
-            'amount': amount, 'fee': fee,
+            'amount': amount, 'fee': fee, 'price': price,
         })
 
     # 固收净值（手动）
@@ -712,6 +713,7 @@ def step_trades(trades: list, template_df: pd.DataFrame, date_str: str
         code_or_name = trade['code_or_name']
         amount       = trade['amount']
         fee          = trade['fee']
+        trade_price  = trade.get('price')  # 用户填的成交价（可为 None）
 
         mask = (df['Code'] == code_or_name) | (df['Name'] == code_or_name)
         if not mask.any():
@@ -722,35 +724,43 @@ def step_trades(trades: list, template_df: pd.DataFrame, date_str: str
         code      = df.loc[mask, 'Code'].values[0]
         cur_price = float(df.loc[mask, 'Current_Price'].values[0])
 
-        if direction == '买入':
-            ncf = amount + fee
-            df.loc[mask, 'Net_Cash_Flow'] = df.loc[mask, 'Net_Cash_Flow'].fillna(0) + ncf
-            if cur_price > 0:
-                df.loc[mask, 'Shares'] = (
-                    float(df.loc[mask, 'Shares'].values[0]) + amount / cur_price
-                )
-            df.loc[mask, 'Total_Value'] = (
-                df.loc[mask, 'Shares'] * cur_price
+        # 份额计算用的价格：优先用户填的成交价，否则用 API 拉取的当前价
+        # 成交价用于精确计算历史买入份额；当前价用于更新 Total_Value
+        exec_price = trade_price if trade_price and trade_price > 0 else cur_price
+
+        if exec_price <= 0:
+            warnings.append(f'⚠️ {name} 价格为0，无法计算份额，已跳过')
+            continue
+
+        if trade_price and trade_price != cur_price:
+            warnings.append(
+                f'  ℹ️ {name}：用成交价 {trade_price} 计算份额'
+                f'（当前价 {cur_price}，Total_Value 仍按当前价计算）'
             )
-            # 扣 Cash
+
+        if direction == '买入':
+            ncf        = amount + fee
+            new_shares = amount / exec_price
+            df.loc[mask, 'Net_Cash_Flow'] = df.loc[mask, 'Net_Cash_Flow'].fillna(0) + ncf
+            df.loc[mask, 'Shares']        = float(df.loc[mask, 'Shares'].values[0]) + new_shares
+            # Total_Value 始终用当前价（反映现值）
+            df.loc[mask, 'Total_Value']   = df.loc[mask, 'Shares'] * cur_price
             _adj_cash(df, -(amount + fee))
 
         elif direction in ('卖出', '赎回'):
-            ncf = -(amount - fee)
+            ncf           = -(amount - fee)
+            reduce_shares = amount / exec_price
             df.loc[mask, 'Net_Cash_Flow'] = df.loc[mask, 'Net_Cash_Flow'].fillna(0) + ncf
-            if cur_price > 0:
-                df.loc[mask, 'Shares'] = max(
-                    0,
-                    float(df.loc[mask, 'Shares'].values[0]) - amount / cur_price
-                )
-            df.loc[mask, 'Total_Value'] = df.loc[mask, 'Shares'] * cur_price
-            # 回 Cash
+            df.loc[mask, 'Shares']        = max(
+                0, float(df.loc[mask, 'Shares'].values[0]) - reduce_shares
+            )
+            df.loc[mask, 'Total_Value']   = df.loc[mask, 'Shares'] * cur_price
             _adj_cash(df, amount - fee)
 
         transactions.append({
             'Date': date_str, 'Name': name, 'Code': code,
             'Direction': direction, 'Amount_CNY': amount,
-            'Fee_CNY': fee, 'Source': 'Manual',
+            'Fee_CNY': fee, 'Price': trade_price, 'Source': 'Manual',
         })
 
     return df, transactions, warnings
@@ -978,9 +988,11 @@ def build_preview(date_str, snapshot_df, transactions,
     manual_tx = [t for t in transactions if t.get('Source') == 'Manual']
     if manual_tx:
         for t in manual_tx:
+            price_note = f'，成交价 {t["Price"]}' if t.get('Price') else '（用当前价）'
             lines.append(
                 f'  ✅ {t["Direction"]} {t["Name"]}：¥{t["Amount_CNY"]:,.0f}'
                 + (f'，手续费 ¥{t["Fee_CNY"]}' if t.get('Fee_CNY') else '')
+                + price_note
             )
     else:
         lines.append('  — 无手动交易')
@@ -1168,7 +1180,8 @@ date:
 ---
 
 ## 🔄 步骤三：手动交易登记
-
+<!-- 格式：方向 标的 金额CNY 手续费CNY [成交价] -->
+<!-- 成交价可选，填实际成交净值/价格用于精确计算份额 -->
 
 ---
 
