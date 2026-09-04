@@ -377,7 +377,12 @@ def _parse_one(sms: str) -> dict | None:
         if confirm_mo_str and confirm_d_str:
             confirm_mo, confirm_d = int(confirm_mo_str), int(confirm_d_str)
         else:
-            confirm_mo, confirm_d = apply_mo, apply_d
+            # 无确认日期字段（定期定额）：申购日+1天推算（T+1确认）
+            from datetime import date, timedelta
+            apply_year = _infer_year(apply_mo)
+            apply_date = date(apply_year, apply_mo, apply_d)
+            confirm_date_obj = apply_date + timedelta(days=1)
+            confirm_mo, confirm_d = confirm_date_obj.month, confirm_date_obj.day
         year = _infer_year(confirm_mo)
         nav  = round(amount / shares, 6) if shares > 0 else 0.0
         return {
