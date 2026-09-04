@@ -115,70 +115,74 @@ def parse_weekly_input(path: str) -> dict:
             except ValueError:
                 result['warnings'].append('⚠️ 道指补仓金额格式错误，已忽略')
 
-    # 手动交易（YAML-like 块格式，每笔交易用 --- 分隔）
+    # 手动交易（表格格式）
+    # 列：方向 | Code | 名称 | 金额CNY | 成交价 | 份额
     trade_block = _section(content, '步骤三：手动交易登记', '步骤四：固收净值')
     if trade_block:
-        # 按 --- 分割成多个交易块
-        raw_blocks = re.split(r'\n\s*---\s*\n', trade_block)
-        for raw in raw_blocks:
-            raw = raw.strip()
-            if not raw or raw.startswith('<!--'):
+        for line in trade_block.splitlines():
+            line = line.strip()
+            if not line or line.startswith('<!--') or line.startswith('>'):
                 continue
-            lines_in_block = [l.strip() for l in raw.splitlines()
-                              if l.strip() and not l.strip().startswith('<!--')]
-            if not lines_in_block:
+            # 跳过表头行和分隔行
+            if re.match(r'^\|[\s\-|]+\|$', line):  # 分隔行 | --- | --- |
                 continue
-
-            # 解析 key: value
-            fields = {}
-            for l in lines_in_block:
-                m = re.match(r'^(.+?):\s*(.+)$', l)
-                if m:
-                    fields[m.group(1).strip()] = m.group(2).strip()
-
-            if not fields:
+            if not line.startswith('|') or not line.endswith('|'):
+                continue
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            if len(cells) < 4:
+                continue
+            # 表头行（包含中文字段名）
+            if cells[0] in ('方向', '---', ''):
                 continue
 
-            # 提取各字段
-            direction    = fields.get('方向')
-            code_or_name = fields.get('标的')
-            amount_str   = fields.get('金额')
-            fee_str      = fields.get('手续费')
-            price_str    = fields.get('成交价')
-            shares_str   = fields.get('份额')
+            direction  = cells[0] if len(cells) > 0 else ''
+            code       = cells[1] if len(cells) > 1 else ''
+            name       = cells[2] if len(cells) > 2 else ''
+            amount_str = cells[3] if len(cells) > 3 else ''
+            price_str  = cells[4] if len(cells) > 4 else ''
+            shares_str = cells[5] if len(cells) > 5 else ''
 
-            # 必填校验
-            missing = [f for f, v in [('方向', direction), ('标的', code_or_name),
-                                       ('金额', amount_str), ('手续费', fee_str)]
-                       if not v]
-            if missing:
-                result['errors'].append(
-                    f'❌ 交易块缺少必填字段：{", ".join(missing)}（标的={code_or_name or "?"}）'
-                )
+            # 跳过全空行
+            if not any([direction, code, name, amount_str]):
                 continue
 
             if direction not in ('买入', '卖出', '赎回'):
-                result['errors'].append(f'❌ 方向无效（买入/卖出/赎回）：{direction}')
+                result['errors'].append(
+                    f'❌ 方向无效（买入/卖出/赎回）：「{direction}」'
+                    f'（Code={code}，名称={name}）'
+                )
+                continue
+
+            if not amount_str:
+                result['errors'].append(
+                    f'❌ 金额未填（方向={direction}，Code={code}，名称={name}）'
+                )
+                continue
+
+            # Code 和名称至少填一个
+            if not code and not name:
+                result['errors'].append(f'❌ Code 和名称均未填，无法匹配标的')
                 continue
 
             try:
                 amount = float(amount_str.replace(',', ''))
-                fee    = float(fee_str.replace(',', ''))
-                price  = float(price_str.replace(',', '')) if price_str else None
+                price  = float(price_str.replace(',', ''))  if price_str  else None
                 shares = float(shares_str.replace(',', '')) if shares_str else None
             except ValueError as e:
-                result['errors'].append(f'❌ 数字格式错误（标的={code_or_name}）：{e}')
+                result['errors'].append(
+                    f'❌ 数字格式错误（Code={code}）：{e}'
+                )
                 continue
 
-            # 份额/成交价校验（延迟到 step_trades，因为需要查 Currency）
             result['trades'].append({
-                'direction':    direction,
-                'code_or_name': code_or_name,
-                'amount':       amount,
-                'fee':          fee,
-                'price':        price,
-                'shares':       shares,
+                'direction': direction,
+                'code':      code,
+                'name':      name,
+                'amount':    amount,
+                'price':     price,
+                'shares':    shares,
             })
+
 
     # 固收净值（手动）
     nav_block = _section(content, '步骤四：固收净值', '💵 外部资金变动')
@@ -220,63 +224,105 @@ def parse_weekly_input(path: str) -> dict:
         except ValueError:
             result['warnings'].append(f'⚠️ 外部资金变动格式错误：{line}，已忽略')
 
-    # SAP 归属
+    # SAP 归属（表格格式）
+    # 列：类型 | 日期 | 股价EUR | 税率/汇率EUR | Match CNY | Match股数 | Purchase CNY | Purchase股数 | RSU股数
     sap_block = _section(content, '💼 SAP 归属', '👶 Son Fund 短信区')
     if sap_block:
-        raw_sap_blocks = re.split(r'\n\s*---\s*\n', sap_block)
-        for raw in raw_sap_blocks:
-            raw = raw.strip()
-            if not raw or raw.startswith('<!--'):
+        VALID_SAP_TYPES = ('ESPP', 'RSU', 'ESPP_DIVIDEND', 'RSU_DIVIDEND',
+                           'ESPP-DIVIDEND', 'RSU-DIVIDEND')
+        for line in sap_block.splitlines():
+            line = line.strip()
+            if not line or line.startswith('<!--') or line.startswith('>'):
                 continue
-            lines_in_block = [l.strip() for l in raw.splitlines()
-                              if l.strip() and not l.strip().startswith('<!--')]
-            if not lines_in_block:
+            if re.match(r'^\|[\s\-|]+\|$', line):
                 continue
-            fields = {}
-            for l in lines_in_block:
-                m = re.match(r'^(.+?):\s*(.+)$', l)
-                if m:
-                    fields[m.group(1).strip()] = m.group(2).strip()
-            if not fields:
+            if not line.startswith('|') or not line.endswith('|'):
                 continue
-
-            sap_type = fields.get('类型', '').upper().replace('-', '_')
-            # 标准化：ESPP_DIVIDEND / RSU_DIVIDEND → DIVIDEND，保留来源
-            VALID_SAP_TYPES = ('ESPP', 'RSU', 'ESPP_DIVIDEND', 'RSU_DIVIDEND')
-            if sap_type not in VALID_SAP_TYPES:
-                result['errors'].append(
-                    f'❌ SAP 类型无效（应为 ESPP/RSU/ESPP-Dividend/RSU-Dividend）：{fields.get("类型")}'
-                )
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            if len(cells) < 2:
+                continue
+            # 跳过表头
+            if cells[0] in ('类型', '---', ''):
+                continue
+            # 跳过全空行
+            if not any(c for c in cells):
                 continue
 
-            # 公共必填
-            date_val    = fields.get('日期')
-            price_eur   = fields.get('股价EUR')
+            def cell(i): return cells[i].strip() if i < len(cells) else ''
+
+            sap_type = cell(0).upper().replace('-', '_')
+            if sap_type not in ('ESPP', 'RSU', 'ESPP_DIVIDEND', 'RSU_DIVIDEND'):
+                if sap_type:  # 非空但无效
+                    result['errors'].append(
+                        f'❌ SAP 类型无效（应为 ESPP/RSU/ESPP-Dividend/RSU-Dividend）：{cell(0)}'
+                    )
+                continue
+
+            date_val    = cell(1)
+            price_eur   = cell(2)
+            tax_or_fx   = cell(3)   # ESPP→税率，RSU→汇率EUR
+            match_cny   = cell(4)
+            match_qty   = cell(5)
+            purch_cny   = cell(6)
+            purch_qty   = cell(7)
+            rsu_qty     = cell(8)
+
             if not date_val:
-                result['errors'].append(f'❌ SAP 归属缺少日期字段')
+                result['errors'].append(f'❌ SAP 归属行缺少日期（类型={sap_type}）')
+                continue
+            if not price_eur:
+                result['errors'].append(f'❌ SAP 归属行缺少股价EUR（{date_val}）')
                 continue
 
-            event = {'type': sap_type, 'date': date_val, 'fields': fields}
+            # 组装 fields dict，复用 step_sap 的解析逻辑
+            fields = {
+                '类型':    cell(0),
+                '日期':    date_val,
+                '股价EUR': price_eur,
+            }
 
             if sap_type == 'ESPP':
-                for f in ['税率', 'Match CNY', 'Match 股数', 'Purchase CNY', 'Purchase 股数']:
-                    if not fields.get(f):
-                        result['errors'].append(f'❌ ESPP 归属缺少字段：{f}')
-                        continue
+                missing = []
+                if not tax_or_fx: missing.append('税率')
+                if not match_cny: missing.append('Match CNY')
+                if not match_qty: missing.append('Match股数')
+                if not purch_cny: missing.append('Purchase CNY')
+                if not purch_qty: missing.append('Purchase股数')
+                if missing:
+                    result['errors'].append(
+                        f'❌ ESPP行缺少字段：{", ".join(missing)}（{date_val}）'
+                    )
+                    continue
+                fields.update({'税率': tax_or_fx, 'Match CNY': match_cny,
+                                'Match 股数': match_qty, 'Purchase CNY': purch_cny,
+                                'Purchase 股数': purch_qty})
 
             elif sap_type == 'RSU':
-                for f in ['股价EUR', '汇率EUR', '股数']:
-                    if not fields.get(f):
-                        result['errors'].append(f'❌ RSU 归属缺少字段：{f}')
-                        continue
+                qty_val = rsu_qty or match_cny  # RSU股数在第9列，兼容只填4列的情况
+                if not tax_or_fx:
+                    result['errors'].append(f'❌ RSU行缺少汇率EUR（{date_val}）')
+                    continue
+                if not qty_val:
+                    result['errors'].append(f'❌ RSU行缺少股数（{date_val}）')
+                    continue
+                fields.update({'汇率EUR': tax_or_fx, '股数': qty_val})
 
             elif sap_type in ('ESPP_DIVIDEND', 'RSU_DIVIDEND'):
-                for f in ['股价EUR', '汇率EUR', '股数']:
-                    if not fields.get(f):
-                        result['errors'].append(f'❌ Dividend 归属缺少字段：{f}')
-                        continue
+                qty_val = rsu_qty or match_cny
+                if not tax_or_fx:
+                    result['errors'].append(f'❌ Dividend行缺少汇率EUR（{date_val}）')
+                    continue
+                if not qty_val:
+                    result['errors'].append(f'❌ Dividend行缺少股数（{date_val}）')
+                    continue
+                fields.update({'汇率EUR': tax_or_fx, '股数': qty_val})
 
-            result['sap_events'].append(event)
+            result['sap_events'].append({
+                'type':   sap_type,
+                'date':   date_val,
+                'fields': fields,
+            })
+
 
     # Son Fund 短信区
     son_block = _section(content, '👶 Son Fund 短信区', '📝 备注')
@@ -1007,19 +1053,32 @@ def step_trades(trades: list, template_df: pd.DataFrame, date_str: str
 
     for trade in trades:
         direction    = trade['direction']
-        code_or_name = trade['code_or_name']
+        code         = trade.get('code', '').strip()
+        name_hint    = trade.get('name', '').strip()
         amount       = trade['amount']
-        fee          = trade['fee']
-        price        = trade.get('price')    # 成交价（可选）
-        shares_given = trade.get('shares')   # 用户填的份额（可选）
+        price        = trade.get('price')
+        shares_given = trade.get('shares')
 
-        mask = (df['Code'] == code_or_name) | (df['Name'] == code_or_name)
+        # 匹配逻辑：优先 Code 精确匹配，fallback 到 Name
+        mask = pd.Series([False] * len(df))
+        if code:
+            mask = df['Code'].astype(str) == code
+        if not mask.any() and name_hint:
+            mask = df['Name'] == name_hint
+        if not mask.any() and code:
+            # 最后尝试 Name 包含 code（处理部分匹配）
+            mask = df['Name'].str.contains(code, case=False, na=False)
+
         if not mask.any():
-            warnings.append(f'⚠️ 找不到标的「{code_or_name}」，请确认代码或名称')
+            label = code or name_hint
+            warnings.append(
+                f'⚠️ 找不到标的（Code={code}，名称={name_hint}）'
+                f'，请确认 Code 与 portfolio.csv 一致'
+            )
             continue
 
-        name      = df.loc[mask, 'Name'].values[0]
-        code      = df.loc[mask, 'Code'].values[0]
+        row_name  = df.loc[mask, 'Name'].values[0]
+        row_code  = df.loc[mask, 'Code'].values[0]
         currency  = str(df.loc[mask, 'Currency'].values[0]) if 'Currency' in df.columns else 'CNY'
         cur_price = float(df.loc[mask, 'Current_Price'].values[0])
         is_foreign = currency not in ('CNY', '')
@@ -1039,49 +1098,47 @@ def step_trades(trades: list, template_df: pd.DataFrame, date_str: str
             # CNY资产：份额和成交价至少填一个
             if not shares_given and not price:
                 warnings.append(
-                    f'❌ {name} 份额和成交价均未填写，已跳过。'
+                    f'❌ {row_name} 份额和成交价均未填写，已跳过。'
                     f'请至少填写其中一个。'
                 )
                 continue
             if shares_given and price:
-                # 两者都填：一致性校验
                 implied_amount = shares_given * price
                 diff_pct = abs(implied_amount - amount) / amount if amount > 0 else 0
                 if diff_pct > 0.01:
                     warnings.append(
-                        f'⚠️ {name} 一致性校验：份额×成交价={implied_amount:,.2f}，'
+                        f'⚠️ {row_name} 一致性校验：份额×成交价={implied_amount:,.2f}，'
                         f'填写金额={amount:,.2f}，差异{diff_pct*100:.1f}%，请检查'
                     )
                 shares = shares_given
             elif shares_given:
                 shares = shares_given
             else:
-                shares = amount / price  # 用成交价反算份额
+                shares = amount / price
 
         # ── 更新 DataFrame ────────────────────────────────────────────
         old_shares = float(df.loc[mask, 'Shares'].values[0])
 
         if direction == '买入':
-            ncf = amount + fee
+            ncf = amount  # 买入：金额已含手续费
             df.loc[mask, 'Net_Cash_Flow'] = df.loc[mask, 'Net_Cash_Flow'].fillna(0) + ncf
             df.loc[mask, 'Shares']        = old_shares + shares
             df.loc[mask, 'Total_Value']   = df.loc[mask, 'Shares'] * cur_price
-            _adj_cash(df, -(amount + fee))
+            _adj_cash(df, -amount)
 
         elif direction in ('卖出', '赎回'):
-            ncf = -(amount - fee)
+            ncf = -amount  # 卖出/赎回：金额已是到手（扣费后）
             df.loc[mask, 'Net_Cash_Flow'] = df.loc[mask, 'Net_Cash_Flow'].fillna(0) + ncf
             df.loc[mask, 'Shares']        = max(0, old_shares - shares)
             df.loc[mask, 'Total_Value']   = df.loc[mask, 'Shares'] * cur_price
-            _adj_cash(df, amount - fee)
+            _adj_cash(df, amount)
 
         transactions.append({
             'Date':       date_str,
-            'Name':       name,
-            'Code':       code,
+            'Name':       row_name,
+            'Code':       row_code,
             'Direction':  direction,
             'Amount_CNY': amount,
-            'Fee_CNY':    fee,
             'Shares':     shares,
             'Price':      price,
             'Currency':   currency,
@@ -1510,10 +1567,13 @@ date:
 ---
 
 ## 🔄 步骤三：手动交易登记
-<!-- 每笔交易一个块，用 --- 分隔 -->
-<!-- 必填：方向 / 标的 / 金额（CNY）/ 手续费（无则0）-->
-<!-- CNY资产：份额和成交价至少填一个 -->
-<!-- 外币资产：份额必填 -->
+<!-- 买入金额=实际支出含手续费，卖出/赎回金额=实际到手 -->
+<!-- CNY资产：成交价和份额至少填一个；外币资产：份额必填 -->
+<!-- Code格式：港股=HK0700，A股=601838，场外基金=021000，SAP=SAP.DE -->
+
+| 方向 | Code | 名称 | 金额CNY | 成交价 | 份额 |
+| --- | --- | --- | --- | --- | --- |
+|  |  |  |  |  |  |
 
 ---
 
@@ -1529,7 +1589,12 @@ date:
 ---
 
 ## 💼 SAP 归属（无归属本周则留空）
+<!-- ESPP→own_sap.csv，RSU→move_sap.csv，Dividend→NCF=0 -->
+<!-- 税率/汇率EUR列：ESPP填税率(如33)，RSU/Dividend填汇率(如7.85) -->
 
+| 类型 | 日期 | 股价EUR | 税率/汇率EUR | Match CNY | Match股数 | Purchase CNY | Purchase股数 | RSU股数 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+|  |  |  |  |  |  |  |  |  |
 
 ---
 
