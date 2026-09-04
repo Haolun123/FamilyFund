@@ -267,8 +267,88 @@ def validate_date(date_str: str, csv_path: str) -> tuple[bool, list]:
 
 # ── 步骤一：短信解析 ──────────────────────────────────────────────────────────
 
-def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str
-             ) -> tuple[pd.DataFrame, list, list]:
+def _interactive_new_asset(fund_name: str, shares: float, amount: float, nav: float,
+                            date_str: str) -> Optional[dict]:
+    """
+    交互式引导用户填写新标的信息。
+    返回 new_asset dict，或 None（用户选择跳过）。
+    """
+    CLASS_SHORTCUTS = {
+        '1': 'US_Blend_Fund',   '美股宽基': 'US_Blend_Fund',
+        '2': 'US_Growth_Fund',  '美股成长': 'US_Growth_Fund',  '纳指': 'US_Growth_Fund',
+        '3': 'CN_Index_Fund',   'A股指数': 'CN_Index_Fund',
+        '4': 'Smart_Beta',      'smartbeta': 'Smart_Beta',
+        '5': 'Individual_Stock','个股': 'Individual_Stock',
+        '6': 'Fixed_Income',    '固收': 'Fixed_Income',
+        '7': 'Gold',            '黄金': 'Gold',
+        '8': 'Company_Stock',   '公司股': 'Company_Stock',
+    }
+
+    print(f'\n🆕 发现新标的：「{fund_name}」')
+    print(f'   本次买入：¥{amount:,.0f}，份额 {shares:.4f}，申购净值 {nav}')
+    print('   是否建立新持仓？(直接回车=是，n=跳过)')
+    ans = input('   > ').strip().lower()
+    if ans in ('n', 'no', '否', '跳过'):
+        return None
+
+    print(f'\n   请填写「{fund_name}」的基本信息：')
+
+    # 代码
+    code = input('   证券/基金代码（如 021000）：').strip()
+    if not code:
+        print('   代码不能为空，跳过')
+        return None
+
+    # 名称（默认用 fund_name）
+    name = input(f'   持仓名称（回车使用「{fund_name}」）：').strip() or fund_name
+
+    # 资产类别
+    print('   资产类别：')
+    print('   1=美股宽基  2=美股成长/纳指  3=A股指数  4=SmartBeta')
+    print('   5=个股      6=固收            7=黄金     8=公司股票')
+    cls_input = input('   选择（输入数字或名称）：').strip()
+    asset_class = CLASS_SHORTCUTS.get(cls_input.lower(), cls_input)
+    if asset_class not in {
+        'US_Blend_Fund','US_Growth_Fund','CN_Index_Fund','Smart_Beta',
+        'Individual_Stock','Fixed_Income','Gold','Company_Stock'
+    }:
+        print(f'   ⚠️ 类别「{asset_class}」无效，跳过')
+        return None
+
+    # 平台
+    platform = input('   交易平台（如：纳指场外、中信证券，回车=场外）：').strip() or '场外'
+
+    # 货币
+    ccy_input = input('   货币（CNY/HKD/USD/EUR，回车=CNY）：').strip().upper() or 'CNY'
+
+    # yf_symbol（可选）
+    yf_sym = input('   yfinance 代码（可选，如 0700.HK，回车跳过）：').strip()
+
+    new_asset = {
+        'Code':        code,
+        'Name':        name,
+        'Asset_Class': asset_class,
+        'Platform':    platform,
+        'Currency':    ccy_input,
+        'Exchange_Rate': 1.0,
+        'yf_symbol':   yf_sym,
+    }
+
+    print(f'\n   ✅ 将新增持仓：{name}（{code}）/ {asset_class} / {platform}')
+
+    # 写入 sms_code_map.json，下次自动精确匹配
+    try:
+        from sms_parser import add_sms_mapping
+        add_sms_mapping(DATA_DIR, fund_name, code, name)
+        print(f'   ✅ 已记录短信匹配规则：「{fund_name}」→ {code}')
+    except Exception as e:
+        print(f'   ⚠️ sms_code_map 写入失败：{e}')
+
+    return new_asset
+
+
+def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str,
+             interactive: bool = False) -> tuple[pd.DataFrame, list, list]:
     warnings, transactions = [], []
     if not sms_lines:
         return template_df, transactions, warnings
@@ -287,7 +367,6 @@ def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str
             return df, transactions, warnings
 
         for item in parsed:
-            # parse_sms 返回字段：fund_name, matched_code, matched_name, amount, shares, nav, parse_error
             if item.get('parse_error'):
                 raw = item.get('raw', '')[:60]
                 warnings.append(f'⚠️ 短信格式无法识别，已跳过：{raw}…')
@@ -300,31 +379,60 @@ def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str
             amount    = float(item.get('amount') or 0)
             nav       = float(item.get('nav') or 0)
 
-            # 未匹配到持仓（新标的或名称不匹配）
-            if not code and not name:
-                warnings.append(f'⚠️ 短信："{fund_name}" 无法匹配到持仓，已跳过。'
-                                 f'如为新标的，请先在 Dashboard 建仓，或在步骤三手动登记。')
-                continue
-
+            # 未匹配到持仓
             mask = (df['Name'] == name) | (df['Code'] == code)
             if not mask.any():
-                warnings.append(f'⚠️ 短信："{name}"（{code}）不在持仓中，已跳过。'
-                                 f'如为新标的，请先在 Dashboard 建仓，或在步骤三手动登记。')
-                continue
+                if interactive:
+                    # 交互式引导建立新持仓
+                    new_asset = _interactive_new_asset(
+                        fund_name, shares, amount, nav, date_str
+                    )
+                    if new_asset is None:
+                        warnings.append(f'— 跳过「{fund_name}」（用户选择不建仓）')
+                        continue
 
-            if shares <= 0 and amount <= 0:
-                warnings.append(f'⚠️ 短信：{name} 份额和金额均为0，已跳过')
-                continue
+                    # 构造新行追加到 df
+                    cur_price = nav if nav > 0 else amount / shares if shares > 0 else 1.0
+                    total_val = shares * cur_price
+                    new_row = pd.DataFrame([{
+                        'Asset_Class':    new_asset['Asset_Class'],
+                        'Platform':       new_asset['Platform'],
+                        'Name':           new_asset['Name'],
+                        'Code':           new_asset['Code'],
+                        'Currency':       new_asset['Currency'],
+                        'Exchange_Rate':  new_asset['Exchange_Rate'],
+                        'Shares':         shares,
+                        'Current_Price':  cur_price,
+                        'Total_Value':    total_val,
+                        'Net_Cash_Flow':  amount,  # 建仓日 NCF = 买入金额
+                    }])
+                    df = pd.concat([df, new_row], ignore_index=True)
+                    code = new_asset['Code']
+                    name = new_asset['Name']
+                    warnings.append(f'✅ 新建持仓：{name}（{code}），'
+                                     f'份额 {shares:.4f}，NCF ¥{amount:,.0f}')
+                else:
+                    # dry-run 模式：提示但不操作
+                    warnings.append(
+                        f'⚠️ 「{fund_name}」未匹配到持仓。'
+                        f'确认执行时将引导你建立新持仓。'
+                    )
+                    continue
 
-            old_shares = float(df.loc[mask, 'Shares'].values[0])
-            df.loc[mask, 'Shares'] = old_shares + shares
-            df.loc[mask, 'Net_Cash_Flow'] = (
-                df.loc[mask, 'Net_Cash_Flow'].fillna(0) + amount
-            )
-            # 短信净值是申购确认净值，不代表当前最新净值，不更新 Current_Price
-            df.loc[mask, 'Total_Value'] = (
-                df.loc[mask, 'Shares'] * df.loc[mask, 'Current_Price']
-            )
+            else:
+                if shares <= 0 and amount <= 0:
+                    warnings.append(f'⚠️ 短信：{name} 份额和金额均为0，已跳过')
+                    continue
+
+                old_shares = float(df.loc[mask, 'Shares'].values[0])
+                df.loc[mask, 'Shares'] = old_shares + shares
+                df.loc[mask, 'Net_Cash_Flow'] = (
+                    df.loc[mask, 'Net_Cash_Flow'].fillna(0) + amount
+                )
+                # 短信净值是申购确认净值，不更新 Current_Price
+                df.loc[mask, 'Total_Value'] = (
+                    df.loc[mask, 'Shares'] * df.loc[mask, 'Current_Price']
+                )
 
             transactions.append({
                 'Date': date_str, 'Name': name, 'Code': code,
@@ -1012,13 +1120,15 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
     all_transactions = []
 
     # 步骤一：短信解析（主基金）
-    template, sms_tx, sms_warns = step_sms(inp['sms_lines'], template, date_str)
+    template, sms_tx, sms_warns = step_sms(
+        inp['sms_lines'], template, date_str, interactive=confirm
+    )
     all_transactions += sms_tx
 
     # 步骤一b：Son Fund 短信解析
     if son_template is not None and inp['son_sms_lines']:
         son_template, son_sms_tx, son_sms_warns = step_sms(
-            inp['son_sms_lines'], son_template, date_str
+            inp['son_sms_lines'], son_template, date_str, interactive=confirm
         )
 
     # 步骤二：道指抵扣——计算建议（不执行）
