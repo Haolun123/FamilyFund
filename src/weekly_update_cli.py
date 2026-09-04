@@ -37,9 +37,14 @@ DATA_DIR  = os.environ.get(
         'Project_shared_files/FamilyFund/data'
     )
 )
-CSV_PATH  = os.path.join(DATA_DIR, 'portfolio.csv')
-TX_PATH   = os.path.join(DATA_DIR, 'transaction.csv')
-VAULT_DIR = os.path.expanduser(
+SON_DATA_DIR = os.environ.get(
+    'FAMILYFUND_SON_DATA',
+    os.path.join(DATA_DIR, 'son')
+)
+CSV_PATH    = os.path.join(DATA_DIR, 'portfolio.csv')
+SON_CSV_PATH = os.path.join(SON_DATA_DIR, 'portfolio.csv')
+TX_PATH     = os.path.join(DATA_DIR, 'transaction.csv')
+VAULT_DIR   = os.path.expanduser(
     '~/Library/Mobile Documents/iCloud~md~obsidian/Documents/vault'
 )
 INPUT_PATH  = os.path.join(VAULT_DIR, 'familyfund', '_weekly_input.md')
@@ -70,7 +75,8 @@ def parse_weekly_input(path: str) -> dict:
         'date':           None,
         'status':         'pending',
         'sms_lines':      [],
-        'dow_topup':      None,   # 道指实物补仓金额（可选）
+        'son_sms_lines':  [],      # Son Fund 专属短信
+        'dow_topup':      None,
         'trades':         [],
         'manual_prices':  {},
         'cash_delta':     None,
@@ -161,7 +167,7 @@ def parse_weekly_input(path: str) -> dict:
             )
 
     # 外部资金变动
-    cash_block = _section(content, '💵 外部资金变动', '📝 备注')
+    cash_block = _section(content, '💵 外部资金变动', '👶 Son Fund 短信区')
     for line in (cash_block or '').splitlines():
         line = line.strip()
         if not line or line.startswith('<!--') or line.startswith('>'):
@@ -172,6 +178,14 @@ def parse_weekly_input(path: str) -> dict:
             result['cash_delta'] = float(line.replace(',', ''))
         except ValueError:
             result['warnings'].append(f'⚠️ 外部资金变动格式错误：{line}，已忽略')
+
+    # Son Fund 短信区
+    son_block = _section(content, '👶 Son Fund 短信区', '📝 备注')
+    if son_block:
+        for line in son_block.splitlines():
+            line = line.strip()
+            if line and not line.startswith('<!--') and not line.startswith('>'):
+                result['son_sms_lines'].append(line)
 
     # 备注
     notes_block = _section(content, '📝 备注', None)
@@ -762,8 +776,11 @@ def build_preview(date_str, snapshot_df, transactions,
 
 def save_and_reset(date_str: str, snapshot_df: pd.DataFrame,
                    transactions: list, input_path: str,
-                   cash_delta: Optional[float] = None) -> str:
+                   cash_delta: Optional[float] = None,
+                   son_template: Optional[pd.DataFrame] = None) -> str:
     """写入 CSV，归档输入文件，重置为空模板。"""
+
+    from nav_engine import _atomic_write_csv
 
     # 外部资金变动
     if cash_delta is not None and cash_delta != 0:
@@ -775,11 +792,37 @@ def save_and_reset(date_str: str, snapshot_df: pd.DataFrame,
             snapshot_df.loc[mask, 'Net_Cash_Flow'].fillna(0) + cash_delta
         )
 
-    from nav_engine import _atomic_write_csv
+    # 主基金写入
     snapshot_df.insert(0, 'Date', date_str)
     existing = pd.read_csv(CSV_PATH)
     combined = pd.concat([existing, snapshot_df], ignore_index=True)
     _atomic_write_csv(combined, CSV_PATH)
+
+    # Son Fund 写入（若有模板且净值已刷新）
+    son_msg = ''
+    if son_template is not None and os.path.exists(SON_CSV_PATH):
+        # Son Fund 也需要刷新净值（南方纳指100 I类，走 fetch_latest_prices）
+        try:
+            from price_fetcher import fetch_latest_prices
+            price_map = fetch_latest_prices(son_template, data_dir=DATA_DIR)
+            for code, info in price_map.items():
+                price = info.get('price')
+                if price:
+                    mask = son_template['Code'].astype(str) == str(code)
+                    if mask.any():
+                        son_template.loc[mask, 'Current_Price'] = price
+                        son_template.loc[mask, 'Total_Value'] = (
+                            son_template.loc[mask, 'Shares'] * price
+                        )
+        except Exception:
+            pass  # 价格失败用上期价格
+
+        son_template.insert(0, 'Date', date_str)
+        son_existing = pd.read_csv(SON_CSV_PATH)
+        son_combined = pd.concat([son_existing, son_template], ignore_index=True)
+        _atomic_write_csv(son_combined, SON_CSV_PATH)
+        son_total = float(son_template['Total_Value'].sum())
+        son_msg = f'\n✅ Son Fund 快照已保存：¥{son_total:,.0f}'
 
     # transaction.csv — 走 _atomic_write_csv 获得备份保护
     if transactions:
@@ -844,6 +887,7 @@ def save_and_reset(date_str: str, snapshot_df: pd.DataFrame,
 
     return (
         f'✅ 快照已保存：{date_str}\n'
+        f'{son_msg}\n'
         f'✅ 输入文件已归档：{os.path.basename(archive_path)}\n'
         f'✅ _weekly_input.md 已重置，等待下周填写\n'
         f'{obs_msg}'
@@ -896,6 +940,11 @@ date:
 
 ---
 
+## 👶 Son Fund 短信区
+
+
+---
+
 ## 📝 备注
 
 
@@ -929,18 +978,35 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
     if not date_ok:
         return '## ❌ 日期校验失败\n\n' + '\n'.join(date_msgs)
 
-    # 3. 构建模板（上次快照，NCF 归零）
+    # 3. 构建主基金模板（上次快照，NCF 归零）
     raw_df = pd.read_csv(CSV_PATH)
     raw_df['Date'] = pd.to_datetime(raw_df['Date']).dt.strftime('%Y-%m-%d')
     latest_date = raw_df['Date'].max()
     template = raw_df[raw_df['Date'] == latest_date].copy()
     template['Net_Cash_Flow'] = 0.0
 
+    # 3b. 构建 Son Fund 模板（若存在）
+    son_template = None
+    son_sms_warns = []
+    son_sms_tx = []
+    if os.path.exists(SON_CSV_PATH):
+        son_raw = pd.read_csv(SON_CSV_PATH)
+        son_raw['Date'] = pd.to_datetime(son_raw['Date']).dt.strftime('%Y-%m-%d')
+        son_latest = son_raw[son_raw['Date'] == son_raw['Date'].max()].copy()
+        son_latest['Net_Cash_Flow'] = 0.0
+        son_template = son_latest
+
     all_transactions = []
 
-    # 步骤一：短信解析
+    # 步骤一：短信解析（主基金）
     template, sms_tx, sms_warns = step_sms(inp['sms_lines'], template, date_str)
     all_transactions += sms_tx
+
+    # 步骤一b：Son Fund 短信解析
+    if son_template is not None and inp['son_sms_lines']:
+        son_template, son_sms_tx, son_sms_warns = step_sms(
+            inp['son_sms_lines'], son_template, date_str
+        )
 
     # 步骤二：道指抵扣——计算建议（不执行）
     dow_suggestion = compute_dow_suggestion(all_transactions, inp['dow_topup'], date_str)
@@ -964,6 +1030,20 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
         dow_suggestion, trade_warns, recon_ok, recon_msgs,
         failed_codes=failed_codes,
     )
+
+    # Son Fund 预览附加
+    if son_template is not None:
+        son_total = float(son_template['Total_Value'].sum())
+        preview += f'\n\n### 👶 Son Fund\n  总资产：¥{son_total:,.0f}'
+        if son_sms_tx:
+            for t in son_sms_tx:
+                preview += f'\n  ✅ {t["Name"]}：买入 ¥{t["Amount_CNY"]:,.0f}'
+        elif inp['son_sms_lines']:
+            preview += '\n  ⚠️ 短信解析未匹配到任何记录'
+        else:
+            preview += '\n  — 本周无 Son Fund 定投'
+        for w in son_sms_warns:
+            preview += f'\n  {w}'
 
     # 写入
     if confirm:
@@ -1018,8 +1098,11 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
             topup_prepaid(DATA_DIR, date_str, dow_suggestion['topup_applied'])
             print(f'✅ 道指补仓 ¥{dow_suggestion["topup_applied"]:,.0f} 已写入')
 
-        save_msg = save_and_reset(date_str, template, all_transactions,
-                                  input_path, inp['cash_delta'])
+        save_msg = save_and_reset(
+            date_str, template, all_transactions,
+            input_path, inp['cash_delta'],
+            son_template=son_template,
+        )
         return preview + f'\n\n{save_msg}'
 
     return preview
