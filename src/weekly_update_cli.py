@@ -75,9 +75,10 @@ def parse_weekly_input(path: str) -> dict:
         'date':           None,
         'status':         'pending',
         'sms_lines':      [],
-        'son_sms_lines':  [],      # Son Fund 专属短信
+        'son_sms_lines':  [],
         'dow_topup':      None,
         'trades':         [],
+        'sap_events':     [],      # SAP 归属事件列表
         'manual_prices':  {},
         'cash_delta':     None,
         'notes':          '',
@@ -207,7 +208,7 @@ def parse_weekly_input(path: str) -> dict:
             )
 
     # 外部资金变动
-    cash_block = _section(content, '💵 外部资金变动', '👶 Son Fund 短信区')
+    cash_block = _section(content, '💵 外部资金变动', '💼 SAP 归属')
     for line in (cash_block or '').splitlines():
         line = line.strip()
         if not line or line.startswith('<!--') or line.startswith('>'):
@@ -218,6 +219,62 @@ def parse_weekly_input(path: str) -> dict:
             result['cash_delta'] = float(line.replace(',', ''))
         except ValueError:
             result['warnings'].append(f'⚠️ 外部资金变动格式错误：{line}，已忽略')
+
+    # SAP 归属
+    sap_block = _section(content, '💼 SAP 归属', '👶 Son Fund 短信区')
+    if sap_block:
+        raw_sap_blocks = re.split(r'\n\s*---\s*\n', sap_block)
+        for raw in raw_sap_blocks:
+            raw = raw.strip()
+            if not raw or raw.startswith('<!--'):
+                continue
+            lines_in_block = [l.strip() for l in raw.splitlines()
+                              if l.strip() and not l.strip().startswith('<!--')]
+            if not lines_in_block:
+                continue
+            fields = {}
+            for l in lines_in_block:
+                m = re.match(r'^(.+?):\s*(.+)$', l)
+                if m:
+                    fields[m.group(1).strip()] = m.group(2).strip()
+            if not fields:
+                continue
+
+            sap_type = fields.get('类型', '').upper()
+            if sap_type not in ('ESPP', 'RSU', 'DIVIDEND'):
+                result['errors'].append(
+                    f'❌ SAP 归属类型无效（应为 ESPP/RSU/Dividend）：{fields.get("类型")}'
+                )
+                continue
+
+            # 公共必填
+            date_val    = fields.get('日期')
+            price_eur   = fields.get('股价EUR')
+            if not date_val:
+                result['errors'].append(f'❌ SAP 归属缺少日期字段')
+                continue
+
+            event = {'type': sap_type, 'date': date_val, 'fields': fields}
+
+            if sap_type == 'ESPP':
+                for f in ['税率', 'Match CNY', 'Match 股数', 'Purchase CNY', 'Purchase 股数']:
+                    if not fields.get(f):
+                        result['errors'].append(f'❌ ESPP 归属缺少字段：{f}')
+                        continue
+
+            elif sap_type == 'RSU':
+                for f in ['股价EUR', '汇率EUR', '股数']:
+                    if not fields.get(f):
+                        result['errors'].append(f'❌ RSU 归属缺少字段：{f}')
+                        continue
+
+            elif sap_type == 'DIVIDEND':
+                for f in ['来源', '股价EUR', '汇率EUR', '股数']:
+                    if not fields.get(f):
+                        result['errors'].append(f'❌ Dividend 归属缺少字段：{f}')
+                        continue
+
+            result['sap_events'].append(event)
 
     # Son Fund 短信区
     son_block = _section(content, '👶 Son Fund 短信区', '📝 备注')
@@ -606,6 +663,185 @@ def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str,
         warnings.append(f'⚠️ 短信解析异常：{e}')
 
     return df, transactions, warnings
+
+
+# ── 步骤一c：SAP 归属 ────────────────────────────────────────────────────────
+
+def step_sap(sap_events: list, template_df: pd.DataFrame, date_str: str,
+             confirm: bool = False) -> tuple[pd.DataFrame, list]:
+    """
+    处理 SAP 归属事件（ESPP / RSU / Dividend）。
+    dry-run：只预览，不写文件。
+    confirm：写入 own_sap.csv / move_sap.csv，更新 portfolio 快照行。
+    返回 (updated_df, warnings)
+    """
+    if not sap_events:
+        return template_df, []
+
+    warnings = []
+    df = template_df.copy()
+
+    own_sap_path  = os.path.join(DATA_DIR, 'own_sap.csv')
+    move_sap_path = os.path.join(DATA_DIR, 'move_sap.csv')
+
+    new_own_rows  = []
+    new_move_rows = []
+
+    for event in sap_events:
+        sap_type = event['type']
+        fields   = event['fields']
+        evt_date = fields.get('日期', date_str)
+
+        try:
+            if sap_type == 'ESPP':
+                price_eur   = float(fields['股价EUR'])
+                tax_rate    = float(fields['税率']) / 100
+                match_cny   = float(fields['Match CNY'].replace(',', ''))
+                match_qty   = float(fields['Match 股数'].replace(',', ''))
+                purch_cny   = float(fields['Purchase CNY'].replace(',', ''))
+                purch_qty   = float(fields['Purchase 股数'].replace(',', ''))
+
+                # Match：25% 折扣，Cost_CNY = CNY × 0.25
+                new_own_rows.append({
+                    'Date':           evt_date,
+                    'Activity':       'Match',
+                    'Price_EUR':      round(price_eur, 6),
+                    'Quantity':       round(match_qty, 6),
+                    'Discount_Ratio': 0.25,
+                    'CNY':            round(match_cny, 2),
+                    'Cost_CNY':       round(match_cny * 0.25, 2),
+                })
+                # Purchase：75% 折扣，Cost_CNY = CNY × 0.75
+                new_own_rows.append({
+                    'Date':           evt_date,
+                    'Activity':       'Purchase',
+                    'Price_EUR':      round(price_eur, 6),
+                    'Quantity':       round(purch_qty, 6),
+                    'Discount_Ratio': 0.75,
+                    'CNY':            round(purch_cny, 2),
+                    'Cost_CNY':       round(purch_cny * 0.75, 2),
+                })
+
+                total_qty     = match_qty + purch_qty
+                total_cost    = round(match_cny * 0.25 + purch_cny * 0.75, 2)
+                warnings.append(
+                    f'✅ ESPP 归属 {evt_date}：'
+                    f'+{total_qty:.4f}股，成本 ¥{total_cost:,.2f}'
+                )
+
+                # 更新 portfolio 快照行（Own SAP）
+                mask = (df['Asset_Class'] == 'Company_Stock') & \
+                       (df['Name'].str.contains('Own', case=False, na=False) |
+                        df['Code'].str.contains('SAP', case=False, na=False))
+                if mask.any():
+                    df.loc[mask, 'Shares'] = float(df.loc[mask, 'Shares'].values[0]) + total_qty
+                    df.loc[mask, 'Net_Cash_Flow'] = \
+                        df.loc[mask, 'Net_Cash_Flow'].fillna(0) + total_cost
+                else:
+                    warnings.append('⚠️ ESPP：未找到 Own SAP 持仓行，portfolio 快照未更新')
+
+            elif sap_type == 'RSU':
+                price_eur  = float(fields['股价EUR'])
+                fx_rate    = float(fields['汇率EUR'])
+                activity   = fields.get('Activity', 'Award')
+                shares_str = fields['股数']
+                # 支持多个 tranche 用逗号分隔
+                tranches   = [float(s.strip()) for s in shares_str.split(',') if s.strip()]
+
+                for qty in tranches:
+                    cny_val = round(qty * price_eur * fx_rate, 2)
+                    new_move_rows.append({
+                        'Date':      evt_date,
+                        'Activity':  activity,
+                        'Price_EUR': round(price_eur, 6),
+                        'Quantity':  round(qty, 6),
+                        'FX_Rate':   round(fx_rate, 4),
+                        'CNY':       cny_val,
+                    })
+
+                total_qty  = sum(tranches)
+                total_cny  = round(sum(q * price_eur * fx_rate for q in tranches), 2)
+                ncf_amount = total_cny if activity == 'Award' else 0.0  # Dividend NCF=0
+
+                warnings.append(
+                    f'✅ RSU {activity} {evt_date}：'
+                    f'+{total_qty:.4f}股，FMV ¥{total_cny:,.2f}'
+                    + ('（Dividend，NCF=0）' if activity == 'Dividend' else '')
+                )
+
+                # 更新 portfolio 快照行（Move SAP）
+                mask = (df['Asset_Class'] == 'Company_Stock') & \
+                       (df['Name'].str.contains('Move', case=False, na=False) |
+                        (~df['Name'].str.contains('Own', case=False, na=False) &
+                         df['Code'].str.contains('SAP', case=False, na=False)))
+                # fallback：任何 Company_Stock 行
+                if not mask.any():
+                    mask = df['Asset_Class'] == 'Company_Stock'
+                if mask.any():
+                    df.loc[mask, 'Shares'] = float(df.loc[mask, 'Shares'].values[0]) + total_qty
+                    df.loc[mask, 'Net_Cash_Flow'] = \
+                        df.loc[mask, 'Net_Cash_Flow'].fillna(0) + ncf_amount
+                else:
+                    warnings.append('⚠️ RSU：未找到 Move SAP 持仓行，portfolio 快照未更新')
+
+            elif sap_type == 'DIVIDEND':
+                source     = fields.get('来源', 'Move').upper()
+                price_eur  = float(fields['股价EUR'])
+                fx_rate    = float(fields['汇率EUR'])
+                qty        = float(fields['股数'].replace(',', ''))
+                cny_val    = round(qty * price_eur * fx_rate, 2)
+
+                if source == 'OWN' or source == 'ESPP':
+                    new_own_rows.append({
+                        'Date': evt_date, 'Activity': 'Dividend',
+                        'Price_EUR': round(price_eur, 6), 'Quantity': round(qty, 6),
+                        'Discount_Ratio': 1.0, 'CNY': cny_val, 'Cost_CNY': 0.0,
+                    })
+                    mask = (df['Asset_Class'] == 'Company_Stock') & \
+                           df['Name'].str.contains('Own', case=False, na=False)
+                else:
+                    new_move_rows.append({
+                        'Date': evt_date, 'Activity': 'Dividend',
+                        'Price_EUR': round(price_eur, 6), 'Quantity': round(qty, 6),
+                        'FX_Rate': round(fx_rate, 4), 'CNY': cny_val,
+                    })
+                    mask = (df['Asset_Class'] == 'Company_Stock') & \
+                           (~df['Name'].str.contains('Own', case=False, na=False))
+                    if not mask.any():
+                        mask = df['Asset_Class'] == 'Company_Stock'
+
+                if mask.any():
+                    df.loc[mask, 'Shares'] = float(df.loc[mask, 'Shares'].values[0]) + qty
+                    # Dividend NCF = 0
+                warnings.append(
+                    f'✅ Dividend（{source}）{evt_date}：+{qty:.4f}股，NCF=0'
+                )
+
+        except (KeyError, ValueError) as e:
+            warnings.append(f'⚠️ SAP 归属解析失败（{sap_type} {evt_date}）：{e}')
+            continue
+
+    # 写入 CSV（仅 confirm 模式）
+    if confirm:
+        from nav_engine import _atomic_write_csv
+        if new_own_rows:
+            new_df = pd.DataFrame(new_own_rows)
+            existing = pd.read_csv(own_sap_path) if os.path.exists(own_sap_path) else pd.DataFrame()
+            _atomic_write_csv(pd.concat([existing, new_df], ignore_index=True), own_sap_path)
+            warnings.append(f'✅ own_sap.csv 已写入 {len(new_own_rows)} 行')
+        if new_move_rows:
+            new_df = pd.DataFrame(new_move_rows)
+            existing = pd.read_csv(move_sap_path) if os.path.exists(move_sap_path) else pd.DataFrame()
+            _atomic_write_csv(pd.concat([existing, new_df], ignore_index=True), move_sap_path)
+            warnings.append(f'✅ move_sap.csv 已写入 {len(new_move_rows)} 行')
+    else:
+        if new_own_rows or new_move_rows:
+            warnings.append(
+                f'— dry-run：将写入 {len(new_own_rows)} 行到 own_sap.csv，'
+                f'{len(new_move_rows)} 行到 move_sap.csv（确认执行时写入）'
+            )
+
+    return df, warnings
 
 
 # ── 步骤二：道指抵扣（计算建议，不立即执行） ────────────────────────────────
@@ -1020,7 +1256,7 @@ def reconcile(snapshot_df: pd.DataFrame, transactions: list
 def build_preview(date_str, snapshot_df, transactions,
                   date_msgs, price_warns, sms_warns,
                   dow_suggestion, trade_warns, recon_ok, recon_msgs,
-                  failed_codes=None) -> str:
+                  sap_warns=None, failed_codes=None) -> str:
     total = snapshot_df['Total_Value'].sum()
     cash  = float(snapshot_df.loc[
         snapshot_df['Asset_Class'] == 'Cash', 'Total_Value'
@@ -1047,6 +1283,12 @@ def build_preview(date_str, snapshot_df, transactions,
     else:
         lines.append('  — 无短信定投')
     for w in sms_warns: lines.append(f'  {w}')
+
+    lines += ['', '### 💼 步骤一c：SAP 归属']
+    if sap_warns:
+        for w in sap_warns: lines.append(f'  {w}')
+    else:
+        lines.append('  — 本周无 SAP 归属')
 
     lines += ['', '### 📊 步骤二：道指抵扣']
     dow_deduct = dow_suggestion.get('dow_deduct', 0)
@@ -1264,6 +1506,11 @@ date:
 
 ---
 
+## 💼 SAP 归属（无归属本周则留空）
+
+
+---
+
 ## 👶 Son Fund 短信区
 
 
@@ -1334,6 +1581,11 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
             inp['son_sms_lines'], son_template, date_str, interactive=confirm
         )
 
+    # 步骤一c：SAP 归属
+    sap_warns = []
+    if inp['sap_events']:
+        template, sap_warns = step_sap(inp['sap_events'], template, date_str, confirm=confirm)
+
     # 步骤二：道指抵扣——计算建议（不执行）
     dow_suggestion = compute_dow_suggestion(all_transactions, inp['dow_topup'], date_str)
 
@@ -1354,7 +1606,7 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
         date_str, template, all_transactions,
         date_msgs, price_warns, sms_warns,
         dow_suggestion, trade_warns, recon_ok, recon_msgs,
-        failed_codes=failed_codes,
+        sap_warns=sap_warns, failed_codes=failed_codes,
     )
 
     # Son Fund 预览附加
