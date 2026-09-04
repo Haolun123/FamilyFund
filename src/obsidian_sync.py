@@ -246,33 +246,47 @@ def _build_class_perf_table(
     class_nav_dict: Dict[str, pd.DataFrame],
     allocation_df: pd.DataFrame,
     cost_basis_df: pd.DataFrame,
+    raw_df: Optional[pd.DataFrame] = None,
 ) -> str:
     mv_col  = 'Total_Value' if 'Total_Value' in allocation_df.columns else 'Market_Value'
     pct_col = 'Allocation_Percent' if 'Allocation_Percent' in allocation_df.columns else None
 
-    # 按类别汇总盈亏
-    cls_pnl = {}
+    # 浮盈（仅当前持仓）
+    cls_float_pnl = {}
     if cost_basis_df is not None and not cost_basis_df.empty:
+        cost_col = 'Cost_Basis' if 'Cost_Basis' in cost_basis_df.columns else 'Cost'
         cb = cost_basis_df[cost_basis_df['Market_Value'] > 0].groupby('Asset_Class').agg(
-            cost=('Cost_Basis', 'sum') if 'Cost_Basis' in cost_basis_df.columns else ('Cost', 'sum'),
-            mv=('Market_Value', 'sum')
+            cost=(cost_col, 'sum'), mv=('Market_Value', 'sum')
         )
         for cls, row in cb.iterrows():
-            cls_pnl[cls] = float(row['mv']) - float(row['cost'])
+            cls_float_pnl[cls] = float(row['mv']) - float(row['cost'])
+
+    # 合计盈亏（含已实现）
+    cls_total_pnl = {}
+    if raw_df is not None and not raw_df.empty and 'Asset_Class' in raw_df.columns:
+        for cls in raw_df['Asset_Class'].unique():
+            if cls == 'Cash':
+                continue
+            cdf        = raw_df[raw_df['Asset_Class'] == cls]
+            latest_tv  = float(cdf[cdf['Date'] == cdf['Date'].max()]['Total_Value'].sum())
+            ncf_all    = cdf['Net_Cash_Flow'].fillna(0)
+            buy_total  = float(ncf_all[ncf_all > 0].sum())
+            sell_total = float(ncf_all[ncf_all < 0].abs().sum())
+            cls_total_pnl[cls] = latest_tv + sell_total - buy_total
 
     rows = ['## 📋 分类业绩一览\n',
-            '| 类别 | 净值 | 收益率 | 收益额 | 市值 | 占比 |',
-            '|------|------|--------|--------|------|------|']
+            '| 类别 | 净值 | 收益率 | 浮盈 | 已实现 | 合计盈亏 | 市值 | 占比 |',
+            '|------|------|--------|------|--------|---------|------|------|']
 
     classes = [c for c in class_nav_dict if c not in EXCLUDE_FROM_CLASS]
     for cls in classes:
         nav_df = class_nav_dict[cls]
         if nav_df.empty:
             continue
-        latest = nav_df.iloc[-1]
-        nav_val  = float(latest['NAV'])
-        ret_val  = float(latest['Cumulative_Return(%)'])
-        tv_val   = float(latest['Total_Value'])
+        latest  = nav_df.iloc[-1]
+        nav_val = float(latest['NAV'])
+        ret_val = float(latest['Cumulative_Return(%)'])
+        tv_val  = float(latest['Total_Value'])
 
         alloc_row = allocation_df[allocation_df['Asset_Class'] == cls]
         if pct_col and not alloc_row.empty:
@@ -283,13 +297,18 @@ def _build_class_perf_table(
         else:
             pct_val = 0.0
 
-        pnl = cls_pnl.get(cls)
-        pnl_str = f"¥{pnl:+,.0f}" if pnl is not None else '—'
-        display = CLASS_DISPLAY.get(cls, cls)
+        float_pl    = cls_float_pnl.get(cls)
+        total_pl    = cls_total_pnl.get(cls)
+        realized_pl = (total_pl - float_pl) if (total_pl is not None and float_pl is not None) else None
+
+        float_str    = f"¥{float_pl:+,.0f}"    if float_pl    is not None else '—'
+        realized_str = f"¥{realized_pl:+,.0f}" if realized_pl is not None and abs(realized_pl) > 1 else '—'
+        total_str    = f"¥{total_pl:+,.0f}"    if total_pl    is not None else '—'
+        display      = CLASS_DISPLAY.get(cls, cls)
 
         rows.append(
-            f'| {display} | {nav_val:.4f} | {ret_val:+.2f}% | {pnl_str} '
-            f'| ¥{tv_val:,.0f} | {pct_val:.1f}% |'
+            f'| {display} | {nav_val:.4f} | {ret_val:+.2f}% | {float_str} '
+            f'| {realized_str} | {total_str} | ¥{tv_val:,.0f} | {pct_val:.1f}% |'
         )
 
     return '\n'.join(rows) + '\n'
@@ -661,7 +680,7 @@ updated: {date_str}
     sections.append('')
 
     # 分类业绩表
-    sections.append(_build_class_perf_table(class_nav_dict, allocation_df, cost_basis_df))
+    sections.append(_build_class_perf_table(class_nav_dict, allocation_df, cost_basis_df, raw_df))
 
     # 持仓明细表
     sections.append(_build_holdings_table(cost_basis_df))

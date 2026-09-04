@@ -445,14 +445,30 @@ with tab_dashboard:
     st.subheader("分类业绩一览")
     perf_rows = []
 
-    # 按类别汇总成本和市值，用于计算收益额
-    _cls_cost = {}
+    # 按类别计算「历史总盈亏（含已实现）」：
+    # total_pnl = 当前TV + 历史累计赎回金额 - 历史累计买入金额
+    #           = current_TV + |负NCF合计| - 正NCF合计
+    # 这个数字不管赎回多少，都能正确追踪已实现+未实现的合计盈亏。
+    _cls_total_pnl = {}
+    _cls_float_pnl = {}  # 仅浮盈（当前持仓）
+    for _cls in raw_df['Asset_Class'].unique():
+        if _cls == 'Cash':
+            continue
+        _cdf = raw_df[raw_df['Asset_Class'] == _cls]
+        # 按日期聚合：取最新日期 TV 和全历史 NCF
+        _latest_tv = float(_cdf[_cdf['Date'] == _cdf['Date'].max()]['Total_Value'].sum())
+        _ncf_all   = _cdf['Net_Cash_Flow'].fillna(0)
+        _buy_total  = float(_ncf_all[_ncf_all > 0].sum())
+        _sell_total = float(_ncf_all[_ncf_all < 0].abs().sum())
+        _cls_total_pnl[_cls] = _latest_tv + _sell_total - _buy_total
+
+    # 浮盈（仅当前持仓，原来的口径）
     if cost_basis_df is not None and len(cost_basis_df) > 0:
         _cb = cost_basis_df[cost_basis_df['Market_Value'] > 0].groupby('Asset_Class').agg(
             cost=('Cost_Basis', 'sum'), mktval=('Market_Value', 'sum')
         )
         for _ac, _row in _cb.iterrows():
-            _cls_cost[_ac] = _row['mktval'] - _row['cost']
+            _cls_float_pnl[_ac] = _row['mktval'] - _row['cost']
 
     for cls in selected_classes:
         if cls in class_nav_dict:
@@ -462,15 +478,24 @@ with tab_dashboard:
                 latest = filtered_cls.iloc[-1]
                 alloc_row = allocation_df[allocation_df['Asset_Class'] == cls]
                 alloc_pct = alloc_row['Allocation_Percent'].values[0] * 100 if len(alloc_row) > 0 else 0
-                pl = _cls_cost.get(cls)
-                pl_str = f"¥{pl:+,.0f}" if pl is not None else '—'
+
+                float_pl   = _cls_float_pnl.get(cls)
+                total_pl   = _cls_total_pnl.get(cls)
+                realized_pl = (total_pl - float_pl) if (total_pl is not None and float_pl is not None) else None
+
+                float_str    = f"¥{float_pl:+,.0f}"   if float_pl   is not None else '—'
+                total_str    = f"¥{total_pl:+,.0f}"   if total_pl   is not None else '—'
+                realized_str = f"¥{realized_pl:+,.0f}" if realized_pl is not None and abs(realized_pl) > 1 else '—'
+
                 perf_rows.append({
-                    '资产类别': display_map[cls],
-                    '净值': f"{latest['NAV']:.4f}",
-                    '收益率': f"{latest['Cumulative_Return(%)']:+.2f}%",
-                    '收益额': pl_str,
-                    '市值': f"¥{latest['Total_Value']:,.0f}",
-                    '占比': f"{alloc_pct:.1f}%",
+                    '资产类别':          display_map[cls],
+                    '净值':              f"{latest['NAV']:.4f}",
+                    '收益率':            f"{latest['Cumulative_Return(%)']:+.2f}%",
+                    '浮盈（持仓中）':    float_str,
+                    '已实现盈亏':        realized_str,
+                    '合计盈亏':          total_str,
+                    '市值':              f"¥{latest['Total_Value']:,.0f}",
+                    '占比':              f"{alloc_pct:.1f}%",
                 })
 
     if perf_rows:
