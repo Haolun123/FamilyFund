@@ -138,6 +138,31 @@ _PAT_H = re.compile(
 )
 
 
+# 格式I：华安基金（申购/定期定额申购，无净值，从金额/份额反算）
+# "您于MM月DD日，[定期定额]申购<基金名> <金额>元，[确认日期 MM月DD日，]成交份额 <份额>份"
+_PAT_I = re.compile(
+    r'您于(\d{1,2})月(\d{1,2})日，(?:定期定额)?申购'
+    r'(.+?)\s+'                               # 基金名称
+    r'([\d,]+\.?\d*)元，'                     # 金额
+    r'(?:确认日期\s*(\d{1,2})月(\d{1,2})日，)?'  # 确认日月（可选）
+    r'成交份额\s*([\d,]+\.?\d*)份',           # 份额
+    re.DOTALL,
+)
+
+
+# 格式J：天弘基金（申购，含净值和确认日期，一条短信可包含多笔）
+# "您于N月N日通过天弘基金提交的申购<基金名>的申请已成功，申请金额<X>元，确认份额<X>份，确认净值<X>元，确认日期为N月N日"
+_PAT_J_UNIT = re.compile(
+    r'您于(\d{1,2})月(\d{1,2})日通过天弘基金提交的申购'
+    r'(.+?)的申请已成功，'                    # 基金名称
+    r'申请金额([\d,]+\.?\d*)元，'             # 金额
+    r'确认份额([\d,]+\.?\d*)份，'             # 份额
+    r'确认净值([\d.]+)元，'                   # 净值
+    r'确认日期为(\d{1,2})月(\d{1,2})日',      # 确认日月
+    re.DOTALL,
+)
+
+
 def _parse_amount(s: str) -> float:
     """去掉逗号后转 float。"""
     return float(s.replace(',', ''))
@@ -322,7 +347,6 @@ def _parse_one(sms: str) -> dict | None:
         year      = _infer_year(confirm_mo)
         amount    = _parse_amount(m.group(3))
         fund_name = m.group(4).strip()
-        # 大成短信里基金名不含公司前缀，补上"大成"避免跨公司误匹配
         if not fund_name.startswith('大成'):
             fund_name = '大成' + fund_name
         shares    = _parse_amount(m.group(5))
@@ -341,7 +365,72 @@ def _parse_one(sms: str) -> dict | None:
             '_brand':       '大成',
         }
 
+    # 格式I：华安基金（申购/定期定额申购，无净值字段，从金额/份额反算）
+    m = _PAT_I.search(sms)
+    if m:
+        apply_mo, apply_d = int(m.group(1)), int(m.group(2))
+        fund_name         = m.group(3).strip()
+        amount            = _parse_amount(m.group(4))
+        confirm_mo_str    = m.group(5)   # 可能为 None（定期定额无确认日期）
+        confirm_d_str     = m.group(6)
+        shares            = _parse_amount(m.group(7))
+        if confirm_mo_str and confirm_d_str:
+            confirm_mo, confirm_d = int(confirm_mo_str), int(confirm_d_str)
+        else:
+            confirm_mo, confirm_d = apply_mo, apply_d
+        year = _infer_year(confirm_mo)
+        nav  = round(amount / shares, 6) if shares > 0 else 0.0
+        return {
+            'confirm_date': f'{year:04d}-{confirm_mo:02d}-{confirm_d:02d}',
+            'action':       '买入',
+            'fund_name':    fund_name,
+            'amount':       amount,
+            'shares':       shares,
+            'nav':          nav,
+            'is_gold':      False,
+            'raw':          sms,
+            'matched_code': None,
+            'matched_name': None,
+            '_brand':       '华安',
+        }
+
     return None
+
+
+def _parse_tianhong_all(sms: str) -> list:
+    """
+    格式J：天弘基金，一条短信可含多笔申购，用 findall 提取全部。
+    返回结果列表（空列表表示不是天弘格式）。
+    """
+    if '天弘基金' not in sms:
+        return []
+    matches = _PAT_J_UNIT.findall(sms)
+    if not matches:
+        return []
+    results = []
+    for g in matches:
+        apply_mo, apply_d = int(g[0]), int(g[1])
+        fund_name         = g[2].strip()
+        amount            = _parse_amount(g[3])
+        shares            = _parse_amount(g[4])
+        nav               = float(g[5])
+        confirm_mo        = int(g[6])
+        confirm_d         = int(g[7])
+        year              = _infer_year(confirm_mo)
+        results.append({
+            'confirm_date': f'{year:04d}-{confirm_mo:02d}-{confirm_d:02d}',
+            'action':       '买入',
+            'fund_name':    fund_name,
+            'amount':       amount,
+            'shares':       shares,
+            'nav':          nav,
+            'is_gold':      False,
+            'raw':          sms,
+            'matched_code': None,
+            'matched_name': None,
+            '_brand':       '天弘',
+        })
+    return results
 
 
 # ── 自定义格式 (sms_custom_formats.json) ─────────────────────
@@ -722,10 +811,17 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
             custom_formats.extend(load_custom_formats(_dir))
 
     for block in blocks:
-        # 摩根格式：一个块内可能含多笔交易，先尝试全部提取
+        # 摩根格式：一个块内可能含多笔交易
         jpm_all = _parse_jpmorgan_all(block)
         if jpm_all:
             for parsed in jpm_all:
+                results.append(_attach_match(parsed))
+            continue
+
+        # 天弘格式：一条短信可含多笔申购
+        th_all = _parse_tianhong_all(block)
+        if th_all:
+            for parsed in th_all:
                 results.append(_attach_match(parsed))
             continue
 
