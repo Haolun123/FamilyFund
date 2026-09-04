@@ -114,31 +114,70 @@ def parse_weekly_input(path: str) -> dict:
             except ValueError:
                 result['warnings'].append('⚠️ 道指补仓金额格式错误，已忽略')
 
-    # 手动交易
+    # 手动交易（YAML-like 块格式，每笔交易用 --- 分隔）
     trade_block = _section(content, '步骤三：手动交易登记', '步骤四：固收净值')
-    for line in (trade_block or '').splitlines():
-        line = line.strip()
-        if not line or line.startswith('<!--') or line.startswith('>'):
-            continue
-        parts = line.split()
-        if len(parts) < 3:
-            result['errors'].append(f'❌ 交易格式错误（方向 标的 金额 [手续费] [成交价]）：{line}')
-            continue
-        direction = parts[0]
-        if direction not in ('买入', '卖出', '赎回'):
-            result['errors'].append(f'❌ 交易方向无效（买入/卖出/赎回）：{line}')
-            continue
-        try:
-            amount = float(parts[2].replace(',', ''))
-            fee    = float(parts[3].replace(',', '')) if len(parts) > 3 else 0.0
-            price  = float(parts[4].replace(',', '')) if len(parts) > 4 else None
-        except ValueError:
-            result['errors'].append(f'❌ 交易金额/价格格式错误：{line}')
-            continue
-        result['trades'].append({
-            'direction': direction, 'code_or_name': parts[1],
-            'amount': amount, 'fee': fee, 'price': price,
-        })
+    if trade_block:
+        # 按 --- 分割成多个交易块
+        raw_blocks = re.split(r'\n\s*---\s*\n', trade_block)
+        for raw in raw_blocks:
+            raw = raw.strip()
+            if not raw or raw.startswith('<!--'):
+                continue
+            lines_in_block = [l.strip() for l in raw.splitlines()
+                              if l.strip() and not l.strip().startswith('<!--')]
+            if not lines_in_block:
+                continue
+
+            # 解析 key: value
+            fields = {}
+            for l in lines_in_block:
+                m = re.match(r'^(.+?):\s*(.+)$', l)
+                if m:
+                    fields[m.group(1).strip()] = m.group(2).strip()
+
+            if not fields:
+                continue
+
+            # 提取各字段
+            direction    = fields.get('方向')
+            code_or_name = fields.get('标的')
+            amount_str   = fields.get('金额')
+            fee_str      = fields.get('手续费')
+            price_str    = fields.get('成交价')
+            shares_str   = fields.get('份额')
+
+            # 必填校验
+            missing = [f for f, v in [('方向', direction), ('标的', code_or_name),
+                                       ('金额', amount_str), ('手续费', fee_str)]
+                       if not v]
+            if missing:
+                result['errors'].append(
+                    f'❌ 交易块缺少必填字段：{", ".join(missing)}（标的={code_or_name or "?"}）'
+                )
+                continue
+
+            if direction not in ('买入', '卖出', '赎回'):
+                result['errors'].append(f'❌ 方向无效（买入/卖出/赎回）：{direction}')
+                continue
+
+            try:
+                amount = float(amount_str.replace(',', ''))
+                fee    = float(fee_str.replace(',', ''))
+                price  = float(price_str.replace(',', '')) if price_str else None
+                shares = float(shares_str.replace(',', '')) if shares_str else None
+            except ValueError as e:
+                result['errors'].append(f'❌ 数字格式错误（标的={code_or_name}）：{e}')
+                continue
+
+            # 份额/成交价校验（延迟到 step_trades，因为需要查 Currency）
+            result['trades'].append({
+                'direction':    direction,
+                'code_or_name': code_or_name,
+                'amount':       amount,
+                'fee':          fee,
+                'price':        price,
+                'shares':       shares,
+            })
 
     # 固收净值（手动）
     nav_block = _section(content, '步骤四：固收净值', '💵 外部资金变动')
@@ -713,55 +752,90 @@ def step_trades(trades: list, template_df: pd.DataFrame, date_str: str
         code_or_name = trade['code_or_name']
         amount       = trade['amount']
         fee          = trade['fee']
-        trade_price  = trade.get('price')  # 用户填的成交价（可为 None）
+        price        = trade.get('price')    # 成交价（可选）
+        shares_given = trade.get('shares')   # 用户填的份额（可选）
 
         mask = (df['Code'] == code_or_name) | (df['Name'] == code_or_name)
         if not mask.any():
-            warnings.append(f'⚠️ 找不到标的"{code_or_name}"，请确认代码')
+            warnings.append(f'⚠️ 找不到标的「{code_or_name}」，请确认代码或名称')
             continue
 
         name      = df.loc[mask, 'Name'].values[0]
         code      = df.loc[mask, 'Code'].values[0]
+        currency  = str(df.loc[mask, 'Currency'].values[0]) if 'Currency' in df.columns else 'CNY'
         cur_price = float(df.loc[mask, 'Current_Price'].values[0])
+        is_foreign = currency not in ('CNY', '')
 
-        # 份额计算用的价格：优先用户填的成交价，否则用 API 拉取的当前价
-        # 成交价用于精确计算历史买入份额；当前价用于更新 Total_Value
-        exec_price = trade_price if trade_price and trade_price > 0 else cur_price
+        # ── 份额/成交价校验 ───────────────────────────────────────────
+        if is_foreign:
+            # 外币资产：份额必填
+            if not shares_given:
+                warnings.append(
+                    f'❌ {name}（{currency}）是外币资产，份额为必填字段，已跳过。'
+                    f'请在交易块里填写「份额: <股数>」'
+                )
+                continue
+            shares = shares_given
+            # 成交价备注用，不用于份额计算
+        else:
+            # CNY资产：份额和成交价至少填一个
+            if not shares_given and not price:
+                warnings.append(
+                    f'❌ {name} 份额和成交价均未填写，已跳过。'
+                    f'请至少填写其中一个。'
+                )
+                continue
+            if shares_given and price:
+                # 两者都填：一致性校验
+                implied_amount = shares_given * price
+                diff_pct = abs(implied_amount - amount) / amount if amount > 0 else 0
+                if diff_pct > 0.01:
+                    warnings.append(
+                        f'⚠️ {name} 一致性校验：份额×成交价={implied_amount:,.2f}，'
+                        f'填写金额={amount:,.2f}，差异{diff_pct*100:.1f}%，请检查'
+                    )
+                shares = shares_given
+            elif shares_given:
+                shares = shares_given
+            else:
+                shares = amount / price  # 用成交价反算份额
 
-        if exec_price <= 0:
-            warnings.append(f'⚠️ {name} 价格为0，无法计算份额，已跳过')
-            continue
-
-        if trade_price and trade_price != cur_price:
-            warnings.append(
-                f'  ℹ️ {name}：用成交价 {trade_price} 计算份额'
-                f'（当前价 {cur_price}，Total_Value 仍按当前价计算）'
-            )
+        # ── 更新 DataFrame ────────────────────────────────────────────
+        old_shares = float(df.loc[mask, 'Shares'].values[0])
 
         if direction == '买入':
-            ncf        = amount + fee
-            new_shares = amount / exec_price
+            ncf = amount + fee
             df.loc[mask, 'Net_Cash_Flow'] = df.loc[mask, 'Net_Cash_Flow'].fillna(0) + ncf
-            df.loc[mask, 'Shares']        = float(df.loc[mask, 'Shares'].values[0]) + new_shares
-            # Total_Value 始终用当前价（反映现值）
+            df.loc[mask, 'Shares']        = old_shares + shares
             df.loc[mask, 'Total_Value']   = df.loc[mask, 'Shares'] * cur_price
             _adj_cash(df, -(amount + fee))
 
         elif direction in ('卖出', '赎回'):
-            ncf           = -(amount - fee)
-            reduce_shares = amount / exec_price
+            ncf = -(amount - fee)
             df.loc[mask, 'Net_Cash_Flow'] = df.loc[mask, 'Net_Cash_Flow'].fillna(0) + ncf
-            df.loc[mask, 'Shares']        = max(
-                0, float(df.loc[mask, 'Shares'].values[0]) - reduce_shares
-            )
+            df.loc[mask, 'Shares']        = max(0, old_shares - shares)
             df.loc[mask, 'Total_Value']   = df.loc[mask, 'Shares'] * cur_price
             _adj_cash(df, amount - fee)
 
         transactions.append({
-            'Date': date_str, 'Name': name, 'Code': code,
-            'Direction': direction, 'Amount_CNY': amount,
-            'Fee_CNY': fee, 'Price': trade_price, 'Source': 'Manual',
+            'Date':       date_str,
+            'Name':       name,
+            'Code':       code,
+            'Direction':  direction,
+            'Amount_CNY': amount,
+            'Fee_CNY':    fee,
+            'Shares':     shares,
+            'Price':      price,
+            'Currency':   currency,
+            'Source':     'Manual',
         })
+
+        # 预览提示
+        price_note = f'成交价 {price}' if price else f'份额反算（¥{amount/shares:.4f}/份）' if shares else ''
+        warnings.append(
+            f'✅ {direction} {name}：¥{amount:,.0f}，{shares:,.4f}份'
+            + (f'，{price_note}' if price_note else '')
+        )
 
     return df, transactions, warnings
 
@@ -986,15 +1060,7 @@ def build_preview(date_str, snapshot_df, transactions,
 
     lines += ['', '### 🔄 步骤三：手动交易']
     manual_tx = [t for t in transactions if t.get('Source') == 'Manual']
-    if manual_tx:
-        for t in manual_tx:
-            price_note = f'，成交价 {t["Price"]}' if t.get('Price') else '（用当前价）'
-            lines.append(
-                f'  ✅ {t["Direction"]} {t["Name"]}：¥{t["Amount_CNY"]:,.0f}'
-                + (f'，手续费 ¥{t["Fee_CNY"]}' if t.get('Fee_CNY') else '')
-                + price_note
-            )
-    else:
+    if not manual_tx:
         lines.append('  — 无手动交易')
     for w in trade_warns: lines.append(f'  {w}')
 
@@ -1180,8 +1246,10 @@ date:
 ---
 
 ## 🔄 步骤三：手动交易登记
-<!-- 格式：方向 标的 金额CNY 手续费CNY [成交价] -->
-<!-- 成交价可选，填实际成交净值/价格用于精确计算份额 -->
+<!-- 每笔交易一个块，用 --- 分隔 -->
+<!-- 必填：方向 / 标的 / 金额（CNY）/ 手续费（无则0）-->
+<!-- CNY资产：份额和成交价至少填一个 -->
+<!-- 外币资产：份额必填 -->
 
 ---
 
