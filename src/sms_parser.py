@@ -5,7 +5,9 @@
   B: 南方基金定投格式（定投关键词，不含年份）
   D: 招商银行黄金积存金
   E: 摩根基金（申购/定期定额申购，不含年份，确认日从"持有时间从X月X日"推算）
-  F: 建信基金（定期定额申购，日期为8位数字 YYYYMMDD，无净值需反算）
+  F: 建信基金（定期定额申购，日期为8位数字 YYYYMMDD，无净值反算）
+  G: 广发基金（定投，"净值X，份额X份，N月N日交易成功并开始计算持有时间"）
+  H: 大成基金（定投申购，"确认份额X份，份额净值X元，确认日N月N日"）
 
 返回结构：
     [
@@ -111,6 +113,29 @@ _PAT_F = re.compile(
     re.DOTALL,
 )
 
+
+# 格式G：广发基金，"您于N月N日通过广发基金定投...净值X，份额X份，N月N日交易成功并开始计算持有时间"
+# 确认日 = 持有时间起始日（即"N月N日交易成功"当天）
+_PAT_G = re.compile(
+    r'您于(\d{1,2})月(\d{1,2})日通过广发基金定投'
+    r'([\d,]+\.?\d*)\s*元'                    # 金额
+    r'(.+?)[，,]'                              # 基金名称（到第一个逗号止）
+    r'.*?净值([\d.]+)[，,]'                    # 净值
+    r'.*?份额([\d,]+\.?\d*)份[，,]'            # 份额
+    r'.*?(\d{1,2})月(\d{1,2})日交易成功',     # 确认月日
+    re.DOTALL,
+)
+
+# 格式H：大成基金，"您于N月N日在大成直销定投申购的X元...已确认成功!确认份额X份，份额净值X元，确认日N月N日"
+_PAT_H = re.compile(
+    r'您于(\d{1,2})月(\d{1,2})日在大成直销定投申购的'
+    r'([\d,]+\.?\d*)\s*元'                    # 金额
+    r'(.+?)基金已确认成功'                    # 基金名称
+    r'.*?确认份额([\d,]+\.?\d*)份'            # 份额
+    r'.*?份额净值([\d.]+)元'                  # 净值
+    r'.*?确认日(\d{1,2})月(\d{1,2})日',      # 确认月日
+    re.DOTALL,
+)
 
 
 def _parse_amount(s: str) -> float:
@@ -267,7 +292,215 @@ def _parse_one(sms: str) -> dict | None:
             '_brand':        '建信',  # 用于匹配时限定发行方，避免跨公司误匹配
         }
 
+    # 格式G：广发基金定投
+    m = _PAT_G.search(sms)
+    if m:
+        confirm_mo, confirm_d = int(m.group(7)), int(m.group(8))
+        year      = _infer_year(confirm_mo)
+        amount    = _parse_amount(m.group(3))
+        fund_name = m.group(4).strip()
+        nav       = float(m.group(5))
+        shares    = _parse_amount(m.group(6))
+        return {
+            'confirm_date': f'{year:04d}-{confirm_mo:02d}-{confirm_d:02d}',
+            'action':       '买入',
+            'fund_name':    fund_name,
+            'amount':       amount,
+            'shares':       shares,
+            'nav':          nav,
+            'is_gold':      False,
+            'raw':          sms,
+            'matched_code': None,
+            'matched_name': None,
+            '_brand':       '广发',
+        }
+
+    # 格式H：大成基金定投申购
+    m = _PAT_H.search(sms)
+    if m:
+        confirm_mo, confirm_d = int(m.group(7)), int(m.group(8))
+        year      = _infer_year(confirm_mo)
+        amount    = _parse_amount(m.group(3))
+        fund_name = m.group(4).strip()
+        # 大成短信里基金名不含公司前缀，补上"大成"避免跨公司误匹配
+        if not fund_name.startswith('大成'):
+            fund_name = '大成' + fund_name
+        shares    = _parse_amount(m.group(5))
+        nav       = float(m.group(6))
+        return {
+            'confirm_date': f'{year:04d}-{confirm_mo:02d}-{confirm_d:02d}',
+            'action':       '买入',
+            'fund_name':    fund_name,
+            'amount':       amount,
+            'shares':       shares,
+            'nav':          nav,
+            'is_gold':      False,
+            'raw':          sms,
+            'matched_code': None,
+            'matched_name': None,
+            '_brand':       '大成',
+        }
+
     return None
+
+
+# ── 自定义格式 (sms_custom_formats.json) ─────────────────────
+
+def _custom_formats_path(data_dir: str) -> str:
+    import os
+    return os.path.join(data_dir, 'sms_custom_formats.json')
+
+
+def load_custom_formats(data_dir: str) -> list:
+    """加载用户自定义格式列表。"""
+    import json, os
+    path = _custom_formats_path(data_dir)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_custom_format(data_dir: str, fmt: dict) -> None:
+    """追加/更新一条自定义格式并持久化。"""
+    import json, os
+    formats = load_custom_formats(data_dir)
+    formats = [f for f in formats if f.get('name') != fmt.get('name')]
+    formats.append(fmt)
+    path = _custom_formats_path(data_dir)
+    tmp  = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(formats, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def build_regex_from_anchors(anchors: dict) -> str:
+    """
+    从锚点 dict 生成正则字符串。
+
+    anchors 字段：
+        fund_name_prefix  基金名称之前的固定文字
+        fund_name_suffix  基金名称之后的固定文字（可选）
+        amount_prefix     金额之前的固定文字
+        shares_prefix     份额之前的固定文字
+        nav_prefix        净值之前的固定文字（None=从 amount/shares 反算）
+        date_prefix       日期之前的固定文字（None=用当天日期）
+        date_format       'YYYY-MM-DD' | 'MM月DD日' | '8位数字'
+    """
+    def esc(s):
+        return re.escape(s) if s else ''
+
+    parts = []
+
+    dp  = anchors.get('date_prefix')
+    dft = anchors.get('date_format', 'MM月DD日')
+    if dp:
+        if dft == 'YYYY-MM-DD':
+            parts.append(esc(dp) + r'(\d{4}-\d{2}-\d{2})')
+        elif dft == '8位数字':
+            parts.append(esc(dp) + r'(\d{8})')
+        else:
+            parts.append(esc(dp) + r'(\d{1,2})月(\d{1,2})日')
+
+    fn_pre = anchors.get('fund_name_prefix')
+    fn_suf = anchors.get('fund_name_suffix')
+    if fn_pre:
+        suf_pat = (r'(.+?)' + esc(fn_suf)) if fn_suf else r'(.+?)\s*'
+        parts.append(r'.*?' + esc(fn_pre) + suf_pat)
+
+    amt_pre = anchors.get('amount_prefix')
+    if amt_pre:
+        parts.append(r'.*?' + esc(amt_pre) + r'([\d,]+\.?\d*)\s*元')
+
+    sh_pre = anchors.get('shares_prefix')
+    if sh_pre:
+        parts.append(r'.*?' + esc(sh_pre) + r'([\d,]+\.?\d*)份')
+
+    nav_pre = anchors.get('nav_prefix')
+    if nav_pre:
+        parts.append(r'.*?' + esc(nav_pre) + r'([\d.]+)')
+
+    return ''.join(parts)
+
+
+def _try_custom_format(sms: str, fmt: dict) -> 'dict | None':
+    """尝试用自定义格式解析短信，成功返回标准结构，失败返回 None。"""
+    trigger = fmt.get('trigger', '')
+    if trigger and trigger not in sms:
+        return None
+
+    pattern_str = fmt.get('pattern')
+    if not pattern_str:
+        return None
+
+    try:
+        m = re.search(pattern_str, sms, re.DOTALL)
+    except re.error:
+        return None
+    if not m:
+        return None
+
+    groups  = m.groups()
+    idx     = 0
+
+    def _next():
+        nonlocal idx
+        v = groups[idx] if idx < len(groups) else None
+        idx += 1
+        return v
+
+    anchors  = fmt.get('anchors', {})
+    dft      = anchors.get('date_format', 'MM月DD日')
+    has_date = bool(anchors.get('date_prefix'))
+    has_name = bool(anchors.get('fund_name_prefix'))
+    has_amt  = bool(anchors.get('amount_prefix'))
+    has_sh   = bool(anchors.get('shares_prefix'))
+    has_nav  = bool(anchors.get('nav_prefix'))
+
+    confirm_date = None
+    if has_date:
+        if dft == 'YYYY-MM-DD':
+            confirm_date = _next()
+        elif dft == '8位数字':
+            d8 = _next()
+            if d8:
+                confirm_date = f'{d8[:4]}-{d8[4:6]}-{d8[6:8]}'
+        else:
+            mo_s, d_s = _next(), _next()
+            if mo_s and d_s:
+                yr = _infer_year(int(mo_s))
+                confirm_date = f'{yr}-{int(mo_s):02d}-{int(d_s):02d}'
+
+    if not confirm_date:
+        from datetime import date as _d
+        confirm_date = _d.today().isoformat()
+
+    fund_name = _next().strip() if has_name else fmt.get('fund_name_default', '')
+    amount    = float(_next().replace(',', '')) if has_amt else 0.0
+    shares    = float(_next().replace(',', '')) if has_sh  else 0.0
+    nav       = float(_next()) if has_nav else (
+        round(amount / shares, 6) if shares > 0 and amount > 0 else 0.0
+    )
+
+    if amount <= 0 and shares <= 0:
+        return None
+
+    return {
+        'confirm_date':   confirm_date,
+        'action':         '买入',
+        'fund_name':      fund_name or fmt.get('fund_name_default', ''),
+        'amount':         amount,
+        'shares':         shares,
+        'nav':            nav,
+        'is_gold':        False,
+        'raw':            sms,
+        'matched_code':   None,
+        'matched_name':   None,
+        '_custom_format': fmt.get('name', 'custom'),
+    }
 
 
 # ── 格式E：摩根基金 ──────────────────────────────────────────
@@ -328,14 +561,18 @@ def _match_holding(fund_name: str, holdings: list[dict]) -> tuple[str | None, st
 
     # 1. 关键词包含匹配（去除常见后缀后比较）
     def _normalize(s: str) -> str:
-        for suffix in ['ETF联接', 'ETF', '联接', 'A类', 'E类', 'I类', 'C类', 'A', 'E', 'I', 'C']:
+        for suffix in ['ETF联接', 'ETF', '联接',
+                       '人民币A', '人民币C', '人民币E', '人民币F', '人民币I',
+                       'A类', 'C类', 'E类', 'F类', 'I类',
+                       'A', 'C', 'E', 'F', 'I']:
             s = s.replace(suffix, '')
         return s.strip()
 
     fn_norm = _normalize(fund_name)
     for h in holdings:
         hn_norm = _normalize(h['name'])
-        if fn_norm in hn_norm or hn_norm in fn_norm:
+        # normalize 后必须完全相等，避免 A类/F类 等不同份额类别互相误匹配
+        if fn_norm == hn_norm:
             return h['code'], h['name']
 
     # 2. 关键词分词匹配
@@ -395,13 +632,15 @@ def add_sms_mapping(data_dir: str, fund_name: str, code: str, name: str) -> None
 # ── 公开 API ──────────────────────────────────────────────
 
 def parse_sms(text: str, holdings: list[dict] | None = None,
-              data_dir: str | None = None) -> list[dict]:
+              data_dir: str | None = None,
+              fallback_data_dir: str | None = None) -> list[dict]:
     """解析短信文本（支持多条，用空行分隔）。
 
     Args:
-        text:     粘贴的短信内容（多条用空行分隔）
-        holdings: 持仓列表 [{'code': str, 'name': str}]，用于基金名称匹配
-        data_dir: $FAMILYFUND_DATA 路径，用于读取 sms_code_map.json 精确匹配
+        text:              粘贴的短信内容（多条用空行分隔）
+        holdings:          持仓列表 [{'code': str, 'name': str}]，用于基金名称匹配
+        data_dir:          $FAMILYFUND_DATA 路径，用于读取 sms_code_map.json 精确匹配
+        fallback_data_dir: 备用 data_dir（如主基金目录），data_dir 找不到时回退
 
     Returns:
         解析结果列表，每条对应一条短信
@@ -410,8 +649,10 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
     blocks = [b.strip() for b in re.split(r'\n\s*\n', text) if b.strip()]
     results = []
 
-    # 加载持久化精确匹配 map（优先于模糊匹配）
-    sms_map = load_sms_map(data_dir) if data_dir else {}
+    # 加载持久化精确匹配 map：fallback map 先加载，data_dir map 后加载（覆盖 fallback）
+    sms_map = load_sms_map(fallback_data_dir) if fallback_data_dir else {}
+    if data_dir:
+        sms_map.update(load_sms_map(data_dir))
 
     def _attach_match(parsed: dict) -> dict:
         """为解析结果附加持仓匹配。"""
@@ -437,17 +678,48 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
 
         # 2. 模糊匹配（需要 holdings）
         if holdings:
-            candidate_holdings = holdings
             if brand:
                 branded = [h for h in holdings if brand in h.get('name', '')]
-                if branded:
-                    candidate_holdings = branded
-            code, name = _match_holding(fund_name, candidate_holdings)
+                if not branded:
+                    # brand 明确但持仓里没有该品牌基金，不跨品牌模糊匹配
+                    return parsed
+                # brand 内只做 normalize 完全相等 + 类别后缀一致的匹配
+                def _norm(s):
+                    for sfx in ['ETF联接', 'ETF', '联接',
+                                '人民币A', '人民币C', '人民币E', '人民币F', '人民币I',
+                                'A类', 'C类', 'E类', 'F类', 'I类',
+                                'A', 'C', 'E', 'F', 'I']:
+                        s = s.replace(sfx, '')
+                    return s.strip()
+                def _cls(s):
+                    import re as _re
+                    m = _re.search(r'人民币([A-Z])|([A-Z])类?\s*$', s)
+                    return (m.group(1) or m.group(2)) if m else None
+                fn = _norm(fund_name)
+                fn_cls = _cls(fund_name)
+                matched = next(
+                    (h for h in branded
+                     if _norm(h['name']) == fn and
+                     (fn_cls is None or _cls(h['name']) == fn_cls)),
+                    None
+                )
+                if matched:
+                    parsed['matched_code'] = matched['code']
+                    parsed['matched_name'] = matched['name']
+                # normalize/类别不中则保持未匹配，不做进一步模糊
+                return parsed
+            code, name = _match_holding(fund_name, holdings)
             parsed['matched_code'] = code
             parsed['matched_name'] = name
 
         return parsed
         return parsed
+
+    # 加载自定义格式
+    custom_formats = []
+    for _dir in [fallback_data_dir, data_dir]:
+        if _dir:
+            custom_formats.extend(load_custom_formats(_dir))
 
     for block in blocks:
         # 摩根格式：一个块内可能含多笔交易，先尝试全部提取
@@ -458,8 +730,16 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
             continue
 
         parsed = _parse_one(block)
+
+        # 内置格式失败，尝试自定义格式
         if parsed is None:
-            # 无法解析，返回错误条目
+            for fmt in custom_formats:
+                parsed = _try_custom_format(block, fmt)
+                if parsed is not None:
+                    break
+
+        if parsed is None:
+            # 所有格式都失败
             results.append({
                 'confirm_date': None,
                 'action':       None,

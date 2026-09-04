@@ -267,6 +267,105 @@ def validate_date(date_str: str, csv_path: str) -> tuple[bool, list]:
 
 # ── 步骤一：短信解析 ──────────────────────────────────────────────────────────
 
+def _interactive_add_sms_format(raw_sms: str) -> Optional[dict]:
+    """
+    交互式引导用户为无法识别的短信创建新解析格式。
+    返回 fmt dict（可传给 save_custom_format），或 None（用户跳过）。
+    """
+    from sms_parser import build_regex_from_anchors, _try_custom_format
+
+    print('\n📋 发现无法识别的短信格式，引导你创建解析规则：')
+    print(f'   原始短信：\n   {raw_sms}\n')
+    print('   是否创建解析规则？(直接回车=是，n=跳过本条)')
+    if input('   > ').strip().lower() in ('n', 'no', '否'):
+        return None
+
+    print('\n   请根据短信内容回答以下问题（直接回车=该字段不存在/跳过）：\n')
+
+    def _ask(prompt, required=False):
+        while True:
+            val = input(f'   {prompt}：').strip()
+            if val or not required:
+                return val or None
+            print('   此字段为必填，请重新输入')
+
+    # 格式名（用于识别和去重）
+    fmt_name = _ask('格式名称（如"招行某基金"，用于区分）', required=True)
+
+    # 触发词（快速判断是否尝试该格式）
+    print('   触发词：短信中一定出现的唯一文字（如发送方名称或特征词，用于快速过滤）')
+    trigger = _ask('触发词（如"招商银行"、"嘉实基金"）')
+
+    # 日期
+    print('\n   --- 日期字段 ---')
+    date_prefix = _ask('日期前面的文字（如"于"、"申购日期"，无则回车跳过）')
+    date_format = None
+    if date_prefix:
+        print('   日期格式：1=MM月DD日（如"9月4日"）  2=YYYY-MM-DD  3=8位数字（如"20260904"）')
+        df_choice = input('   选择(1/2/3，回车=1)：').strip() or '1'
+        date_format = {'1': 'MM月DD日', '2': 'YYYY-MM-DD', '3': '8位数字'}.get(df_choice, 'MM月DD日')
+
+    # 基金名称
+    print('\n   --- 基金名称字段 ---')
+    fn_prefix = _ask('基金名称前面的文字（如"申购"、"定投"）')
+    fn_suffix = None
+    if fn_prefix:
+        fn_suffix = _ask('基金名称后面的文字（可选，如"基金"、"，"，用于精确定位）')
+
+    # 金额
+    print('\n   --- 金额字段 ---')
+    amt_prefix = _ask('金额前面的文字（如"申购金额"、"扣款金额"）', required=True)
+
+    # 份额
+    print('\n   --- 份额字段 ---')
+    sh_prefix = _ask('份额前面的文字（如"申购确认份额"、"确认份额"）', required=True)
+
+    # 净值
+    print('\n   --- 净值字段 ---')
+    print('   若短信没有净值，系统会从金额/份额自动反算，直接回车跳过')
+    nav_prefix = _ask('净值前面的文字（如"基金净值"、"成交净值"）')
+
+    anchors = {
+        'date_prefix':       date_prefix,
+        'date_format':       date_format or 'MM月DD日',
+        'fund_name_prefix':  fn_prefix,
+        'fund_name_suffix':  fn_suffix,
+        'amount_prefix':     amt_prefix,
+        'shares_prefix':     sh_prefix,
+        'nav_prefix':        nav_prefix,
+    }
+
+    pattern = build_regex_from_anchors(anchors)
+
+    # 在当前短信上验证
+    print('\n   生成的正则：', pattern)
+    print('   正在验证...')
+
+    test_fmt = {'name': fmt_name, 'trigger': trigger or '', 'pattern': pattern, 'anchors': anchors}
+    result   = _try_custom_format(raw_sms, test_fmt)
+
+    if result is None:
+        print('\n   ❌ 验证失败：正则未能匹配当前短信。')
+        print('   可能原因：锚点文字不完全匹配（注意全角/半角、空格），请重试。')
+        retry = input('   重新填写？(y/n)：').strip().lower()
+        if retry in ('y', 'yes', '是'):
+            return _interactive_add_sms_format(raw_sms)
+        return None
+
+    print(f'\n   ✅ 验证成功！提取结果：')
+    print(f'      基金名称：{result.get("fund_name")}')
+    print(f'      金额：¥{result.get("amount"):,.2f}')
+    print(f'      份额：{result.get("shares"):.4f}')
+    print(f'      净值：{result.get("nav")}')
+    print(f'      日期：{result.get("confirm_date")}')
+
+    confirm = input('\n   结果正确，保存格式？(直接回车=是，n=不保存)：').strip().lower()
+    if confirm in ('n', 'no', '否'):
+        return None
+
+    return test_fmt
+
+
 def _interactive_new_asset(fund_name: str, shares: float, amount: float, nav: float,
                             date_str: str) -> Optional[dict]:
     """
@@ -368,9 +467,32 @@ def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str,
 
         for item in parsed:
             if item.get('parse_error'):
-                raw = item.get('raw', '')[:60]
-                warnings.append(f'⚠️ 短信格式无法识别，已跳过：{raw}…')
-                continue
+                raw = item.get('raw', '')
+                if interactive:
+                    # 交互式引导创建新格式
+                    fmt = _interactive_add_sms_format(raw)
+                    if fmt is not None:
+                        # 保存格式
+                        from sms_parser import save_custom_format, _try_custom_format
+                        save_custom_format(DATA_DIR, fmt)
+                        # 用新格式立即重新解析本条短信
+                        retried = _try_custom_format(raw, fmt)
+                        if retried:
+                            # 重新走后续匹配逻辑
+                            item = retried
+                            # fall through（不 continue）
+                        else:
+                            warnings.append(f'⚠️ 新格式保存成功，但本条短信重解析失败，已跳过')
+                            continue
+                    else:
+                        warnings.append(f'⚠️ 短信格式无法识别，已跳过：{raw[:60]}…')
+                        continue
+                else:
+                    warnings.append(
+                        f'⚠️ 短信格式无法识别（{raw[:40]}…）。'
+                        f'确认执行时将引导你创建新解析规则。'
+                    )
+                    continue
 
             fund_name = item.get('fund_name', '')
             code      = item.get('matched_code') or ''
