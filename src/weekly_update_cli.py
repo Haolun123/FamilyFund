@@ -287,15 +287,29 @@ def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str
             return df, transactions, warnings
 
         for item in parsed:
-            name   = item.get('name', item.get('Name', ''))
-            code   = item.get('code', item.get('Code', ''))
-            shares = float(item.get('shares_delta', 0))
-            amount = float(item.get('amount', 0))
-            nav    = float(item.get('nav', 0)) if item.get('nav') else 0.0
+            # parse_sms 返回字段：fund_name, matched_code, matched_name, amount, shares, nav, parse_error
+            if item.get('parse_error'):
+                raw = item.get('raw', '')[:60]
+                warnings.append(f'⚠️ 短信格式无法识别，已跳过：{raw}…')
+                continue
+
+            fund_name = item.get('fund_name', '')
+            code      = item.get('matched_code') or ''
+            name      = item.get('matched_name') or fund_name
+            shares    = float(item.get('shares') or 0)
+            amount    = float(item.get('amount') or 0)
+            nav       = float(item.get('nav') or 0)
+
+            # 未匹配到持仓（新标的或名称不匹配）
+            if not code and not name:
+                warnings.append(f'⚠️ 短信："{fund_name}" 无法匹配到持仓，已跳过。'
+                                 f'如为新标的，请先在 Dashboard 建仓，或在步骤三手动登记。')
+                continue
 
             mask = (df['Name'] == name) | (df['Code'] == code)
             if not mask.any():
-                warnings.append(f'⚠️ 短信：未找到标的"{name}"（{code}），已跳过')
+                warnings.append(f'⚠️ 短信："{name}"（{code}）不在持仓中，已跳过。'
+                                 f'如为新标的，请先在 Dashboard 建仓，或在步骤三手动登记。')
                 continue
 
             if shares <= 0 and amount <= 0:
@@ -305,10 +319,9 @@ def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str
             old_shares = float(df.loc[mask, 'Shares'].values[0])
             df.loc[mask, 'Shares'] = old_shares + shares
             df.loc[mask, 'Net_Cash_Flow'] = (
-                df.loc[mask, 'Net_Cash_Flow'].fillna(0) + amount + 0  # fee 含在 amount 里
+                df.loc[mask, 'Net_Cash_Flow'].fillna(0) + amount
             )
-            if nav > 0:
-                df.loc[mask, 'Current_Price'] = nav
+            # 短信净值是申购确认净值，不代表当前最新净值，不更新 Current_Price
             df.loc[mask, 'Total_Value'] = (
                 df.loc[mask, 'Shares'] * df.loc[mask, 'Current_Price']
             )
