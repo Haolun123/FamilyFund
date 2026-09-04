@@ -240,10 +240,12 @@ def parse_weekly_input(path: str) -> dict:
             if not fields:
                 continue
 
-            sap_type = fields.get('类型', '').upper()
-            if sap_type not in ('ESPP', 'RSU', 'DIVIDEND'):
+            sap_type = fields.get('类型', '').upper().replace('-', '_')
+            # 标准化：ESPP_DIVIDEND / RSU_DIVIDEND → DIVIDEND，保留来源
+            VALID_SAP_TYPES = ('ESPP', 'RSU', 'ESPP_DIVIDEND', 'RSU_DIVIDEND')
+            if sap_type not in VALID_SAP_TYPES:
                 result['errors'].append(
-                    f'❌ SAP 归属类型无效（应为 ESPP/RSU/Dividend）：{fields.get("类型")}'
+                    f'❌ SAP 类型无效（应为 ESPP/RSU/ESPP-Dividend/RSU-Dividend）：{fields.get("类型")}'
                 )
                 continue
 
@@ -268,8 +270,8 @@ def parse_weekly_input(path: str) -> dict:
                         result['errors'].append(f'❌ RSU 归属缺少字段：{f}')
                         continue
 
-            elif sap_type == 'DIVIDEND':
-                for f in ['来源', '股价EUR', '汇率EUR', '股数']:
+            elif sap_type in ('ESPP_DIVIDEND', 'RSU_DIVIDEND'):
+                for f in ['股价EUR', '汇率EUR', '股数']:
                     if not fields.get(f):
                         result['errors'].append(f'❌ Dividend 归属缺少字段：{f}')
                         continue
@@ -687,6 +689,22 @@ def step_sap(sap_events: list, template_df: pd.DataFrame, date_str: str,
     new_own_rows  = []
     new_move_rows = []
 
+    # 预加载已有记录，用于重复检查
+    existing_own_dates  = set()
+    existing_move_dates = set()
+    if os.path.exists(own_sap_path):
+        try:
+            _own_existing = pd.read_csv(own_sap_path)
+            existing_own_dates = set(_own_existing['Date'].astype(str).unique())
+        except Exception:
+            pass
+    if os.path.exists(move_sap_path):
+        try:
+            _move_existing = pd.read_csv(move_sap_path)
+            existing_move_dates = set(_move_existing['Date'].astype(str).unique())
+        except Exception:
+            pass
+
     for event in sap_events:
         sap_type = event['type']
         fields   = event['fields']
@@ -695,41 +713,40 @@ def step_sap(sap_events: list, template_df: pd.DataFrame, date_str: str,
         try:
             if sap_type == 'ESPP':
                 price_eur   = float(fields['股价EUR'])
-                tax_rate    = float(fields['税率']) / 100
                 match_cny   = float(fields['Match CNY'].replace(',', ''))
                 match_qty   = float(fields['Match 股数'].replace(',', ''))
                 purch_cny   = float(fields['Purchase CNY'].replace(',', ''))
                 purch_qty   = float(fields['Purchase 股数'].replace(',', ''))
 
-                # Match：25% 折扣，Cost_CNY = CNY × 0.25
-                new_own_rows.append({
-                    'Date':           evt_date,
-                    'Activity':       'Match',
-                    'Price_EUR':      round(price_eur, 6),
-                    'Quantity':       round(match_qty, 6),
-                    'Discount_Ratio': 0.25,
-                    'CNY':            round(match_cny, 2),
-                    'Cost_CNY':       round(match_cny * 0.25, 2),
-                })
-                # Purchase：75% 折扣，Cost_CNY = CNY × 0.75
-                new_own_rows.append({
-                    'Date':           evt_date,
-                    'Activity':       'Purchase',
-                    'Price_EUR':      round(price_eur, 6),
-                    'Quantity':       round(purch_qty, 6),
-                    'Discount_Ratio': 0.75,
-                    'CNY':            round(purch_cny, 2),
-                    'Cost_CNY':       round(purch_cny * 0.75, 2),
-                })
+                total_qty  = match_qty + purch_qty
+                total_cost = round(match_cny * 0.25 + purch_cny * 0.75, 2)
 
-                total_qty     = match_qty + purch_qty
-                total_cost    = round(match_cny * 0.25 + purch_cny * 0.75, 2)
+                # 台账重复检查
+                already_in_own = evt_date in existing_own_dates
+                if already_in_own:
+                    warnings.append(
+                        f'⏭ ESPP {evt_date}：own_sap.csv 已有该日期记录，跳过台账写入'
+                    )
+                else:
+                    new_own_rows.append({
+                        'Date': evt_date, 'Activity': 'Match',
+                        'Price_EUR': round(price_eur, 6), 'Quantity': round(match_qty, 6),
+                        'Discount_Ratio': 0.25, 'CNY': round(match_cny, 2),
+                        'Cost_CNY': round(match_cny * 0.25, 2),
+                    })
+                    new_own_rows.append({
+                        'Date': evt_date, 'Activity': 'Purchase',
+                        'Price_EUR': round(price_eur, 6), 'Quantity': round(purch_qty, 6),
+                        'Discount_Ratio': 0.75, 'CNY': round(purch_cny, 2),
+                        'Cost_CNY': round(purch_cny * 0.75, 2),
+                    })
+
                 warnings.append(
-                    f'✅ ESPP 归属 {evt_date}：'
-                    f'+{total_qty:.4f}股，成本 ¥{total_cost:,.2f}'
+                    f'✅ ESPP 归属 {evt_date}：+{total_qty:.4f}股，成本 ¥{total_cost:,.2f}'
+                    + ('（台账已存在，仅更新portfolio）' if already_in_own else '')
                 )
 
-                # 更新 portfolio 快照行（Own SAP）
+                # portfolio 快照始终更新
                 mask = (df['Asset_Class'] == 'Company_Stock') & \
                        (df['Name'].str.contains('Own', case=False, na=False) |
                         df['Code'].str.contains('SAP', case=False, na=False))
@@ -745,36 +762,35 @@ def step_sap(sap_events: list, template_df: pd.DataFrame, date_str: str,
                 fx_rate    = float(fields['汇率EUR'])
                 activity   = fields.get('Activity', 'Award')
                 shares_str = fields['股数']
-                # 支持多个 tranche 用逗号分隔
                 tranches   = [float(s.strip()) for s in shares_str.split(',') if s.strip()]
-
-                for qty in tranches:
-                    cny_val = round(qty * price_eur * fx_rate, 2)
-                    new_move_rows.append({
-                        'Date':      evt_date,
-                        'Activity':  activity,
-                        'Price_EUR': round(price_eur, 6),
-                        'Quantity':  round(qty, 6),
-                        'FX_Rate':   round(fx_rate, 4),
-                        'CNY':       cny_val,
-                    })
-
                 total_qty  = sum(tranches)
                 total_cny  = round(sum(q * price_eur * fx_rate for q in tranches), 2)
-                ncf_amount = total_cny if activity == 'Award' else 0.0  # Dividend NCF=0
+                ncf_amount = total_cny if activity == 'Award' else 0.0
+
+                # 台账重复检查
+                already_in_move = evt_date in existing_move_dates
+                if already_in_move:
+                    warnings.append(
+                        f'⏭ RSU {activity} {evt_date}：move_sap.csv 已有该日期记录，跳过台账写入'
+                    )
+                else:
+                    for qty in tranches:
+                        new_move_rows.append({
+                            'Date': evt_date, 'Activity': activity,
+                            'Price_EUR': round(price_eur, 6), 'Quantity': round(qty, 6),
+                            'FX_Rate': round(fx_rate, 4),
+                            'CNY': round(qty * price_eur * fx_rate, 2),
+                        })
 
                 warnings.append(
-                    f'✅ RSU {activity} {evt_date}：'
-                    f'+{total_qty:.4f}股，FMV ¥{total_cny:,.2f}'
+                    f'✅ RSU {activity} {evt_date}：+{total_qty:.4f}股，FMV ¥{total_cny:,.2f}'
                     + ('（Dividend，NCF=0）' if activity == 'Dividend' else '')
+                    + ('（台账已存在，仅更新portfolio）' if already_in_move else '')
                 )
 
-                # 更新 portfolio 快照行（Move SAP）
+                # portfolio 快照始终更新
                 mask = (df['Asset_Class'] == 'Company_Stock') & \
-                       (df['Name'].str.contains('Move', case=False, na=False) |
-                        (~df['Name'].str.contains('Own', case=False, na=False) &
-                         df['Code'].str.contains('SAP', case=False, na=False)))
-                # fallback：任何 Company_Stock 行
+                       (~df['Name'].str.contains('Own', case=False, na=False))
                 if not mask.any():
                     mask = df['Asset_Class'] == 'Company_Stock'
                 if mask.any():
@@ -784,27 +800,31 @@ def step_sap(sap_events: list, template_df: pd.DataFrame, date_str: str,
                 else:
                     warnings.append('⚠️ RSU：未找到 Move SAP 持仓行，portfolio 快照未更新')
 
-            elif sap_type == 'DIVIDEND':
-                source     = fields.get('来源', 'Move').upper()
-                price_eur  = float(fields['股价EUR'])
-                fx_rate    = float(fields['汇率EUR'])
-                qty        = float(fields['股数'].replace(',', ''))
-                cny_val    = round(qty * price_eur * fx_rate, 2)
+            elif sap_type in ('ESPP_DIVIDEND', 'RSU_DIVIDEND'):
+                price_eur = float(fields['股价EUR'])
+                fx_rate   = float(fields['汇率EUR'])
+                qty       = float(fields['股数'].replace(',', ''))
+                cny_val   = round(qty * price_eur * fx_rate, 2)
+                is_own    = (sap_type == 'ESPP_DIVIDEND')
 
-                if source == 'OWN' or source == 'ESPP':
-                    new_own_rows.append({
-                        'Date': evt_date, 'Activity': 'Dividend',
-                        'Price_EUR': round(price_eur, 6), 'Quantity': round(qty, 6),
-                        'Discount_Ratio': 1.0, 'CNY': cny_val, 'Cost_CNY': 0.0,
-                    })
+                if is_own:
+                    already = evt_date in existing_own_dates
+                    if not already:
+                        new_own_rows.append({
+                            'Date': evt_date, 'Activity': 'Dividend',
+                            'Price_EUR': round(price_eur, 6), 'Quantity': round(qty, 6),
+                            'Discount_Ratio': 1.0, 'CNY': cny_val, 'Cost_CNY': 0.0,
+                        })
                     mask = (df['Asset_Class'] == 'Company_Stock') & \
                            df['Name'].str.contains('Own', case=False, na=False)
                 else:
-                    new_move_rows.append({
-                        'Date': evt_date, 'Activity': 'Dividend',
-                        'Price_EUR': round(price_eur, 6), 'Quantity': round(qty, 6),
-                        'FX_Rate': round(fx_rate, 4), 'CNY': cny_val,
-                    })
+                    already = evt_date in existing_move_dates
+                    if not already:
+                        new_move_rows.append({
+                            'Date': evt_date, 'Activity': 'Dividend',
+                            'Price_EUR': round(price_eur, 6), 'Quantity': round(qty, 6),
+                            'FX_Rate': round(fx_rate, 4), 'CNY': cny_val,
+                        })
                     mask = (df['Asset_Class'] == 'Company_Stock') & \
                            (~df['Name'].str.contains('Own', case=False, na=False))
                     if not mask.any():
@@ -812,9 +832,11 @@ def step_sap(sap_events: list, template_df: pd.DataFrame, date_str: str,
 
                 if mask.any():
                     df.loc[mask, 'Shares'] = float(df.loc[mask, 'Shares'].values[0]) + qty
-                    # Dividend NCF = 0
+
+                src = 'ESPP' if is_own else 'RSU'
                 warnings.append(
-                    f'✅ Dividend（{source}）{evt_date}：+{qty:.4f}股，NCF=0'
+                    f'✅ {src} Dividend {evt_date}：+{qty:.4f}股，NCF=0'
+                    + ('（台账已存在，仅更新portfolio）' if already else '')
                 )
 
         except (KeyError, ValueError) as e:
