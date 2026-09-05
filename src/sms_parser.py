@@ -741,7 +741,7 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
 
     # 内置默认映射（覆盖优先级最低，被文件 map 覆盖）
     _DEFAULT_MAP = {
-        '黄金积存金':                         {'code': 'GOLD',   'name': '黄金'},
+        '黄金积存金':                         {'code': 'GOLD',   'name': '积存金'},
         '南方纳斯达克100指数发起（QDII）I':    {'code': '021000', 'name': '南方纳指100 I类'},
         '南方纳斯达克100指数发起(QDII)I':      {'code': '021000', 'name': '南方纳指100 I类'},
         '南方中证A500ETF联接A':                {'code': '022434', 'name': '南方中证A500 A类'},
@@ -769,13 +769,13 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
         parsed.pop('_brand', None)  # brand 不再用于模糊匹配
 
         if parsed['is_gold']:
-            # 黄金积存金（招行纸黄金定投）对应 GOLD 行，不是 GOLD.P（实物）
+            # 黄金积存金（招行纸黄金定投）→ 积存金（code=GOLD），不是实物金（GOLD.P）
             if holdings:
                 gold = next((h for h in holdings
                              if (h.get('code') or h.get('Code', '')) == 'GOLD'), None)
                 if gold:
                     parsed['matched_code'] = gold.get('code') or gold.get('Code')
-                    parsed['matched_name'] = gold.get('name') or gold.get('Name')
+                    parsed['matched_name'] = gold.get('name') or gold.get('Name') or '积存金'
             return parsed
 
         # 唯一匹配路径：sms_code_map 精确匹配或前缀匹配
