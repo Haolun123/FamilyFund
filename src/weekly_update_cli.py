@@ -98,12 +98,21 @@ def parse_weekly_input(path: str) -> dict:
     else:
         result['errors'].append('❌ 日期未填，请填写 date: YYYY-MM-DD')
 
-    # 短信区
+    # 短信区（保留空行，parse_sms 用空行分割多条短信）
     sms_block = _section(content, '步骤一：短信区', '步骤二：道指抵扣')
-    for line in (sms_block or '').splitlines():
-        line = line.strip()
-        if line and not line.startswith('<!--') and not line.startswith('>'):
-            result['sms_lines'].append(line)
+    if sms_block:
+        for line in sms_block.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('<!--') or stripped.startswith('>'):
+                continue  # 跳过注释
+            if re.match(r'^-{3,}$', stripped):
+                continue  # 跳过 --- 分隔符
+            result['sms_lines'].append(stripped)  # 空行保留（作为短信分隔符）
+        # 去掉头尾多余空行
+        while result['sms_lines'] and not result['sms_lines'][0]:
+            result['sms_lines'].pop(0)
+        while result['sms_lines'] and not result['sms_lines'][-1]:
+            result['sms_lines'].pop()
 
     # 道指补仓（可选）
     dow_block = _section(content, '步骤二：道指抵扣', '步骤三：手动交易登记')
@@ -324,13 +333,20 @@ def parse_weekly_input(path: str) -> dict:
             })
 
 
-    # Son Fund 短信区
+    # Son Fund 短信区（保留空行）
     son_block = _section(content, '👶 Son Fund 短信区', '📝 备注')
     if son_block:
         for line in son_block.splitlines():
-            line = line.strip()
-            if line and not line.startswith('<!--') and not line.startswith('>'):
-                result['son_sms_lines'].append(line)
+            stripped = line.strip()
+            if stripped.startswith('<!--') or stripped.startswith('>'):
+                continue
+            if re.match(r'^-{3,}$', stripped):
+                continue
+            result['son_sms_lines'].append(stripped)
+        while result['son_sms_lines'] and not result['son_sms_lines'][0]:
+            result['son_sms_lines'].pop(0)
+        while result['son_sms_lines'] and not result['son_sms_lines'][-1]:
+            result['son_sms_lines'].pop()
 
     # 备注
     notes_block = _section(content, '📝 备注', None)

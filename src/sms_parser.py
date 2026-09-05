@@ -769,13 +769,13 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
         parsed.pop('_brand', None)  # brand 不再用于模糊匹配
 
         if parsed['is_gold']:
+            # 黄金积存金（招行纸黄金定投）对应 GOLD 行，不是 GOLD.P（实物）
             if holdings:
-                gold = [h for h in holdings if 'GOLD' in h.get('code', '').upper()
-                        or h.get('Code', '') == 'GOLD'
-                        or '黄金' in h.get('name', '') or '黄金' in h.get('Name', '')]
+                gold = next((h for h in holdings
+                             if (h.get('code') or h.get('Code', '')) == 'GOLD'), None)
                 if gold:
-                    parsed['matched_code'] = gold[0].get('code') or gold[0].get('Code')
-                    parsed['matched_name'] = gold[0].get('name') or gold[0].get('Name')
+                    parsed['matched_code'] = gold.get('code') or gold.get('Code')
+                    parsed['matched_name'] = gold.get('name') or gold.get('Name')
             return parsed
 
         # 唯一匹配路径：sms_code_map 精确匹配或前缀匹配
