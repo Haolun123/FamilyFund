@@ -1294,14 +1294,17 @@ def step_prices(template_df: pd.DataFrame, manual_prices: dict,
 
     warnings.insert(0, f'✅ 自动拉取价格：{ok_count} 个成功，{len(failed)} 个失败')
 
-    # ── 交互填写（仅 CLI 交互模式）──────────────────────────────────────────
+    # ── 交互填写（仅 CLI 交互模式，价格必须填，不能跳过）──────────────────
     if interactive and failed:
-        print('\n以下标的价格拉取失败，请手动输入（直接回车跳过，使用上期价格）：')
+        print('\n以下标的价格拉取失败，必须手动输入才能继续保存：')
         still_failed = []
         for name, code, err in failed:
             cur = float(df.loc[df['Code'] == code, 'Current_Price'].values[0])
-            val = input(f'  {name}（{code}，上期价格 {cur}）当前净值/价格：').strip()
-            if val:
+            while True:
+                val = input(f'  {name}（{code}，上期价格 {cur}）当前净值/价格（必填）：').strip()
+                if not val:
+                    print(f'  ❌ 不能留空，请输入 {name} 的当前价格（查招行App/券商App）')
+                    continue
                 try:
                     price = float(val)
                     mask = df['Code'] == code
@@ -1311,13 +1314,10 @@ def step_prices(template_df: pd.DataFrame, manual_prices: dict,
                         df.loc[mask, 'Exchange_Rate'].fillna(1.0)
                     )
                     warnings.append(f'✅ 手动输入：{name} = {price}')
+                    break
                 except ValueError:
-                    warnings.append(f'⚠️ {name} 输入格式错误，使用上期价格')
-                    still_failed.append((name, code))
-            else:
-                warnings.append(f'— {name} 跳过，使用上期价格')
-                still_failed.append((name, code))
-        failed = still_failed
+                    print(f'  ❌ 格式错误，请输入数字（如 1.2527）')
+        failed = still_failed  # 交互模式下 failed 必须清空才能保存
 
     return df, warnings, failed
 
@@ -1437,9 +1437,10 @@ def build_preview(date_str, snapshot_df, transactions,
 
     if failed_codes:
         lines.append(
-            f'**⚠️ {len(failed_codes)} 个标的使用上期价格（'
+            f'**⚠️ {len(failed_codes)} 个标的价格拉取失败，使用上期价格（dry-run）。'
+            f'确认执行时将强制要求手动输入：'
             + '、'.join(n for n, _, _ in failed_codes)
-            + '），总资产可能略有偏差。**'
+            + '**'
         )
     lines.append('**✅ 预览通过，回复"确认执行"保存快照。**')
     return '\n'.join(lines)
@@ -1745,6 +1746,14 @@ def run(input_path: str = INPUT_PATH, confirm: bool = False) -> str:
     if confirm:
         if not recon_ok:
             return preview + '\n\n❌ 对账不平，已拒绝写入，请修正后重试。'
+
+        # confirm 模式下，价格必须全部填写（failed_codes 应已在 step_prices 交互中清空）
+        if failed_codes:
+            return preview + (
+                f'\n\n❌ 以下标的价格未填写，已拒绝保存：'
+                + '、'.join(n for n, _, _ in failed_codes)
+                + '\n请重新执行并填写价格。'
+            )
 
         # 道指抵扣交互确认
         actual_dow_deduct = 0.0
