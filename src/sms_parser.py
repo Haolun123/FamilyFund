@@ -739,70 +739,61 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
     blocks = [b.strip() for b in re.split(r'\n\s*\n', text) if b.strip()]
     results = []
 
-    # 加载持久化精确匹配 map：fallback map 先加载，data_dir map 后加载（覆盖 fallback）
-    sms_map = load_sms_map(fallback_data_dir) if fallback_data_dir else {}
+    # 内置默认映射（覆盖优先级最低，被文件 map 覆盖）
+    _DEFAULT_MAP = {
+        '黄金积存金':                         {'code': 'GOLD',   'name': '黄金'},
+        '南方纳斯达克100指数发起（QDII）I':    {'code': '021000', 'name': '南方纳指100 I类'},
+        '南方纳斯达克100指数发起(QDII)I':      {'code': '021000', 'name': '南方纳指100 I类'},
+        '南方中证A500ETF联接A':                {'code': '022434', 'name': '南方中证A500 A类'},
+        '摩根标普500人民币A':                  {'code': '017641', 'name': '摩根标普500 A类'},
+        '摩根纳斯达克100人民币A':              {'code': '019172', 'name': '摩根纳指100 A类'},
+        '建信纳斯达克100指数(QDII)A':          {'code': '539001', 'name': '建信纳指100 A类'},
+        '建信纳斯达克100指数(QDII)A人民币':    {'code': '539001', 'name': '建信纳指100 A类'},
+        '广发纳指100联接人民币F':              {'code': '021778', 'name': '广发纳指100 F类'},
+        '博时标普500ETF联接E':                 {'code': '018738', 'name': '博时标普500 E类'},
+        '大成纳指100联接A':                    {'code': '000834', 'name': '大成纳指100 A类'},
+        '纳斯达克100联接A':                    {'code': '040046', 'name': '华安纳指100 A类'},
+        '天弘标普500发起（QDII-FOF）A':        {'code': '007721', 'name': '天弘标普500 A类'},
+        '天弘纳斯达克100指数发起（QDII）A':    {'code': '018043', 'name': '天弘纳指100 A类'},
+    }
+
+    # 加载持久化精确匹配 map（文件 map 覆盖内置 map）
+    sms_map = dict(_DEFAULT_MAP)
+    if fallback_data_dir:
+        sms_map.update(load_sms_map(fallback_data_dir))
     if data_dir:
         sms_map.update(load_sms_map(data_dir))
 
     def _attach_match(parsed: dict) -> dict:
         """为解析结果附加持仓匹配。"""
+        parsed.pop('_brand', None)  # brand 不再用于模糊匹配
+
         if parsed['is_gold']:
-            parsed.pop('_brand', None)
             if holdings:
                 gold = [h for h in holdings if 'GOLD' in h.get('code', '').upper()
-                        or '黄金' in h.get('name', '')]
+                        or h.get('Code', '') == 'GOLD'
+                        or '黄金' in h.get('name', '') or '黄金' in h.get('Name', '')]
                 if gold:
-                    parsed['matched_code'] = gold[0]['code']
-                    parsed['matched_name'] = gold[0]['name']
+                    parsed['matched_code'] = gold[0].get('code') or gold[0].get('Code')
+                    parsed['matched_name'] = gold[0].get('name') or gold[0].get('Name')
             return parsed
 
-        brand = parsed.pop('_brand', None)
-
-        # 1. 优先走精确 map 匹配（不依赖 holdings）
+        # 唯一匹配路径：sms_code_map 精确匹配或前缀匹配
+        # 找不到就是真正的未知标的，不做模糊匹配
         fund_name = parsed['fund_name']
+        # 1. 精确匹配
         if fund_name in sms_map:
             entry = sms_map[fund_name]
             parsed['matched_code'] = entry['code']
             parsed['matched_name'] = entry['name']
             return parsed
-
-        # 2. 模糊匹配（需要 holdings）
-        if holdings:
-            if brand:
-                branded = [h for h in holdings if brand in h.get('name', '')]
-                if not branded:
-                    # brand 明确但持仓里没有该品牌基金，不跨品牌模糊匹配
-                    return parsed
-                # brand 内只做 normalize 完全相等 + 类别后缀一致的匹配
-                def _norm(s):
-                    for sfx in ['ETF联接', 'ETF', '联接',
-                                '人民币A', '人民币C', '人民币E', '人民币F', '人民币I',
-                                'A类', 'C类', 'E类', 'F类', 'I类',
-                                'A', 'C', 'E', 'F', 'I']:
-                        s = s.replace(sfx, '')
-                    return s.strip()
-                def _cls(s):
-                    import re as _re
-                    m = _re.search(r'人民币([A-Z])|([A-Z])类?\s*$', s)
-                    return (m.group(1) or m.group(2)) if m else None
-                fn = _norm(fund_name)
-                fn_cls = _cls(fund_name)
-                matched = next(
-                    (h for h in branded
-                     if _norm(h['name']) == fn and
-                     (fn_cls is None or _cls(h['name']) == fn_cls)),
-                    None
-                )
-                if matched:
-                    parsed['matched_code'] = matched['code']
-                    parsed['matched_name'] = matched['name']
-                # normalize/类别不中则保持未匹配，不做进一步模糊
+        # 2. 前缀匹配（sms_map key 是 fund_name 的前缀）
+        for key, entry in sms_map.items():
+            if fund_name.startswith(key):
+                parsed['matched_code'] = entry['code']
+                parsed['matched_name'] = entry['name']
                 return parsed
-            code, name = _match_holding(fund_name, holdings)
-            parsed['matched_code'] = code
-            parsed['matched_name'] = name
 
-        return parsed
         return parsed
 
     # 加载自定义格式
