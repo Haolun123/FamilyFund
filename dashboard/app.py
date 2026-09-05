@@ -2057,11 +2057,13 @@ with tab_update:
                     price_val = e.get('price', 0.0)
                     if not price_val or price_val <= 0:
                         price_val = float(asset_row['Current_Price']) if asset_row is not None else 0.0
-                    if not tx_price_ccy:
-                        from fundamentals import infer_currency
-                        _code_for_ccy = tx_code or (str(asset_row['Code']) if asset_row is not None else '')
-                        _cls_for_ccy  = tx_asset_class or (str(asset_row['Asset_Class']) if asset_row is not None else '')
-                        tx_price_ccy  = infer_currency(_code_for_ccy, _cls_for_ccy)
+                    # 成交价统一存 CNY 单价（Amount_CNY / 份额），不存外币原价
+                    _tx_shares = abs(float(e.get('shares', 0.0) or 0.0))
+                    if _tx_shares <= 0 and price_val > 0:
+                        # 没有份额时用原价×汇率反算
+                        _er = float(asset_row['Exchange_Rate']) if asset_row is not None else 1.0
+                        _tx_shares = e['amount'] / (price_val * _er) if price_val * _er > 0 else 0
+                    price_cny = round(e['amount'] / _tx_shares, 6) if _tx_shares > 0 else 0.0
                     st.session_state['pending_transactions'].append({
                         'Date':           new_date_str,
                         'Asset_Class':    tx_asset_class,
@@ -2070,8 +2072,8 @@ with tab_update:
                         'Code':           tx_code,
                         'Type':           e['type'],
                         'Amount_CNY':     round(e['amount'], 2),
-                        'Price':          round(price_val, 4),
-                        'Price_Currency': tx_price_ccy,
+                        'Price':          price_cny,
+                        'Price_Currency': 'CNY',
                         'Fee_CNY':        round(e.get('fee', 0.0), 2),
                     })
 

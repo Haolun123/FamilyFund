@@ -701,10 +701,22 @@ def step_sms(sms_lines: list, template_df: pd.DataFrame, date_str: str,
                     df.loc[mask, 'Shares'] * df.loc[mask, 'Current_Price']
                 )
 
+            # 短信 nav 是申购净值（CNY计价），直接作为 CNY 单价
+            price_cny = round(nav, 6) if nav and nav > 0 else (
+                round(amount / shares, 6) if shares and shares > 0 else 0.0
+            )
             transactions.append({
-                'Date': date_str, 'Name': name, 'Code': code,
-                'Direction': '买入', 'Amount_CNY': amount,
-                'Shares_Delta': shares, 'Nav': nav, 'Source': 'SMS',
+                'Date':           date_str,
+                'Asset_Class':    str(df.loc[mask, 'Asset_Class'].values[0]) if mask.any() else '',
+                'Platform':       str(df.loc[mask, 'Platform'].values[0]) if mask.any() and 'Platform' in df.columns else '',
+                'Name':           name,
+                'Code':           code,
+                'Type':           '买入',
+                'Amount_CNY':     round(amount, 2),
+                'Price':          price_cny,
+                'Price_Currency': 'CNY',
+                'Fee_CNY':        0.0,
+                'Source':         'SMS',
             })
 
     except Exception as e:
@@ -1133,23 +1145,26 @@ def step_trades(trades: list, template_df: pd.DataFrame, date_str: str
             df.loc[mask, 'Total_Value']   = df.loc[mask, 'Shares'] * cur_price
             _adj_cash(df, amount)
 
+        # 成交价统一存 CNY 单价（Amount_CNY / 份额）
+        price_cny = round(amount / shares, 6) if shares and shares > 0 else 0.0
         transactions.append({
-            'Date':       date_str,
-            'Name':       row_name,
-            'Code':       row_code,
-            'Direction':  direction,
-            'Amount_CNY': amount,
-            'Shares':     shares,
-            'Price':      price,
-            'Currency':   currency,
-            'Source':     'Manual',
+            'Date':           date_str,
+            'Asset_Class':    str(df.loc[mask, 'Asset_Class'].values[0]),
+            'Platform':       str(df.loc[mask, 'Platform'].values[0]) if 'Platform' in df.columns else '',
+            'Name':           row_name,
+            'Code':           row_code,
+            'Type':           direction,
+            'Amount_CNY':     round(amount, 2),
+            'Price':          price_cny,
+            'Price_Currency': 'CNY',
+            'Fee_CNY':        0.0,
+            'Source':         'Manual',
         })
 
         # 预览提示
-        price_note = f'成交价 {price}' if price else f'份额反算（¥{amount/shares:.4f}/份）' if shares else ''
         warnings.append(
-            f'✅ {direction} {name}：¥{amount:,.0f}，{shares:,.4f}份'
-            + (f'，{price_note}' if price_note else '')
+            f'✅ {direction} {row_name}：¥{amount:,.0f}，{shares:,.4f}份'
+            f'，CNY单价 ¥{price_cny:.4f}'
         )
 
     return df, transactions, warnings
