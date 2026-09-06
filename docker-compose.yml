@@ -8,6 +8,7 @@ services:
       - "127.0.0.1:5175:5175"   # Finance Reports 静态文件服务，只绑本机
     environment:
       - FAMILYFUND_SON_DATA=/app/data/son
+      - OBSIDIAN_VAULT_PATH=/obsidian_vault
     volumes:
       - ${FAMILYFUND_DATA:-./data}:/app/data
       - ${FAMILYFUND_SON_DATA:-./data/son}:/app/data/son
@@ -15,4 +16,5 @@ services:
       - ./dashboard:/app/dashboard
       - ./mcp_server.py:/app/mcp_server.py
       - ./tests:/app/tests
+      - "${HOME}/Library/Mobile Documents/iCloud~md~obsidian/Documents/vault:/obsidian_vault"
     restart: unless-stopped
