@@ -1212,7 +1212,24 @@ def sync_to_obsidian(
                                 _write_file(dst, f.read())
                             files_written += 1
 
-        # ── 7. 儿子基金（可选）──────────────────────────────────────────────
+        # ── 7. 周报同步（data/weekly_reports/*.md → vault/weekly_reports/）──
+        wr_src = os.path.join(data_dir, 'weekly_reports')
+        if os.path.isdir(wr_src):
+            wr_dst = os.path.join(ff_dir, 'weekly_reports')
+            os.makedirs(wr_dst, exist_ok=True)
+            for fname in os.listdir(wr_src):
+                if not fname.endswith('.md'):
+                    continue
+                src = os.path.join(wr_src, fname)
+                dst = os.path.join(wr_dst, fname)
+                # 增量同步：源文件更新时才复制
+                if not os.path.exists(dst) or \
+                        os.path.getmtime(src) > os.path.getmtime(dst):
+                    with open(src, encoding='utf-8') as f:
+                        _write_file(dst, f.read())
+                    files_written += 1
+
+        # ── 8. 儿子基金（可选）──────────────────────────────────────────────
         if son_nav_df is not None and not son_nav_df.empty:
             son_dir = os.path.join(ff_dir, 'son_fund')
 
