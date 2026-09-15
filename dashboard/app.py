@@ -6732,12 +6732,49 @@ with tab_son:
                     _applied += 1
                 st.session_state['son_update_template'] = _son_template
                 del st.session_state['son_sms_parsed']
-                st.success(f"已应用 {_applied} 条")
+                st.session_state['_son_sms_applied'] = _applied
                 st.rerun()
 
-    # 步骤二：调仓辅助器（简化版：只有买入/新增标的）
-    with st.expander("⚖️ 步骤二：手动登记买入", expanded=False):
+    if st.session_state.get('_son_sms_applied') is not None:
+        st.success(f"✅ 短信解析已应用 {st.session_state.pop('_son_sms_applied')} 条")
+
+    # 步骤二：手动登记买入 + 外部入金
+    with st.expander("⚖️ 步骤二：手动登记", expanded=False):
         st.caption("子基金只有定投买入，无需复杂调仓。")
+
+        # ── 外部入金 ──
+        st.markdown("**💰 外部入金**")
+        _son_deposit = st.number_input("本周打入专属账户金额（¥）", min_value=0.0, value=0.0,
+                                        step=1000.0, key="son_deposit_amount")
+        if st.button("✅ 登记入金", key="son_apply_deposit") and _son_deposit > 0:
+            _son_template = st.session_state['son_update_template'].copy()
+            _cash_mask = _son_template['Code'].astype(str) == 'CASH'
+            if _cash_mask.any():
+                idx = _son_template[_cash_mask].index[0]
+                _son_template.at[idx, 'Net_Cash_Flow'] = round(
+                    float(_son_template.at[idx, 'Net_Cash_Flow'] or 0) + _son_deposit, 2)
+                _son_template.at[idx, 'Total_Value'] = round(
+                    float(_son_template.at[idx, 'Total_Value'] or 0) + _son_deposit, 2)
+            else:
+                # Cash 行不存在则新建
+                _son_template = pd.concat([_son_template, pd.DataFrame([{
+                    'Asset_Class': 'Cash', 'Platform': '专属账户',
+                    'Name': 'Son Fund现金', 'Code': 'CASH',
+                    'Currency': 'CNY', 'Exchange_Rate': 1.0,
+                    'Shares': 1.0, 'Current_Price': _son_deposit,
+                    'Total_Value': _son_deposit, 'Net_Cash_Flow': _son_deposit,
+                }])], ignore_index=True)
+            st.session_state['son_update_template'] = _son_template
+            st.session_state['_son_deposit_applied'] = _son_deposit
+            st.rerun()
+
+        if st.session_state.get('_son_deposit_applied') is not None:
+            st.success(f"✅ 已登记入金 ¥{st.session_state.pop('_son_deposit_applied'):,.0f}")
+
+        st.divider()
+
+        # ── 手动买入 ──
+        st.markdown("**📥 手动登记买入**")
         if st.button("＋ 买入", key="son_add_buy"):
             if 'son_buy_entries' not in st.session_state:
                 st.session_state['son_buy_entries'] = []
