@@ -2178,16 +2178,12 @@ with tab_update:
 
     # ─── 重算市值（在 data_editor 之后，读 edited_df）───
     if st.button("🔄 重算市值 (Shares × Price × Rate)", type="secondary",
-                 help="对所有 Shares > 0 且 Current_Price > 0 的非 Cash 行，自动计算 Total_Value = Shares × Current_Price × Exchange_Rate。手动填写的 Total_Value 仍可在表格中直接覆盖。"):
+                 help="对所有非 Cash 行重算 Total_Value = Shares × Current_Price × Exchange_Rate，Shares=0 时市值归零。"):
         recalc = edited_df.copy()
-        mask = (
-            (recalc['Asset_Class'] != 'Cash') &
-            (pd.to_numeric(recalc['Shares'], errors='coerce').fillna(0) > 0) &
-            (pd.to_numeric(recalc['Current_Price'], errors='coerce').fillna(0) > 0)
-        )
+        mask = (recalc['Asset_Class'] != 'Cash')
         recalc.loc[mask, 'Total_Value'] = (
-            pd.to_numeric(recalc.loc[mask, 'Shares'], errors='coerce') *
-            pd.to_numeric(recalc.loc[mask, 'Current_Price'], errors='coerce') *
+            pd.to_numeric(recalc.loc[mask, 'Shares'], errors='coerce').fillna(0) *
+            pd.to_numeric(recalc.loc[mask, 'Current_Price'], errors='coerce').fillna(0) *
             pd.to_numeric(recalc.loc[mask, 'Exchange_Rate'], errors='coerce').fillna(1.0)
         ).round(2)
         updated_count = mask.sum()
@@ -6838,9 +6834,9 @@ with tab_son:
     if st.button("🔄 重算市值", key="son_recalc", type="secondary"):
         _son_r = _son_edited.copy()
         for i, row in _son_r.iterrows():
-            if str(row.get('Code', '')) != 'CASH' and float(row.get('Shares', 0) or 0) > 0:
+            if str(row.get('Code', '')) != 'CASH':
                 _son_r.at[i, 'Total_Value'] = round(
-                    float(row['Shares']) * float(row['Current_Price'] or 0) * float(row['Exchange_Rate'] or 1), 2)
+                    float(row.get('Shares') or 0) * float(row.get('Current_Price') or 0) * float(row.get('Exchange_Rate') or 1), 2)
         st.session_state['son_update_template'] = _son_r
         st.rerun()
 
