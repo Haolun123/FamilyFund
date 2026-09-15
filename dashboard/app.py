@@ -2161,13 +2161,13 @@ with tab_update:
                 required=True,
             ),
             "Exchange_Rate": st.column_config.NumberColumn(
-                "Exchange_Rate", format="%.4f", min_value=0.0001, default=1.0,
+                "Exchange_Rate", min_value=0.0001, default=1.0,
                 help="Currency to CNY (e.g. EUR→CNY ≈ 7.92)",
             ),
-            "Shares": st.column_config.NumberColumn("Shares", format="%.2f", min_value=0.0),
-            "Current_Price": st.column_config.NumberColumn("Current_Price", format="%.4f", min_value=0.0),
-            "Total_Value": st.column_config.NumberColumn("Total_Value", format="%.2f", min_value=0.0),
-            "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", format="%.2f", default=0.0),
+            "Shares": st.column_config.NumberColumn("Shares", min_value=0.0),
+            "Current_Price": st.column_config.NumberColumn("Current_Price", min_value=0.0),
+            "Total_Value": st.column_config.NumberColumn("Total_Value", min_value=0.0),
+            "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", default=0.0),
         },
         column_order=[
             "Asset_Class", "Platform", "Name", "Code", "Currency", "Exchange_Rate",
@@ -2816,12 +2816,12 @@ with tab_update:
                     required=True,
                 ),
                 "Exchange_Rate": st.column_config.NumberColumn(
-                    "Exchange_Rate", format="%.4f", min_value=0.0001, default=1.0,
+                    "Exchange_Rate", min_value=0.0001, default=1.0,
                 ),
-                "Shares": st.column_config.NumberColumn("Shares", format="%.2f", min_value=0.0),
-                "Current_Price": st.column_config.NumberColumn("Current_Price", format="%.4f", min_value=0.0),
-                "Total_Value": st.column_config.NumberColumn("Total_Value", format="%.2f", min_value=0.0),
-                "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", format="%.2f"),
+                "Shares": st.column_config.NumberColumn("Shares", min_value=0.0),
+                "Current_Price": st.column_config.NumberColumn("Current_Price", min_value=0.0),
+                "Total_Value": st.column_config.NumberColumn("Total_Value", min_value=0.0),
+                "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow"),
             },
             column_order=[
                 "Asset_Class", "Platform", "Name", "Code", "Currency", "Exchange_Rate",
@@ -6826,11 +6826,11 @@ with tab_son:
         column_config={
             "Asset_Class": st.column_config.SelectboxColumn("Asset_Class", options=sorted(VALID_ASSET_CLASSES)),
             "Currency": st.column_config.SelectboxColumn("Currency", options=["CNY","HKD","EUR","USD"]),
-            "Exchange_Rate": st.column_config.NumberColumn("Exchange_Rate", format="%.4f", default=1.0),
-            "Shares": st.column_config.NumberColumn("Shares", format="%.4f"),
-            "Current_Price": st.column_config.NumberColumn("Current_Price", format="%.4f"),
-            "Total_Value": st.column_config.NumberColumn("Total_Value", format="%.2f"),
-            "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", format="%.2f", default=0.0),
+            "Exchange_Rate": st.column_config.NumberColumn("Exchange_Rate", default=1.0),
+            "Shares": st.column_config.NumberColumn("Shares"),
+            "Current_Price": st.column_config.NumberColumn("Current_Price"),
+            "Total_Value": st.column_config.NumberColumn("Total_Value"),
+            "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", default=0.0),
         },
     )
 
