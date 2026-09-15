@@ -6706,6 +6706,7 @@ with tab_son:
                 except Exception:
                     pass
                 _applied = 0
+                _total_bought = 0.0
                 for r in _son_parsed:
                     if r.get('parse_error') or not r['matched_code']:
                         continue
@@ -6730,6 +6731,13 @@ with tab_son:
                             'Net_Cash_Flow': float(r['amount']),
                         }])], ignore_index=True)
                     _applied += 1
+                    _total_bought += float(r['amount'])
+                # 从 Cash 扣减买入金额
+                _cash_mask = _son_template['Code'].astype(str) == 'CASH'
+                if _cash_mask.any() and _total_bought > 0:
+                    _ci = _son_template[_cash_mask].index[0]
+                    _son_template.at[_ci, 'Total_Value'] = round(
+                        float(_son_template.at[_ci, 'Total_Value'] or 0) - _total_bought, 2)
                 st.session_state['son_update_template'] = _son_template
                 del st.session_state['son_sms_parsed']
                 st.session_state['_son_sms_applied'] = _applied
@@ -6796,6 +6804,7 @@ with tab_son:
 
         if _son_entries and st.button("✅ 应用买入", key="son_apply_buy", type="primary"):
             _son_template = st.session_state['son_update_template'].copy()
+            _total_bought = 0.0
             for e in _son_entries:
                 if not e['code'] or not e['name']:
                     continue
@@ -6815,10 +6824,20 @@ with tab_son:
                         'Shares': e['shares'], 'Current_Price': e.get('nav', 0.0),
                         'Total_Value': 0.0, 'Net_Cash_Flow': e['amount'],
                     }])], ignore_index=True)
+                _total_bought += float(e['amount'])
+            # 从 Cash 扣减买入金额
+            _cash_mask = _son_template['Code'].astype(str) == 'CASH'
+            if _cash_mask.any() and _total_bought > 0:
+                _ci = _son_template[_cash_mask].index[0]
+                _son_template.at[_ci, 'Total_Value'] = round(
+                    float(_son_template.at[_ci, 'Total_Value'] or 0) - _total_bought, 2)
             st.session_state['son_update_template'] = _son_template
             st.session_state['son_buy_entries'] = []
-            st.success("已应用")
+            st.session_state['_son_buy_applied'] = True
             st.rerun()
+
+        if st.session_state.pop('_son_buy_applied', False):
+            st.success("✅ 买入已应用")
 
     # 步骤三：刷新净值 + 编辑表格
     st.subheader("步骤三：确认持仓数据")
