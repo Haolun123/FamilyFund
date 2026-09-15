@@ -703,10 +703,10 @@ with tab_dashboard:
             'Platform': '平台',
             'Name': '名称',
             'Code': 'Code',
-            'Cost_Basis': '4月10日成本',
+            'Cost_Basis': '累计成本',
             'Market_Value': '市值',
-            'Profit_Loss': '4月10日盈亏',
-            'Profit_Loss_Rate': '4月10日收益率(%)',
+            'Profit_Loss': '持仓盈亏',
+            'Profit_Loss_Rate': '持仓收益率(%)',
         })
 
         # 加载历史真实浮盈
@@ -751,10 +751,10 @@ with tab_dashboard:
             use_container_width=True,
             hide_index=True,
             column_config={
-                '4月10日成本': st.column_config.NumberColumn(format="¥%.2f"),
+                '累计成本': st.column_config.NumberColumn(format="¥%.2f"),
                 '市值': st.column_config.NumberColumn(format="¥%.2f"),
-                '4月10日盈亏': st.column_config.NumberColumn(format="¥%.2f"),
-                '4月10日收益率(%)': st.column_config.NumberColumn(format="%.2f%%"),
+                '持仓盈亏': st.column_config.NumberColumn(format="¥%.2f"),
+                '持仓收益率(%)': st.column_config.NumberColumn(format="%.2f%%"),
                 **_hist_cols,
             },
         )
