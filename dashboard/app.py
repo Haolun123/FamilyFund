@@ -2570,12 +2570,12 @@ with tab_update:
             # Build the final rows
             save_df = edited_df.copy()
             save_df.insert(0, 'Date', new_date_str)
-            save_df['Code'] = save_df['Code'].fillna('')
+            save_df['Code'] = save_df['Code'].fillna('').astype(str)
             save_df['Exchange_Rate'] = save_df['Exchange_Rate'].fillna(1.0)
             save_df['Net_Cash_Flow'] = save_df['Net_Cash_Flow'].fillna(0.0)
 
             # Read fresh CSV and append
-            existing_df = pd.read_csv(csv_path)
+            existing_df = pd.read_csv(csv_path, dtype={'Code': str})
             combined_df = pd.concat([existing_df, save_df], ignore_index=True)
 
             # Atomic write with file lock
@@ -6820,10 +6820,10 @@ with tab_son:
     if st.button("💾 保存子基金快照", type="primary", disabled=not _son_confirm, key="son_save"):
         _son_save_df = _son_edited.copy()
         _son_save_df.insert(0, 'Date', _son_new_date_str)
-        _son_save_df['Code'] = _son_save_df['Code'].fillna('')
+        _son_save_df['Code'] = _son_save_df['Code'].fillna('').astype(str)
 
         if os.path.exists(SON_CSV) and os.path.getsize(SON_CSV) > 50:
-            _son_existing = pd.read_csv(SON_CSV)
+            _son_existing = pd.read_csv(SON_CSV, dtype={'Code': str})
             _son_combined = pd.concat([_son_existing, _son_save_df], ignore_index=True)
         else:
             _son_combined = _son_save_df

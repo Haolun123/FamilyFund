@@ -56,7 +56,7 @@ def load_portfolio(csv_path=None):
         print(f"错误: 找不到输入文件 {csv_path}")
         return None
 
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, dtype={'Code': str})
     df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
     df['Code'] = df['Code'].fillna('')
     df['Exchange_Rate'] = df['Exchange_Rate'].fillna(1.0)
@@ -214,17 +214,28 @@ def compute_fund_nav(df):
     # 外部现金流 =
     #   建仓日:所有行 NCF (本金)
     #   后续日:Cash 行 NCF (银行入金/取出) + Company_Stock 行 NCF (SAP 归属)
+    #
+    # 例外：若 portfolio 里完全没有 Cash 行（如纯定投子基金），
+    # 则所有行的 NCF 均视为外部现金流（定投直接进投资标的，无 Cash 中转）。
     first_date = df['Date'].min()
-    cash_ncf = (
-        df[
-            (df['Date'] == first_date)
-            | (df['Asset_Class'].isin(['Cash', 'Company_Stock']))
-        ]
-        .groupby('Date')['Net_Cash_Flow']
-        .sum()
-        .reset_index()
-        .rename(columns={'Net_Cash_Flow': 'Net_Cash_Flow'})
-    )
+    has_cash = (df['Asset_Class'] == 'Cash').any()
+    if has_cash:
+        cash_ncf = (
+            df[
+                (df['Date'] == first_date)
+                | (df['Asset_Class'].isin(['Cash', 'Company_Stock']))
+            ]
+            .groupby('Date')['Net_Cash_Flow']
+            .sum()
+            .reset_index()
+        )
+    else:
+        # 无 Cash 行：所有 NCF 都是外部入金（建仓日 + 每笔定投）
+        cash_ncf = (
+            df.groupby('Date')['Net_Cash_Flow']
+            .sum()
+            .reset_index()
+        )
 
     agg = tv_agg.merge(cash_ncf, on='Date', how='left')
     agg['Net_Cash_Flow'] = agg['Net_Cash_Flow'].fillna(0.0)
