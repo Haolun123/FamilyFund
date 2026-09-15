@@ -2371,7 +2371,7 @@ with tab_update:
                 if res['status'] == 'ok':
                     st.markdown(f"✅ `{code}` — {res['price']:.4f}（{res['msg']}，{res.get('date','')}）")
                 elif res['status'] == 'manual':
-                    _m_col1, _m_col2 = st.columns([6, 1])
+                    _m_col1, _m_col2, _m_col3, _m_col4 = st.columns([4, 1, 2, 1])
                     _m_col1.markdown(f"⚠️ `{code}` — {res['msg']}")
                     if _m_col2.button("重试", key=f"retry_{code}_manual"):
                         st.session_state['_retry_code'] = code
@@ -2379,14 +2379,44 @@ with tab_update:
                             st.session_state['_refresh_summary']['_retry_prev_status'] = {}
                         st.session_state['_refresh_summary']['_retry_prev_status'][code] = 'manual'
                         st.rerun()
+                    _manual_price = _m_col3.number_input("手动输入净值", min_value=0.0, value=0.0,
+                                                         format="%.4f", label_visibility="collapsed",
+                                                         key=f"manual_price_{code}")
+                    if _m_col4.button("确认", key=f"manual_confirm_{code}") and _manual_price > 0:
+                        _tmpl = st.session_state['update_template'].copy()
+                        for _i, _row in _tmpl.iterrows():
+                            if str(_row.get('Code', '')) == code:
+                                _tmpl.at[_i, 'Current_Price'] = _manual_price
+                        st.session_state['update_template'] = _tmpl
+                        st.session_state['_refresh_summary']['results'][code] = {
+                            'status': 'ok', 'price': _manual_price,
+                            'msg': '手动输入', 'date': ''}
+                        st.session_state['_refresh_summary']['ok'] += 1
+                        st.session_state['_refresh_summary']['manual'] -= 1
+                        st.rerun()
                 else:
-                    _e_col1, _e_col2 = st.columns([6, 1])
+                    _e_col1, _e_col2, _e_col3, _e_col4 = st.columns([4, 1, 2, 1])
                     _e_col1.markdown(f"❌ `{code}` — {res['msg']}")
                     if _e_col2.button("重试", key=f"retry_{code}_err"):
                         st.session_state['_retry_code'] = code
                         if '_retry_prev_status' not in st.session_state['_refresh_summary']:
                             st.session_state['_refresh_summary']['_retry_prev_status'] = {}
                         st.session_state['_refresh_summary']['_retry_prev_status'][code] = 'error'
+                        st.rerun()
+                    _manual_price_e = _e_col3.number_input("手动输入净值", min_value=0.0, value=0.0,
+                                                            format="%.4f", label_visibility="collapsed",
+                                                            key=f"manual_price_{code}_err")
+                    if _e_col4.button("确认", key=f"manual_confirm_{code}_err") and _manual_price_e > 0:
+                        _tmpl = st.session_state['update_template'].copy()
+                        for _i, _row in _tmpl.iterrows():
+                            if str(_row.get('Code', '')) == code:
+                                _tmpl.at[_i, 'Current_Price'] = _manual_price_e
+                        st.session_state['update_template'] = _tmpl
+                        st.session_state['_refresh_summary']['results'][code] = {
+                            'status': 'ok', 'price': _manual_price_e,
+                            'msg': '手动输入', 'date': ''}
+                        st.session_state['_refresh_summary']['ok'] += 1
+                        st.session_state['_refresh_summary']['err'] -= 1
                         st.rerun()
     # ─── Validation ───
 
