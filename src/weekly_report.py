@@ -209,14 +209,15 @@ def generate_weekly_report(
 
         if sap_lw is not None:
             sap_new_shares  = sap_tw['Shares'] - sap_lw['Shares']
+            # 纯股价涨跌：用上周汇率隔离汇率因素
             sap_price_gain  = sap_lw['Shares'] * (
-                sap_tw['Current_Price'] * sap_tw['Exchange_Rate'] -
-                sap_lw['Current_Price'] * sap_lw['Exchange_Rate'])
-            sap_fx_impact   = sap_lw['Shares'] * sap_lw['Current_Price'] * (
+                sap_tw['Current_Price'] - sap_lw['Current_Price']) * sap_lw['Exchange_Rate']
+            # 汇率影响：用本周股价计算汇率变动贡献
+            sap_fx_impact   = sap_lw['Shares'] * sap_tw['Current_Price'] * (
                 sap_tw['Exchange_Rate'] - sap_lw['Exchange_Rate'])
             sap_delta       = sap_tw['Total_Value'] - sap_lw['Total_Value']
             sap_ncf         = sap_tw['Net_Cash_Flow']
-            sap_espp_contrib = sap_delta - sap_price_gain
+            sap_espp_contrib = sap_delta - sap_price_gain - sap_fx_impact
             sap_discount    = sap_espp_contrib - sap_ncf
 
             lines += [f"| 持仓股数 | {sap_lw['Shares']:.2f} → {sap_tw['Shares']:.2f} 股（{sap_new_shares:+.2f}）|"]
@@ -226,11 +227,11 @@ def generate_weekly_report(
             lines += [f"| EUR/CNY 汇率 | {sap_lw['Exchange_Rate']:.4f} → {fx_str} |"]
             lines += [f"| 本周市值 | {_fmt(sap_tw['Total_Value'])}（上周 {_fmt(sap_lw['Total_Value'])}）|"]
             lines += [f"| 总市值变化 | {sap_delta:+,.0f} |"]
-            lines += [f"| 其中：价格涨跌 | {sap_price_gain:+,.0f}（{sap_lw['Shares']:.2f}股 × €{sap_tw['Current_Price']-sap_lw['Current_Price']:+.2f} × {sap_tw['Exchange_Rate']:.4f}）|"]
+            lines += [f"| 其中：股价涨跌 | {sap_price_gain:+,.0f}（{sap_lw['Shares']:.2f}股 × €{sap_tw['Current_Price']-sap_lw['Current_Price']:+.2f} × {sap_lw['Exchange_Rate']:.4f}）|"]
+            if abs(sap_fx_impact) >= 1:
+                lines += [f"| 其中：汇率影响 | {sap_fx_impact:+,.0f}（{sap_lw['Shares']:.2f}股 × €{sap_tw['Current_Price']:.2f} × {fx_change:+.4f}）|"]
             if sap_ncf > 0:
                 lines += [f"| 其中：ESPP/RSU 归属 | {sap_espp_contrib:+,.0f}（成本 {_fmt(sap_ncf)}，折扣收益 {_fmt(sap_discount)}）|"]
-            if abs(sap_fx_impact) >= 1:
-                lines += [f"| 其中：汇率影响 | {sap_fx_impact:+,.0f} |"]
         else:
             lines += [f"| 持仓股数 | {sap_tw['Shares']:.2f} 股 |"]
             lines += [f"| 本周市值 | {_fmt(sap_tw['Total_Value'])} |"]
