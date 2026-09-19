@@ -6658,10 +6658,13 @@ with tab_son:
             ])
         st.session_state['son_update_template'] = _son_template
 
-    # 快照日期
+    # 快照日期（默认取本周五）
     _son_last_snapshot = son_df['Date'].max() if son_df is not None and not son_df.empty else '（无快照）'
     st.caption(f"上次快照：{_son_last_snapshot}")
-    _son_new_date = st.date_input("本次快照日期", value=pd.Timestamp.now().date(), key="son_new_date")
+    _today = pd.Timestamp.now().date()
+    _days_to_friday = (4 - _today.weekday()) % 7  # 0=Mon...4=Fri
+    _this_friday = _today + pd.Timedelta(days=_days_to_friday) if _days_to_friday > 0 else _today
+    _son_new_date = st.date_input("本次快照日期（建议用每周五）", value=_this_friday, key="son_new_date")
     _son_new_date_str = str(_son_new_date)
 
     # 步骤一：短信解析
