@@ -78,10 +78,13 @@ def _fmt_bias_cell(bias_val: float | None, signal: str, emoji: str) -> str:
     return f'{emoji} {signal} ({sign}{bias_val:.1f}%)'
 
 
-def _format_message(market_data: dict) -> str:
+def _format_message(market_data: dict, stale_cache: bool = False) -> str:
     """将 market_data 渲染为企业微信 Markdown 字符串。"""
     today = date.today().isoformat()
-    lines = [f'📊 **市场温度计** {today}', '']
+    header = f'📊 **市场温度计** {today}'
+    if stale_cache:
+        header += '\n> ⚠️ 数据拉取超时，以下为缓存数据，仅供参考'
+    lines = [header, '']
 
     # ── 乖离率 ──
     lines.append('**乖离率**')
@@ -223,11 +226,12 @@ def _send_webhook(text: str, url: str | None = None) -> bool:
 # 公开入口
 # ══════════════════════════════════════════════════════════════
 
-def send_market_summary(market_data: dict) -> bool:
+def send_market_summary(market_data: dict, stale_cache: bool = False) -> bool:
     """判断交易日，格式化并推送市场温度计摘要。
 
     非交易日直接返回 True（跳过，不算失败）。
     推送失败时发送一条简短错误通知。
+    stale_cache=True 时在消息头加 ⚠️ 提示，告知数据来自缓存。
     """
     today = date.today()
 
@@ -247,6 +251,6 @@ def send_market_summary(market_data: dict) -> bool:
         logger.error("所有数据不可用，发送错误通知")
         return _send_webhook(error_msg)
 
-    text = _format_message(market_data)
+    text = _format_message(market_data, stale_cache=stale_cache)
     print(text)  # 同时输出到日志
     return _send_webhook(text)

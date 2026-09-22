@@ -263,33 +263,56 @@ def _fetch_akshare(symbol: str) -> pd.Series | None:
 
 
 def _fetch_yfinance(symbol: str, period: str = '1y') -> pd.Series | None:
-    """拉取 yfinance 日线，返回 close 序列（index=date str）。"""
-    try:
-        import yfinance as yf
-        df = yf.download(symbol, period=period, progress=False, auto_adjust=True)
-        if df.empty:
+    """拉取 yfinance 日线，返回 close 序列（index=date str）。
+
+    429 限流时 exponential backoff 重试，单次请求超时 15s，最多重试 3 次。
+    """
+    import time
+    import yfinance as yf
+
+    for attempt in range(3):
+        try:
+            df = yf.download(symbol, period=period, progress=False,
+                             auto_adjust=True, timeout=15)
+            if df.empty:
+                return None
+            df.index = pd.to_datetime(df.index).strftime('%Y-%m-%d')
+            close = df['Close'].squeeze()
+            if not isinstance(close, pd.Series):
+                close = pd.Series([close], index=df.index)
+            return close.astype(float)
+        except Exception as e:
+            err = str(e).lower()
+            is_rate_limit = '429' in err or 'too many' in err or 'rate' in err
+            if is_rate_limit and attempt < 2:
+                wait = 30 * (2 ** attempt)  # 30s, 60s
+                time.sleep(wait)
+                continue
             return None
-        df.index = pd.to_datetime(df.index).strftime('%Y-%m-%d')
-        close = df['Close'].squeeze()
-        # squeeze() 在只有1行时会退化成标量，统一包成 Series
-        if not isinstance(close, pd.Series):
-            close = pd.Series([close], index=df.index)
-        return close.astype(float)
-    except Exception:
-        return None
+    return None
 
 
 def _fetch_pe(symbol: str) -> float | None:
-    """拉取 ETF 的 trailingPE。"""
-    try:
-        import yfinance as yf
-        info = yf.Ticker(symbol).info
-        pe = info.get('trailingPE')
-        if pe and float(pe) > 0:
-            return round(float(pe), 2)
-        return None
-    except Exception:
-        return None
+    """拉取 ETF 的 trailingPE。429 时退避重试。"""
+    import time
+    import yfinance as yf
+
+    for attempt in range(3):
+        try:
+            info = yf.Ticker(symbol).info
+            pe = info.get('trailingPE')
+            if pe and float(pe) > 0:
+                return round(float(pe), 2)
+            return None
+        except Exception as e:
+            err = str(e).lower()
+            is_rate_limit = '429' in err or 'too many' in err or 'rate' in err
+            if is_rate_limit and attempt < 2:
+                wait = 30 * (2 ** attempt)
+                time.sleep(wait)
+                continue
+            return None
+    return None
 
 
 def _fetch_akshare_pe(symbol: str) -> float | None:
