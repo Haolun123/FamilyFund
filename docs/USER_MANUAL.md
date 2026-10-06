@@ -1,7 +1,7 @@
 # FamilyFund 用户操作手册
 
-> **版本**: v1.6
-> **最后更新**: 2026-09-03
+> **版本**: v1.7
+> **最后更新**: 2026-10-06
 > **适用对象**: 家庭 CIO（日常操作参考）
 
 ---
@@ -520,57 +520,48 @@ Date,Asset_Class,Platform,Name,Code,Currency,Exchange_Rate,Shares,Current_Price,
 
 ---
 
-### 6.1 新增季度数据（手动编辑 CSV）
+### 6.1 新增季度数据（交互式，推荐）
 
-**Step 1 — 更新 `balance_sheet.csv`**
+**前提**：当季最后一周的 Weekly Update 已完成（portfolio.csv 已有季末快照）。  
+**操作**：告诉 Claude "做 QX 季度报"，由 Claude 交互式逐项问答，自动写入 balance_sheet.csv。
 
-文件路径：`$FAMILYFUND_DATA/balance_sheet.csv`（iCloud 同步目录）
+**Claude 会按顺序问以下 7 项：**
 
-1. 用文本编辑器或 Excel 打开文件
-2. 复制上一季度的所有行（例如复制所有 `2026Q1` 行）
-3. 粘贴到文件末尾，将 `Quarter` 列全部改为新季度（如 `2026Q2`）
-4. 逐行更新各账户余额：
+| 项目 | 数据来源 | 备注 |
+|------|---------|------|
+| 1. 流动现金 | 各银行/支付宝 APP 查余额 | 需剔除 Portfolio Cash（避免与 Asset_Investment 重复） |
+| 2. 住房公积金 | 公积金 APP | 夫妻合并 |
+| 3. 不动产 & 车辆 | 估算，无变化说"全部沿用" | 房产每年 1-2 次更新即可 |
+| 4. 私募股权 | 无变化说"无变化" | |
+| 5. 坏账 | 无变化说"无变化" | |
+| 6. 信用卡 | 各卡当期账单余额 | 含欧元/美元时 Claude 自动换算 |
+| 7. 长期贷款 | Claude 自动从鲨鱼记账 Q3.csv 反推还本额 | 无需手动查银行 APP |
 
-| 类别 | 更新方式 |
-|------|---------|
-| `Asset_Current` Cash 各账户 | 查各银行/支付宝 APP 查季末余额 |
-| `Asset_Current` ProvidentFund | 查公积金 APP 账户余额 |
-| `Asset_Investment` | **2026Q2 起填 0**，引擎自动从 portfolio.csv 聚合季末市值 |
-| `Asset_RealEstate` | 房产估值按需更新（每年 1-2 次即可），车辆按市场行情估算 |
-| `Asset_PrivateEquity` | 按实际变化更新 |
-| `Asset_BadDebt` Provision | 如坏账比例有变化，更新计提金额 |
-| `Liability_Current` CreditCard | 查各信用卡当期账单余额 |
-| `Liability_LongTerm` 贷款 | 查银行 APP 贷款剩余本金 |
-| `Liability_Family` | 按实际变化更新 |
+> **Asset_Investment** 无需填，引擎自动从 portfolio.csv 季末最近快照聚合。
 
-> **Asset_Investment 特别说明**：`2026Q2` 起，`Sub_Category` 为 `auto` 的行引擎会自动从 `portfolio.csv` 中取季末（最近快照）的 `Total_Value` 合计填入，无需手动填数字，保持 `Amount=0, CNY_Amount=0` 即可。
+**cashflow_log.csv**（通常可跳过，Claude 会主动问）：只记录家庭基金外的特殊现金流。日常工资/定投已在 portfolio.csv Cash NCF 里，不需要填。
 
-**Step 2 — 更新 `cashflow_log.csv`**（通常可跳过）
+**Step 2 — 刷新 Dashboard**
 
-文件路径：`$FAMILYFUND_DATA/cashflow_log.csv`
+Claude 写入完成后，刷新浏览器，Quarterly Report Tab 选择当前季度和对比季度，即可查看 QoQ 对比和瀑布图。
 
-**重要**：`cashflow_log.csv` 只记录**家庭基金外**的特殊现金流。
+---
 
-- ❌ **不需要填**：打入家庭基金的工资/注资 → 已在 `portfolio.csv` Cash NCF 里有记录
-- ✅ **需要填**：鲨鱼记账捕捉不到的基金外特殊项
+### 6.1b 手动编辑 CSV（备用）
 
-实际每季度通常 0-2 条，大多数季度可直接跳过此步骤：
+如需直接编辑文件：
 
-```csv
-2026Q2,2026-05-15,-15000,Outflow_Major,保险年费（基金外支出）
-2026Q2,2026-06-01,23000,Inflow_Other,旧车置换补贴已收款（未打入基金）
-```
+1. 打开 `$FAMILYFUND_DATA/balance_sheet.csv`
+2. 复制上季度所有行，粘贴到末尾，`Quarter` 改为新季度
+3. 逐行更新余额（贷款还本从鲨鱼记账 `债务还本` 分类反推）
+4. `Asset_Investment` 行保持 `Amount=0, CNY_Amount=0`（引擎自动填）
 
-Type 枚举：
-- `Inflow_Salary`：工资净储蓄（未来由鲨鱼记账脚本自动生成）
+**cashflow_log.csv Type 枚举：**
+- `Inflow_Salary`：工资净储蓄
 - `Inflow_Other`：经营性特殊收入（政府补贴、保险理赔等）
-- `Capital_Inflow`：资本性流入（资产变现、大额补偿等，不属于日常经营）
-- `Capital_Outflow`：资本性流出（大额资产购置支出等）
+- `Capital_Inflow`：资本性流入（资产变现等）
+- `Capital_Outflow`：资本性流出（大额资产购置等）
 - `Outflow_Major`：基金外大额经营性支出
-
-**Step 3 — 刷新 Dashboard**
-
-保存 CSV 后，刷新浏览器，Quarterly Report Tab 自动加载新季度数据。选择 `2026Q2` 作为当前季度，`2026Q1` 作为对比季度，即可查看 QoQ 对比和瀑布图。
 
 ---
 
