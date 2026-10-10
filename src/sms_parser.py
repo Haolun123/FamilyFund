@@ -8,6 +8,7 @@
   F: 建信基金（定期定额申购，日期为8位数字 YYYYMMDD，无净值反算）
   G: 广发基金（定投，"净值X，份额X份，N月N日交易成功并开始计算持有时间"）
   H: 大成基金（定投申购，"确认份额X份，份额净值X元，确认日N月N日"）
+  K: 万家基金（申购，日期格式 YYYY-MM-DD，无净值反算）
 
 返回结构：
     [
@@ -146,6 +147,17 @@ _PAT_I = re.compile(
     r'([\d,]+\.?\d*)元，'                     # 金额
     r'(?:确认日期\s*(\d{1,2})月(\d{1,2})日，)?'  # 确认日月（可选）
     r'成交份额\s*([\d,]+\.?\d*)份',           # 份额
+    re.DOTALL,
+)
+
+
+# 格式K：万家基金（申购，日期格式 YYYY-MM-DD，无净值，从金额/份额反算）
+# "您于YYYY-MM-DD提交的<基金名>基金的申购申请已确认成功，确认金额为<X>元，确认份额为<X>份"
+_PAT_K = re.compile(
+    r'【万家基金】.*?您于(\d{4}-\d{2}-\d{2})提交的'
+    r'(.+?)基金的申购申请已确认成功'
+    r'.*?确认金额为([\d,]+\.?\d*)元'
+    r'.*?确认份额为([\d,]+\.?\d*)份',
     re.DOTALL,
 )
 
@@ -393,6 +405,28 @@ def _parse_one(sms: str) -> dict | None:
             'matched_code': None,
             'matched_name': None,
             '_brand':       '华安',
+        }
+
+    # 格式K：万家基金（日期 YYYY-MM-DD，无净值，反算）
+    m = _PAT_K.search(sms)
+    if m:
+        confirm_date = m.group(1)
+        fund_name    = m.group(2).strip()
+        amount       = _parse_amount(m.group(3))
+        shares       = _parse_amount(m.group(4))
+        nav          = round(amount / shares, 4) if shares > 0 else 0.0
+        return {
+            'confirm_date': confirm_date,
+            'action':       '买入',
+            'fund_name':    fund_name,
+            'amount':       amount,
+            'shares':       shares,
+            'nav':          nav,
+            'is_gold':      False,
+            'raw':          sms,
+            'matched_code': None,
+            'matched_name': None,
+            '_brand':       '万家',
         }
 
     return None
@@ -755,6 +789,7 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
         '纳斯达克100联接A':                    {'code': '040046', 'name': '华安纳指100 A类'},
         '天弘标普500发起（QDII-FOF）A':        {'code': '007721', 'name': '天弘标普500 A类'},
         '天弘纳斯达克100指数发起（QDII）A':    {'code': '018043', 'name': '天弘纳指100 A类'},
+        '万家纳斯达克100指数发起式（QDII）A':  {'code': '019441', 'name': '万家纳指100 A类'},
     }
 
     # 加载持久化精确匹配 map（文件 map 覆盖内置 map）
