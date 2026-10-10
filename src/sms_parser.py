@@ -9,6 +9,7 @@
   G: 广发基金（定投，"净值X，份额X份，N月N日交易成功并开始计算持有时间"）
   H: 大成基金（定投申购，"确认份额X份，份额净值X元，确认日N月N日"）
   K: 万家基金（申购，日期格式 YYYY-MM-DD，无净值反算）
+  L: 宝盈基金（定期定额申购，"N月N日...申购<基金名>基金<金额>元成功，确认份额X份，成交净值为X"）
 
 返回结构：
     [
@@ -158,6 +159,17 @@ _PAT_K = re.compile(
     r'(.+?)基金的申购申请已确认成功'
     r'.*?确认金额为([\d,]+\.?\d*)元'
     r'.*?确认份额为([\d,]+\.?\d*)份',
+    re.DOTALL,
+)
+
+
+# 格式L：宝盈基金（定期定额申购，"N月N日...申购<基金名>基金<金额>元成功，确认份额X份，成交净值为X"）
+_PAT_L = re.compile(
+    r'【宝盈基金】.*?您于(\d{1,2})月(\d{1,2})日定期定额申购'
+    r'(.+?)基金'
+    r'([\d,]+\.?\d*)元成功'
+    r'.*?确认份额([\d,]+\.?\d*)份'
+    r'.*?成交净值为([\d.]+)',
     re.DOTALL,
 )
 
@@ -427,6 +439,29 @@ def _parse_one(sms: str) -> dict | None:
             'matched_code': None,
             'matched_name': None,
             '_brand':       '万家',
+        }
+
+    # 格式L：宝盈基金（定期定额申购，含净值）
+    m = _PAT_L.search(sms)
+    if m:
+        confirm_mo, confirm_d = int(m.group(1)), int(m.group(2))
+        year      = _infer_year(confirm_mo)
+        fund_name = m.group(3).strip()
+        amount    = _parse_amount(m.group(4))
+        shares    = _parse_amount(m.group(5))
+        nav       = float(m.group(6))
+        return {
+            'confirm_date': f'{year:04d}-{confirm_mo:02d}-{confirm_d:02d}',
+            'action':       '买入',
+            'fund_name':    fund_name,
+            'amount':       amount,
+            'shares':       shares,
+            'nav':          nav,
+            'is_gold':      False,
+            'raw':          sms,
+            'matched_code': None,
+            'matched_name': None,
+            '_brand':       '宝盈',
         }
 
     return None
@@ -790,6 +825,8 @@ def parse_sms(text: str, holdings: list[dict] | None = None,
         '天弘标普500发起（QDII-FOF）A':        {'code': '007721', 'name': '天弘标普500 A类'},
         '天弘纳斯达克100指数发起（QDII）A':    {'code': '018043', 'name': '天弘纳指100 A类'},
         '万家纳斯达克100指数发起式（QDII）A':  {'code': '019441', 'name': '万家纳指100 A类'},
+        '宝盈纳斯达克100指数发起A':            {'code': '019736', 'name': '宝盈纳指100 A类'},
+        '宝盈纳斯达克100指数发起C':            {'code': '019737', 'name': '宝盈纳指100 C类'},
     }
 
     # 加载持久化精确匹配 map（文件 map 覆盖内置 map）
