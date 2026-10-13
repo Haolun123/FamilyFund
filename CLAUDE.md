@@ -548,6 +548,34 @@ portfolio.csv
 - 决策已更新到 `decisions.json`
 - 到 Dashboard Research Tab 点 🔄 刷新研报库 即可看到（或 60 秒内自动刷新）
 
+### Step 8: 同步 Obsidian（强制，每次分析后必须执行）
+
+**不需要用户提醒，分析完成后主动执行。**
+
+```bash
+# 1. 同步分析文档
+cp "$FAMILYFUND_DATA/Finance Reports/<标的文件夹>/analysis/<文档名>.md" \
+   "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/vault/familyfund/research/<标的文件夹>/<文档名>.md"
+
+# 2. 更新 _decisions.md 对应行（决策 action 有变化时）
+# 文件路径：~/Library/Mobile Documents/iCloud~md~obsidian/Documents/vault/familyfund/_decisions.md
+```
+
+**触发规则：**
+
+| 场景 | 同步操作 |
+|------|---------|
+| 新分析文档（芒格框架/财报体检） | cp 到 Obsidian `research/<标的>/` |
+| decisions.json action 变更 | 更新 `_decisions.md` 对应行 + `updated` 日期 |
+| 新建仓标的（首次分析） | Obsidian `research/` 下新建同名文件夹 + 同步文档 |
+| 纯数据更新（价格/仓位变动） | 不需要（Dashboard 已覆盖） |
+| 周报生成 | 已自动同步，不需要手动 |
+
+**Obsidian 路径：**
+- vault 根目录：`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/vault/`
+- 研报目录：`familyfund/research/<标的名（代码）>/`
+- 决策面板：`familyfund/_decisions.md`
+
 ### 港 A 双上市分析要点（双市场标的必看）
 
 参考 `招商银行投资审视：芒格框架分析.md` 第九节的格式，必须涵盖：
