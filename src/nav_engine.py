@@ -419,13 +419,30 @@ def compute_xirr(df):
         return None
 
 def _load_risk_free_rate(data_dir: str | None = None) -> float:
-    """从 fund_config.json 读取无风险利率，找不到则默认 1.5%。"""
+    """无风险利率获取（优先级：市场缓存中国10Y国债 > fund_config.json手动值 > 默认1.5%）。
+
+    优先从 market_cache.json 读取中国10Y国债收益率（实时），
+    缓存不可用时 fallback 到 fund_config.json 的手动配置值。
+    """
     import json
     if data_dir is None:
         data_dir = os.environ.get('FAMILYFUND_DATA', '')
-    path = os.path.join(data_dir, 'config', 'fund_config.json')
+
+    # 优先：market_cache.json 中的中国10Y国债收益率
+    cache_path = os.path.join(data_dir, 'cache', 'market_cache.json')
     try:
-        with open(path, encoding='utf-8') as f:
+        with open(cache_path, encoding='utf-8') as f:
+            cache = json.load(f)
+        cn_bond = cache.get('cn_treasury_10y', {})
+        if cn_bond and cn_bond.get('price') is not None:
+            return round(float(cn_bond['price']) / 100.0, 6)  # 百分比转小数
+    except Exception:
+        pass
+
+    # Fallback：fund_config.json 手动值
+    config_path = os.path.join(data_dir, 'config', 'fund_config.json')
+    try:
+        with open(config_path, encoding='utf-8') as f:
             cfg = json.load(f)
         return float(cfg.get('risk_free_rate', 0.015))
     except Exception:
