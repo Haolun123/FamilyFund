@@ -144,7 +144,9 @@ def compute_suggestion(plan: dict, market_data: dict) -> dict:
             base_unit = plan.get('base_amount_unit', 1)
             gold_price_cny = _estimate_gold_price_cny(market_data)
             suggested_unit = base_unit
-            suggested_cny  = round(suggested_unit * gold_price_cny / 10) * 10 if gold_price_cny else None
+            import math as _math
+            _gp_valid = gold_price_cny and not (isinstance(gold_price_cny, float) and _math.isnan(gold_price_cny))
+            suggested_cny  = round(suggested_unit * gold_price_cny / 10) * 10 if _gp_valid else None
             return {
                 'multiplier_str': '1.0x', 'multiplier': 1.0, 'arrow': '→',
                 'suggested_cny': suggested_cny, 'suggested_unit': suggested_unit,
@@ -247,11 +249,18 @@ def _estimate_gold_price_cny(market_data: dict) -> float | None:
     gold price 单位是 USD/troy oz（1 troy oz ≈ 31.1035 g）。
     汇率从 fx_service 获取，失败返回 None。
     """
+    import math as _math
     gold_entry = market_data.get('gold')
     if not gold_entry:
         return None
     price_usd_oz = gold_entry.get('price')
     if not price_usd_oz:
+        return None
+    try:
+        price_usd_oz = float(price_usd_oz)
+        if _math.isnan(price_usd_oz) or price_usd_oz <= 0:
+            return None
+    except (TypeError, ValueError):
         return None
     try:
         from fx_service import get_exchange_rate
