@@ -148,10 +148,16 @@ def _run_nav_calculation(dates, total_values, net_cash_flows):
 
         # 年化收益率: (1 + cumulative_return)^(365/days) - 1
         days_elapsed = (pd.to_datetime(date) - start_date).days
-        if days_elapsed >= 365:
-            annualized_return = ((1 + cumulative_return) ** (365.0 / days_elapsed) - 1) * 100
+        if days_elapsed >= 30 and (1 + cumulative_return) > 0:  # 至少30天且基数为正
+            try:
+                annualized_return = ((1 + cumulative_return) ** (365.0 / days_elapsed) - 1) * 100
+                # 确保结果是实数
+                if isinstance(annualized_return, complex):
+                    annualized_return = None
+            except (ValueError, OverflowError, ZeroDivisionError):
+                annualized_return = None
         else:
-            annualized_return = None  # 不足一年不显示年化
+            annualized_return = None
 
         records.append({
             'Date': date,
@@ -387,10 +393,9 @@ def compute_xirr(df):
     dates = pd.to_datetime(agg['Date']).tolist()
     cashflows = agg['Net_Cash_Flow'].tolist()
 
-    # 数据不足 1 年不展示 — 对齐 TWR 的处理(_run_nav_calculation line 149)
-    # 短期数据 XIRR 数学正确但金融无意义(49 天 1.91% 折算 +15.44% 误导性强)
+    # 数据不足30天不展示 XIRR
     days_elapsed = (dates[-1] - dates[0]).days
-    if days_elapsed < 365:
+    if days_elapsed < 30:
         return None
 
     # 终值：最新期总市值，符号取负（代表"卖出收回"）
@@ -413,11 +418,25 @@ def compute_xirr(df):
     except (ValueError, RuntimeError):
         return None
 
+def _load_risk_free_rate(data_dir: str | None = None) -> float:
+    """从 fund_config.json 读取无风险利率，找不到则默认 1.5%。"""
+    import json
+    if data_dir is None:
+        data_dir = os.environ.get('FAMILYFUND_DATA', '')
+    path = os.path.join(data_dir, 'fund_config.json')
+    try:
+        with open(path, encoding='utf-8') as f:
+            cfg = json.load(f)
+        return float(cfg.get('risk_free_rate', 0.015))
+    except Exception:
+        return 0.015  # 默认1.5%
+
+
 # ============================================================
 # Sharpe Ratio
 # ============================================================
 
-def compute_sharpe(fund_nav_df, risk_free_rate: float = 0.025) -> float | None:
+def compute_sharpe(fund_nav_df, risk_free_rate: float | None = None, data_dir: str | None = None) -> float | None:
     """计算基金的年化夏普比率。
 
     基于 NAV 序列的周期收益率：
@@ -428,13 +447,17 @@ def compute_sharpe(fund_nav_df, risk_free_rate: float = 0.025) -> float | None:
 
     Args:
         fund_nav_df: compute_fund_nav() 返回的 DataFrame，需含 NAV 和 Date 列
-        risk_free_rate: 无风险年化利率，默认 2.5%
+        risk_free_rate: 无风险年化利率。None 时从 fund_config.json 读取（默认 1.5%）
+        data_dir: $FAMILYFUND_DATA 路径，用于读取 fund_config.json
 
     Returns:
         float: 夏普比率（保留两位小数），数据不足 4 个周期或波动率为 0 时返回 None
     """
     if fund_nav_df is None or len(fund_nav_df) < 4:
         return None
+
+    if risk_free_rate is None:
+        risk_free_rate = _load_risk_free_rate(data_dir)
 
     nav = fund_nav_df['NAV'].astype(float).tolist()
     dates = pd.to_datetime(fund_nav_df['Date']).tolist()

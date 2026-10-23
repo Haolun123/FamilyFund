@@ -18,6 +18,7 @@ from nav_engine import (
     load_target_allocation, save_target_allocation,
     CLASS_DISPLAY_NAMES, VALID_ASSET_CLASSES,
     _atomic_write_csv, update_snapshot, delete_snapshot,
+    _load_risk_free_rate,
 )
 from fx_service import get_exchange_rate, get_stock_price, load_sap_price_cache, save_sap_price_cache
 from sap_stock import load_own_sap, load_move_sap, own_sap_summary, move_sap_summary
@@ -103,7 +104,7 @@ def load_data(csv_path):
         move_sap_csv=MOVE_SAP_CSV if os.path.exists(MOVE_SAP_CSV) else None,
     )
     xirr = compute_xirr(df)
-    sharpe = compute_sharpe(fund_nav)
+    sharpe = compute_sharpe(fund_nav, data_dir=os.path.dirname(csv_path))
     calmar = compute_calmar(fund_nav)
     return df, fund_nav, class_nav, allocation, cost_basis, xirr, sharpe, calmar
 
@@ -268,26 +269,47 @@ with tab_dashboard:
     with col4:
         ann = latest_fund.get('Annualized_Return(%)')
         if ann is not None and not pd.isna(ann):
-            st.metric("年化收益率(TWR)", f"{ann:+.2f}%", help="时间加权年化收益率，剔除资金进出影响")
+            _ann_help = "时间加权年化收益率，剔除资金进出影响"
+            _ann_label = f"{ann:+.2f}%"
+            if fund_nav_df is not None and len(fund_nav_df) >= 2:
+                _days = (pd.to_datetime(fund_nav_df['Date'].iloc[-1]) - pd.to_datetime(fund_nav_df['Date'].iloc[0])).days
+                if _days < 365:
+                    _ann_help += "（⚠️ 不足一年，年化折算仅供参考）"
+            st.metric("年化收益率(TWR)", _ann_label, help=_ann_help)
         else:
-            st.metric("年化收益率(TWR)", "< 1年")
+            st.metric("年化收益率(TWR)", "—")
     with col5:
         if xirr_value is not None:
-            st.metric("XIRR(MWR)", f"{xirr_value*100:+.2f}%", help="资金加权年化收益率，反映实际资金投入时机的真实回报")
+            _xirr_help = "资金加权年化收益率，反映实际资金投入时机的真实回报"
+            if fund_nav_df is not None and len(fund_nav_df) >= 2:
+                _days = (pd.to_datetime(fund_nav_df['Date'].iloc[-1]) - pd.to_datetime(fund_nav_df['Date'].iloc[0])).days
+                if _days < 365:
+                    _xirr_help += "（⚠️ 不足一年，年化折算仅供参考）"
+            st.metric("XIRR(MWR)", f"{xirr_value*100:+.2f}%", help=_xirr_help)
         else:
-            st.metric("XIRR(MWR)", "< 1年")
+            st.metric("XIRR(MWR)", "—")
 
     col6, col7, col8, col9 = st.columns(4)
     with col6:
         if sharpe_value is not None:
-            st.metric("夏普比率", f"{sharpe_value:.2f}", help="年化夏普比率，无风险利率 2.5%。>1 优秀，>0 可接受，<0 不如无风险收益")
+            _sharpe_help = "年化夏普比率，无风险利率 2.5%。>1 优秀，>0 可接受，<0 不如无风险收益"
+            if fund_nav_df is not None and len(fund_nav_df) >= 2:
+                _days = (pd.to_datetime(fund_nav_df['Date'].iloc[-1]) - pd.to_datetime(fund_nav_df['Date'].iloc[0])).days
+                if _days < 365:
+                    _sharpe_help += "（⚠️ 不足一年，仅供参考）"
+            st.metric("夏普比率", f"{sharpe_value:.2f}", help=_sharpe_help)
         else:
-            st.metric("夏普比率", "< 1年")
+            st.metric("夏普比率", "—")
     with col7:
         if calmar_value is not None:
-            st.metric("卡尔马比率", f"{calmar_value:.2f}", help="年化收益率 / 最大回撤。>1 优秀，越高说明相对回撤获取的收益越高")
+            _calmar_help = "年化收益率 / 最大回撤。>1 优秀，越高说明相对回撤获取的收益越高"
+            if fund_nav_df is not None and len(fund_nav_df) >= 2:
+                _days = (pd.to_datetime(fund_nav_df['Date'].iloc[-1]) - pd.to_datetime(fund_nav_df['Date'].iloc[0])).days
+                if _days < 365:
+                    _calmar_help += "（⚠️ 不足一年，仅供参考）"
+            st.metric("卡尔马比率", f"{calmar_value:.2f}", help=_calmar_help)
         else:
-            st.metric("卡尔马比率", "< 1年")
+            st.metric("卡尔马比率", "—")
     with col8:
         mdd = latest_fund.get('Max_Drawdown(%)')
         if mdd is not None and not pd.isna(mdd):
@@ -331,6 +353,119 @@ with tab_dashboard:
                            legend=dict(orientation='h', yanchor='bottom', y=-0.3,
                                        xanchor='center', x=0.5))
     st.plotly_chart(fig_fund, use_container_width=True)
+
+    # ─── 基准指标对比表 ───
+    if selected_benchmarks and benchmark_data:
+        import statistics as _stats
+        _rfr = _load_risk_free_rate(os.path.dirname(csv_path))
+
+        def _calc_benchmark_metrics(bdata: list[dict], rfr: float) -> dict:
+            """计算基准的累计收益、年化、最大回撤、夏普、卡尔马。"""
+            if not bdata or len(bdata) < 4:
+                return {}
+            df_b = pd.DataFrame(bdata).sort_values('date').reset_index(drop=True)
+            values = df_b['value'].astype(float).tolist()
+            dates  = pd.to_datetime(df_b['date']).tolist()
+
+            # 累计收益
+            cum_ret = (values[-1] / values[0]) - 1
+
+            # 年化收益（不足一年也算，加标注）
+            days = (dates[-1] - dates[0]).days
+            if days >= 30 and values[0] > 0:
+                try:
+                    ann_ret = ((values[-1] / values[0]) ** (365.0 / days) - 1)
+                    if isinstance(ann_ret, complex):
+                        ann_ret = None
+                except Exception:
+                    ann_ret = None
+            else:
+                ann_ret = None
+
+            # 最大回撤
+            peak = values[0]
+            mdd = 0.0
+            for v in values:
+                if v > peak:
+                    peak = v
+                dd = (v - peak) / peak
+                if dd < mdd:
+                    mdd = dd
+
+            # 年化波动率（周期收益率std × √周期数/年）
+            period_rets = [(values[i] / values[i-1]) - 1 for i in range(1, len(values))]
+            if len(period_rets) < 3:
+                return {'cum_ret': cum_ret, 'ann_ret': ann_ret, 'mdd': mdd}
+            total_days = (dates[-1] - dates[0]).days
+            avg_days = total_days / len(period_rets)
+            periods_per_year = 365.0 / avg_days if avg_days > 0 else 52.0
+            vol = _stats.stdev(period_rets) * (periods_per_year ** 0.5)
+
+            sharpe = ((ann_ret - rfr) / vol) if (ann_ret is not None and vol > 0) else None
+            calmar = (ann_ret / abs(mdd)) if (ann_ret is not None and mdd < 0) else None
+
+            return {
+                'cum_ret': cum_ret,
+                'ann_ret': ann_ret,
+                'mdd':     mdd,
+                'vol':     vol,
+                'sharpe':  sharpe,
+                'calmar':  calmar,
+            }
+
+        # 组合自身指标
+        _fund_days = (pd.to_datetime(fund_nav_df['Date'].iloc[-1]) - pd.to_datetime(fund_nav_df['Date'].iloc[0])).days
+        _insufficient = _fund_days < 365
+        _s = "＊" if _insufficient else ""
+
+        _bm_rows = [{
+            '标的':       '📊 本基金',
+            '累计收益':   f"{fund_nav_df['Cumulative_Return(%)'].iloc[-1]:+.2f}%",
+            '年化收益':   f"{fund_nav_df['Annualized_Return(%)'].iloc[-1]:+.2f}%{_s}" if fund_nav_df['Annualized_Return(%)'].iloc[-1] is not None and not pd.isna(fund_nav_df['Annualized_Return(%)'].iloc[-1]) else '—',
+            '年化波动率':  f"{sharpe_value:.2f}" if sharpe_value is not None else '—',  # placeholder, recompute below
+            '最大回撤':   f"{fund_nav_df['Max_Drawdown(%)'].iloc[-1]:.2f}%",
+            '夏普率':     f"{sharpe_value:.2f}{_s}" if sharpe_value is not None else '—',
+            '卡尔马率':   f"{calmar_value:.2f}{_s}" if calmar_value is not None else '—',
+            '无风险利率': f"{_rfr*100:.1f}% (CNY)",
+        }]
+
+        # 重新计算波动率填入本基金行
+        _fund_rets = [(fund_nav_df['NAV'].astype(float).iloc[i] / fund_nav_df['NAV'].astype(float).iloc[i-1]) - 1
+                      for i in range(1, len(fund_nav_df))]
+        if len(_fund_rets) >= 3:
+            _fd = (pd.to_datetime(fund_nav_df['Date'].iloc[-1]) - pd.to_datetime(fund_nav_df['Date'].iloc[0])).days
+            _ppyr = 365.0 / (_fd / len(_fund_rets)) if _fd > 0 else 52.0
+            _fund_vol = _stats.stdev(_fund_rets) * (_ppyr ** 0.5)
+            _bm_rows[0]['年化波动率'] = f"{_fund_vol*100:.2f}%{_s}"
+
+        # 各基准指标
+        for bkey in selected_benchmarks:
+            bdata = benchmark_data.get(bkey)
+            if not bdata:
+                continue
+            m = _calc_benchmark_metrics(bdata, _rfr)
+            if not m:
+                continue
+            _bi = _fund_days < 365
+            _bs = "＊" if _bi else ""
+            _bm_rows.append({
+                '标的':       BENCHMARK_DISPLAY_NAMES[bkey],
+                '累计收益':   f"{m['cum_ret']*100:+.2f}%",
+                '年化收益':   f"{m['ann_ret']*100:+.2f}%{_bs}" if m.get('ann_ret') is not None else '—',
+                '年化波动率': f"{m['vol']*100:.2f}%{_bs}" if m.get('vol') is not None else '—',
+                '最大回撤':   f"{m['mdd']*100:.2f}%",
+                '夏普率':     f"{m['sharpe']:.2f}{_bs}" if m.get('sharpe') is not None else '—',
+                '卡尔马率':   f"{m['calmar']:.2f}{_bs}" if m.get('calmar') is not None else '—',
+                '无风险利率': f"{_rfr*100:.1f}% (CNY)",
+            })
+
+        if len(_bm_rows) > 1:
+            st.subheader("基准指标对比")
+            st.dataframe(pd.DataFrame(_bm_rows), use_container_width=True, hide_index=True)
+            _note = f"统一口径：人民币计价，无风险利率 {_rfr*100:.1f}%（来自 fund_config.json）。S&P500/纳指100已含 USD/CNY 汇率换算。"
+            if _insufficient:
+                _note += " ＊ 不足一年，年化折算仅供参考。"
+            st.caption(_note)
 
     # ─── AI 周度评估 ───
     from ai_weekly import build_weekly_context, generate_weekly_summary
@@ -487,10 +622,22 @@ with tab_dashboard:
                 total_str    = f"¥{total_pl:+,.0f}"   if total_pl   is not None else '—'
                 realized_str = f"¥{realized_pl:+,.0f}" if realized_pl is not None and abs(realized_pl) > 1 else '—'
 
+                # 夏普/卡尔马用完整历史（非日期筛选），更有统计意义
+                # Fixed_Income / Cash 波动极低，这两个指标无意义，显示"—"
+                _skip_risk_metrics = cls in ('Fixed_Income', 'Cash')
+                _cls_sharpe = None if _skip_risk_metrics else compute_sharpe(nav_df, data_dir=os.path.dirname(csv_path))
+                _cls_calmar = None if _skip_risk_metrics else compute_calmar(nav_df)
+                _cls_days = (pd.to_datetime(nav_df['Date'].iloc[-1]) - pd.to_datetime(nav_df['Date'].iloc[0])).days
+                _insufficient = _cls_days < 365
+                _suffix = "＊" if (_insufficient and not _skip_risk_metrics) else ""
+
                 perf_rows.append({
                     '资产类别':          display_map[cls],
                     '净值':              f"{latest['NAV']:.4f}",
-                    '收益率':            f"{latest['Cumulative_Return(%)']:+.2f}%",
+                    '年化收益(TWR)':     f"{latest['Annualized_Return(%)']:+.2f}%{_suffix}" if latest['Annualized_Return(%)'] is not None and not pd.isna(latest['Annualized_Return(%)']) else '—',
+                    '累计收益率':        f"{latest['Cumulative_Return(%)']:+.2f}%",
+                    '夏普比率':          f"{_cls_sharpe:.2f}{_suffix}" if _cls_sharpe is not None else '—',
+                    '卡尔马比率':        f"{_cls_calmar:.2f}{_suffix}" if _cls_calmar is not None else '—',
                     '浮盈（持仓中）':    float_str,
                     '已实现盈亏':        realized_str,
                     '合计盈亏':          total_str,
@@ -501,6 +648,7 @@ with tab_dashboard:
     if perf_rows:
         perf_df = pd.DataFrame(perf_rows)
         st.dataframe(perf_df, use_container_width=True, hide_index=True)
+        st.caption("＊ 数据不足一年，年化折算及夏普/卡尔马仅供参考。夏普/卡尔马基于完整历史计算，不受上方日期筛选影响。")
 
     # ─── Section 3: Holdings Detail ───
 
