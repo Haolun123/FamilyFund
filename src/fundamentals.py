@@ -392,7 +392,7 @@ def append_fundamentals_snapshot(data_dir: str) -> dict:
     import yfinance as yf
     from datetime import date as _date
 
-    p = os.path.join(data_dir, 'fundamentals_history.json')
+    p = os.path.join(data_dir, 'cache', 'fundamentals_history.json')
     history: dict[str, list] = {}
     if os.path.exists(p):
         with open(p, encoding='utf-8') as f:
@@ -468,7 +468,7 @@ def get_fundamentals_history(data_dir: str, symbol: str = None) -> dict | list:
     Returns:
         dict 或 list；symbol 不存在返回空列表
     """
-    p = os.path.join(data_dir, 'fundamentals_history.json')
+    p = os.path.join(data_dir, 'cache', 'fundamentals_history.json')
     if not os.path.exists(p):
         return {} if symbol is None else []
     try:

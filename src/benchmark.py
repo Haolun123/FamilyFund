@@ -23,7 +23,7 @@ _DATA_DIR = os.environ.get(
     'FAMILYFUND_DATA',
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data'),
 )
-CACHE_PATH = os.path.join(_DATA_DIR, 'benchmark_cache.json')
+CACHE_PATH = os.path.join(_DATA_DIR, 'cache', 'benchmark_cache.json')
 
 # ── 基准显示名称 ──────────────────────────────────────────────
 BENCHMARK_DISPLAY_NAMES = {

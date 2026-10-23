@@ -44,7 +44,7 @@ _DATA_DIR = os.environ.get(
     'FAMILYFUND_DATA',
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data'),
 )
-CACHE_PATH = os.path.join(_DATA_DIR, 'market_cache.json')
+CACHE_PATH = os.path.join(_DATA_DIR, 'cache', 'market_cache.json')
 
 # ── 标的配置 ──────────────────────────────────────────────────
 TARGETS = {
@@ -564,7 +564,7 @@ def set_vol_override(target: str, value: float | None):
 
 # ── QVIX 历史快照 ──────────────────────────────────────────
 
-_VOL_HISTORY_FILE = 'vol_history.json'
+_VOL_HISTORY_FILE = os.path.join('cache', 'vol_history.json')
 
 
 def append_vol_snapshot(data_dir: str, market_data: dict):

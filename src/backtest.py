@@ -36,7 +36,7 @@ _DATA_DIR = os.environ.get(
     'FAMILYFUND_DATA',
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data'),
 )
-CACHE_PATH = os.path.join(_DATA_DIR, 'backtest_cache.json')
+CACHE_PATH = os.path.join(_DATA_DIR, 'cache', 'backtest_cache.json')
 
 SHILLER_URL = 'http://www.econ.yale.edu/~shiller/data/ie_data.xls'
 

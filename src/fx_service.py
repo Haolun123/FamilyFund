@@ -13,7 +13,7 @@ _DATA_DIR = os.environ.get(
     'FAMILYFUND_DATA',
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data'),
 )
-_PRICE_CACHE_PATH = os.path.join(_DATA_DIR, 'sap_price_cache.json')
+_PRICE_CACHE_PATH = os.path.join(_DATA_DIR, 'cache', 'sap_price_cache.json')
 
 
 def get_exchange_rate(from_currency, to_currency="CNY"):

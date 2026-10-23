@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 def _cache_path() -> str:
     """位置数据缓存路径（iCloud 同步）。"""
     data_dir = os.environ.get('FAMILYFUND_DATA', '/app/data')
-    return os.path.join(data_dir, 'position_percentile_cache.json')
+    return os.path.join(data_dir, 'cache', 'position_percentile_cache.json')
 
 
 CACHE_TTL_DAYS = 7
