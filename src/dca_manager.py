@@ -44,7 +44,7 @@ _FREQ_LABELS  = {'weekly': '每周', 'biweekly': '每两周', 'monthly': '每月
 
 
 def _path(data_dir: str) -> str:
-    return os.path.join(data_dir, 'dca_config.json')
+    return os.path.join(data_dir, 'config', 'dca_config.json')
 
 
 def load_dca_config(data_dir: str) -> dict:

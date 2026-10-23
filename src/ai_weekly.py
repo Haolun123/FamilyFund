@@ -9,7 +9,7 @@ from datetime import date
 
 
 def _load_config(data_dir: str) -> dict | None:
-    path = os.path.join(data_dir, 'tenth_man_config.json')
+    path = os.path.join(data_dir, 'config', 'tenth_man_config.json')
     if not os.path.exists(path):
         return None
     with open(path, encoding='utf-8') as f:

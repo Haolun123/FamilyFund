@@ -330,7 +330,7 @@ def run_tenth_man(
         error: str | None
     """
     # 加载 config
-    cfg_path = os.path.join(data_dir, config_file)
+    cfg_path = os.path.join(data_dir, 'config', config_file)
     if not os.path.exists(cfg_path):
         return {'agent_a': '', 'agent_b': '', 'agent_c': '',
                 'context': '', 'error': f'未找到 {config_file}'}

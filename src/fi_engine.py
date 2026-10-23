@@ -19,7 +19,7 @@ _DEFAULT_CONFIG = {
 
 
 def _path(data_dir: str) -> str:
-    return os.path.join(data_dir, 'fi_config.json')
+    return os.path.join(data_dir, 'config', 'fi_config.json')
 
 
 def load_fi_config(data_dir: str) -> dict:

@@ -470,7 +470,7 @@ with tab_dashboard:
     # ─── AI 周度评估 ───
     from ai_weekly import build_weekly_context, generate_weekly_summary
     _ai_data_dir = os.path.dirname(csv_path)
-    _ai_config_exists = os.path.exists(os.path.join(_ai_data_dir, 'tenth_man_config.json'))
+    _ai_config_exists = os.path.exists(os.path.join(_ai_data_dir, 'config', 'tenth_man_config.json'))
 
     with st.expander("✨ AI 周度评估", expanded=False):
         if not _ai_config_exists:
@@ -491,7 +491,7 @@ with tab_dashboard:
 
             if 'ai_weekly_summary' in st.session_state:
                 st.markdown(st.session_state['ai_weekly_summary'])
-                _ai_cfg = json.load(open(os.path.join(_ai_data_dir, 'tenth_man_config.json'))) if _ai_config_exists else {}
+                _ai_cfg = json.load(open(os.path.join(_ai_data_dir, 'config', 'tenth_man_config.json'))) if _ai_config_exists else {}
                 st.caption(f"生成于 {st.session_state.get('ai_weekly_date', '')} · {_ai_cfg.get('model', 'GLM')}")
 
     # ─── Section 2: Asset Class Comparison ───
@@ -5780,7 +5780,7 @@ with tab_tenth:
     def _load_providers(data_dir: str) -> dict:
         """扫描 data_dir 下所有 tenth_man_config_*.json，返回 {显示名: 文件名}。"""
         result = {}
-        for path in sorted(_glob.glob(os.path.join(data_dir, 'tenth_man_config_*.json'))):
+        for path in sorted(_glob.glob(os.path.join(data_dir, 'config', 'tenth_man_config_*.json'))):
             fname = os.path.basename(path)
             try:
                 with open(path, encoding='utf-8') as _f:

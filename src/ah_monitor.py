@@ -44,7 +44,7 @@ _HISTORY_DAYS = 365  # 保留近1年历史用于分位数计算
 
 
 def _path(data_dir: str) -> str:
-    return os.path.join(data_dir, 'ah_config.json')
+    return os.path.join(data_dir, 'config', 'ah_config.json')
 
 
 def load_ah_config(data_dir: str) -> dict:

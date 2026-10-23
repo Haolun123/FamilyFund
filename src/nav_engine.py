@@ -423,7 +423,7 @@ def _load_risk_free_rate(data_dir: str | None = None) -> float:
     import json
     if data_dir is None:
         data_dir = os.environ.get('FAMILYFUND_DATA', '')
-    path = os.path.join(data_dir, 'fund_config.json')
+    path = os.path.join(data_dir, 'config', 'fund_config.json')
     try:
         with open(path, encoding='utf-8') as f:
             cfg = json.load(f)
@@ -628,7 +628,7 @@ _TARGET_ALLOC_DEFAULT = {
 
 def load_target_allocation(data_dir: str) -> dict:
     """从 iCloud 目录加载目标配置比例。文件不存在时返回默认值。"""
-    path = os.path.join(data_dir, 'target_allocation.json')
+    path = os.path.join(data_dir, 'config', 'target_allocation.json')
     if not os.path.exists(path):
         return dict(_TARGET_ALLOC_DEFAULT)
     with open(path, encoding='utf-8') as f:
@@ -643,7 +643,7 @@ def load_target_allocation(data_dir: str) -> dict:
 def save_target_allocation(data_dir: str, alloc: dict):
     """保存目标配置比例到 iCloud 目录。"""
     from datetime import date
-    path = os.path.join(data_dir, 'target_allocation.json')
+    path = os.path.join(data_dir, 'config', 'target_allocation.json')
     payload = {k: alloc[k] for k in _TARGET_ALLOC_DEFAULT if k in alloc}
     payload['_updated'] = date.today().isoformat()
     with open(path, 'w', encoding='utf-8') as f:

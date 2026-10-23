@@ -10,7 +10,7 @@ from datetime import date
 
 
 def _path(data_dir: str) -> str:
-    return os.path.join(data_dir, 'life_stages.json')
+    return os.path.join(data_dir, 'config', 'life_stages.json')
 
 
 def load_life_stages(data_dir: str) -> dict | None:
