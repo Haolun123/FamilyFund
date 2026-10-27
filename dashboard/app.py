@@ -3816,6 +3816,7 @@ with tab_market:
             "该指数历史股息率序列目前无可靠的免费数据来源（理杏仁不收录标普系指数）。"
             "当前仅展示 ETF 价格走势，不生成估值高低位信号。"
         )
+        _show_bond_line = st.toggle('叠加中国10Y国债收益率', value=False, key='div_show_bond')
         try:
             import yfinance as _yf_nav
             _nav_ticker = _yf_nav.Ticker('515450.SS')
@@ -3827,11 +3828,45 @@ with tab_market:
                     x=_nav_hist.index, y=_nav_hist['Close'],
                     mode='lines', name='515450 周收盘价',
                     line=dict(color='#42A5F5', width=1.5),
+                    yaxis='y1',
                 ))
+
+                if _show_bond_line:
+                    # 从缓存读国债历史数据
+                    import json as _json_bond, os as _os_bond
+                    _bond_cache = _os_bond.path.join(_div_data_dir, 'cache', 'bond_yield_cache.json')
+                    if _os_bond.path.exists(_bond_cache):
+                        with open(_bond_cache, encoding='utf-8') as _bf:
+                            _bond_data = _json_bond.load(_bf).get('data', {})
+                        if _bond_data:
+                            import pandas as _pd_bond
+                            _bond_df = _pd_bond.DataFrame(
+                                [(k, v * 100) for k, v in _bond_data.items()],
+                                columns=['date', 'yield_pct']
+                            )
+                            _bond_df['date'] = _pd_bond.to_datetime(_bond_df['date'])
+                            _bond_df = _bond_df.sort_values('date')
+                            _fig_nav.add_trace(go.Scatter(
+                                x=_bond_df['date'], y=_bond_df['yield_pct'],
+                                mode='lines', name='中国10Y国债收益率（%）',
+                                line=dict(color='#EF5350', width=1.2, dash='dot'),
+                                yaxis='y2',
+                            ))
+                            _fig_nav.update_layout(
+                                yaxis2=dict(
+                                    title='国债收益率（%）',
+                                    overlaying='y',
+                                    side='right',
+                                    showgrid=False,
+                                    tickformat='.2f',
+                                ),
+                            )
+
                 _fig_nav.update_layout(
-                    height=220, margin=dict(t=10, b=30),
+                    height=260, margin=dict(t=10, b=30),
                     yaxis_title='收盘价（元）',
                     hovermode='x unified',
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, x=0),
                 )
                 st.plotly_chart(_fig_nav, use_container_width=True)
         except Exception as _nav_e:
