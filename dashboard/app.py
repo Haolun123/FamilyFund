@@ -3695,6 +3695,116 @@ with tab_market:
 
     st.divider()
 
+    # ─── 红利低波估值温度计 ───────────────────────────────────
+    st.subheader("🌡️ 红利低波估值温度计")
+    st.caption("数据源：理杏仁 Open API · 中证红利低波动指数（H30269）· 5年历史分位")
+
+    _div_data_dir = os.path.dirname(csv_path)
+
+    _div_refresh = st.button('🔄 刷新', key='div_refresh')
+    if _div_refresh or 'div_monitor' not in st.session_state:
+        with st.spinner('拉取理杏仁数据…'):
+            from dividend_monitor import get_dividend_monitor_data, signal_label as _div_signal
+            _div = get_dividend_monitor_data(_div_data_dir, force_refresh=_div_refresh)
+            st.session_state['div_monitor'] = _div
+    else:
+        from dividend_monitor import signal_label as _div_signal
+        _div = st.session_state['div_monitor']
+
+    if _div['status'] == 'no_token':
+        st.warning(_div['error_msg'])
+    elif _div['status'] == 'error':
+        st.error(_div['error_msg'])
+    else:
+        _idx = _div['index']
+        _rfr = _div.get('risk_free_rate')
+        _spd = _div.get('spread')
+
+        st.caption(f"数据日期：{_idx['date']}  ·  缓存：{_div.get('updated','')[:16]}")
+
+        # ── 512890 / H30269 完整指标 ──
+        st.markdown("**华泰柏瑞中证红利低波动ETF（512890）· H30269**")
+        _dc1, _dc2, _dc3 = st.columns(3)
+
+        _dyr_label, _dyr_color = _div_signal(_idx['dyr_pct5'], invert=True)
+        with _dc1:
+            st.metric('当前股息率', f"{_idx['dyr']*100:.2f}%")
+            st.markdown(
+                f"5年分位：**{_idx['dyr_pct5']*100:.1f}%**　"
+                f"<span style='color:{_dyr_color}'>{_dyr_label}</span>",
+                unsafe_allow_html=True,
+            )
+            st.caption("分位越低 = 股息率越低 = 通常越贵")
+
+        _pb_label, _pb_color = _div_signal(_idx['pb_pct5'], invert=False)
+        with _dc2:
+            st.metric('当前 PB', f"{_idx['pb']:.3f}")
+            st.markdown(
+                f"5年分位：**{_idx['pb_pct5']*100:.1f}%**　"
+                f"<span style='color:{_pb_color}'>{_pb_label}</span>",
+                unsafe_allow_html=True,
+            )
+            st.caption("分位越高 = PB 越高 = 通常越贵")
+
+        with _dc3:
+            if _spd is not None and _rfr is not None:
+                st.metric('股息率 − 国债利差', f"{_spd*100:.2f}%",
+                          help=f"股息率 {_idx['dyr']*100:.2f}% − 10Y国债 {_rfr*100:.2f}%")
+                st.caption("利差越大，相对债券越有吸引力")
+            else:
+                st.metric('股息率 − 国债利差', 'N/A')
+                st.caption('国债利率数据暂无')
+
+        with st.expander("📊 全历史参考数据", expanded=False):
+            _hc1, _hc2 = st.columns(2)
+            with _hc1:
+                st.markdown("**股息率（dyr）**")
+                st.markdown(f"- 历史均值：{_idx['dyr_mean_all']*100:.2f}%")
+                st.markdown(f"- 历史最低：{_idx['dyr_min_all']*100:.2f}%")
+                st.markdown(f"- 历史最高：{_idx['dyr_max_all']*100:.2f}%")
+                st.markdown(f"- 全历史分位：{_idx['dyr_pct_all']*100:.1f}%")
+            with _hc2:
+                st.markdown("**PB**")
+                st.markdown(f"- 历史均值：{_idx['pb_mean_all']:.3f}")
+                st.markdown(f"- 历史最低：{_idx['pb_min_all']:.3f}")
+                st.markdown(f"- 历史最高：{_idx['pb_max_all']:.3f}")
+                st.markdown(f"- 全历史分位：{_idx['pb_pct_all']*100:.1f}%")
+            st.caption(
+                f"历史数据范围：{_idx['history_start']} ~ {_idx['date']}，共 {_idx['history_n']} 个交易日。"
+                f"5年窗口：{_idx['window5_start']} 起，{_idx['window5_n']} 个交易日。"
+            )
+
+        # ── 515450 净值走势 ──
+        st.markdown("---")
+        st.markdown("**南方标普红利低波50ETF（515450）**")
+        st.info(
+            "指数估值数据暂不可用。515450 跟踪「标普中国A股大盘红利低波50指数」，"
+            "该指数历史股息率序列目前无可靠的免费数据来源（理杏仁不收录标普系指数）。"
+            "当前仅展示 ETF 价格走势，不生成估值高低位信号。"
+        )
+        try:
+            import yfinance as _yf_nav
+            _nav_ticker = _yf_nav.Ticker('515450.SS')
+            _nav_hist = _nav_ticker.history(start='2020-01-01', interval='1wk')
+            _nav_hist = _nav_hist.dropna(subset=['Close'])
+            if not _nav_hist.empty:
+                _fig_nav = go.Figure()
+                _fig_nav.add_trace(go.Scatter(
+                    x=_nav_hist.index, y=_nav_hist['Close'],
+                    mode='lines', name='515450 周收盘价',
+                    line=dict(color='#42A5F5', width=1.5),
+                ))
+                _fig_nav.update_layout(
+                    height=220, margin=dict(t=10, b=30),
+                    yaxis_title='收盘价（元）',
+                    hovermode='x unified',
+                )
+                st.plotly_chart(_fig_nav, use_container_width=True)
+        except Exception as _nav_e:
+            st.caption(f"净值走势暂时无法加载：{_nav_e}")
+
+    st.divider()
+
     # ─── Section 4: A股定投倍数建议（CSI300 + 中证A500） ───
 
     st.subheader("A股定投倍数建议")
@@ -4368,127 +4478,6 @@ with tab_market:
                 if st.button('取消', key='dca_add_cancel'):
                     st.session_state['dca_adding'] = False
                     st.rerun()
-
-    # ─── 红利低波估值温度计 ───────────────────────────────────
-    st.divider()
-    st.subheader("🌡️ 红利低波估值温度计")
-    st.caption("数据源：理杏仁 Open API · 中证红利低波动指数（H30269）· 5年历史分位")
-
-    _div_data_dir = os.path.dirname(csv_path)
-
-    _div_refresh = st.button('🔄 刷新', key='div_refresh')
-    if _div_refresh or 'div_monitor' not in st.session_state:
-        with st.spinner('拉取理杏仁数据…'):
-            from dividend_monitor import get_dividend_monitor_data, signal_label as _div_signal
-            _div = get_dividend_monitor_data(_div_data_dir, force_refresh=_div_refresh)
-            st.session_state['div_monitor'] = _div
-    else:
-        from dividend_monitor import signal_label as _div_signal
-        _div = st.session_state['div_monitor']
-
-    if _div['status'] == 'no_token':
-        st.warning(_div['error_msg'])
-    elif _div['status'] == 'error':
-        st.error(_div['error_msg'])
-    else:
-        _idx = _div['index']
-        _rfr = _div.get('risk_free_rate')
-        _spd = _div.get('spread')
-
-        st.caption(f"数据日期：{_idx['date']}  ·  缓存：{_div.get('updated','')[:16]}")
-
-        # ── 512890 / H30269 完整指标 ──
-        st.markdown("**华泰柏瑞中证红利低波动ETF（512890）· H30269**")
-
-        _dc1, _dc2, _dc3 = st.columns(3)
-
-        # 股息率
-        _dyr_label, _dyr_color = _div_signal(_idx['dyr_pct5'], invert=True)
-        with _dc1:
-            st.metric('当前股息率', f"{_idx['dyr']*100:.2f}%")
-            st.markdown(
-                f"5年分位：**{_idx['dyr_pct5']*100:.1f}%**　"
-                f"<span style='color:{_dyr_color}'>{_dyr_label}</span>",
-                unsafe_allow_html=True,
-            )
-            st.caption("分位越低 = 股息率越低 = 通常越贵")
-
-        # PB
-        _pb_label, _pb_color = _div_signal(_idx['pb_pct5'], invert=False)
-        with _dc2:
-            st.metric('当前 PB', f"{_idx['pb']:.3f}")
-            st.markdown(
-                f"5年分位：**{_idx['pb_pct5']*100:.1f}%**　"
-                f"<span style='color:{_pb_color}'>{_pb_label}</span>",
-                unsafe_allow_html=True,
-            )
-            st.caption("分位越高 = PB 越高 = 通常越贵")
-
-        # 股债利差
-        with _dc3:
-            if _spd is not None and _rfr is not None:
-                st.metric('股息率 − 国债利差', f"{_spd*100:.2f}%",
-                          help=f"股息率 {_idx['dyr']*100:.2f}% − 10Y国债 {_rfr*100:.2f}%")
-                st.caption("利差越大，相对债券越有吸引力")
-            else:
-                st.metric('股息率 − 国债利差', 'N/A')
-                st.caption('国债利率数据暂无')
-
-        # 展开：全历史参考
-        with st.expander("📊 全历史参考数据", expanded=False):
-            _hc1, _hc2 = st.columns(2)
-            with _hc1:
-                st.markdown("**股息率（dyr）**")
-                st.markdown(f"- 历史均值：{_idx['dyr_mean_all']*100:.2f}%")
-                st.markdown(f"- 历史最低：{_idx['dyr_min_all']*100:.2f}%")
-                st.markdown(f"- 历史最高：{_idx['dyr_max_all']*100:.2f}%")
-                st.markdown(f"- 全历史分位：{_idx['dyr_pct_all']*100:.1f}%")
-            with _hc2:
-                st.markdown("**PB**")
-                st.markdown(f"- 历史均值：{_idx['pb_mean_all']:.3f}")
-                st.markdown(f"- 历史最低：{_idx['pb_min_all']:.3f}")
-                st.markdown(f"- 历史最高：{_idx['pb_max_all']:.3f}")
-                st.markdown(f"- 全历史分位：{_idx['pb_pct_all']*100:.1f}%")
-            st.caption(
-                f"历史数据范围：{_idx['history_start']} ~ {_idx['date']}，共 {_idx['history_n']} 个交易日。"
-                f"5年窗口：{_idx['window5_start']} 起，{_idx['window5_n']} 个交易日。"
-            )
-
-        # ── 515450 暂无数据提示 ──
-        st.markdown("---")
-        st.markdown("**南方标普红利低波50ETF（515450）**")
-        st.info(
-            "指数估值数据暂不可用。\n\n"
-            "515450 跟踪「标普中国A股大盘红利低波50指数」，该指数历史股息率序列目前无可靠的免费数据来源（理杏仁不收录标普系指数）。"
-            "当前仅展示基金净值走势，不生成估值高低位信号。"
-        )
-        # 515450 净值走势（akshare 历史数据）
-        try:
-            import akshare as ak
-            _nav_df = ak.fund_etf_hist_em(
-                symbol='515450', period='weekly',
-                start_date='20200101',
-                end_date=datetime.date.today().strftime('%Y%m%d'),
-                adjust='',
-            )
-            if not _nav_df.empty:
-                _nav_df = _nav_df.rename(columns={'日期': 'date', '收盘': 'close'})
-                _nav_df['date'] = pd.to_datetime(_nav_df['date'])
-                import plotly.graph_objects as go
-                _fig_nav = go.Figure()
-                _fig_nav.add_trace(go.Scatter(
-                    x=_nav_df['date'], y=_nav_df['close'],
-                    mode='lines', name='515450 收盘价',
-                    line=dict(color='#42A5F5', width=1.5),
-                ))
-                _fig_nav.update_layout(
-                    height=220, margin=dict(t=20, b=30),
-                    yaxis_title='收盘价（元）',
-                    hovermode='x unified',
-                )
-                st.plotly_chart(_fig_nav, use_container_width=True)
-        except Exception:
-            st.caption("净值走势暂时无法加载")
 
 
 # ═══════════════════════════════════════════════════════════
