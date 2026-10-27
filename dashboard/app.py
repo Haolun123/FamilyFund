@@ -3697,13 +3697,13 @@ with tab_market:
 
     # ─── 红利低波估值温度计 ───────────────────────────────────
     st.subheader("🌡️ 红利低波估值温度计")
-    st.caption("数据源：理杏仁 Open API · 中证红利低波动指数（H30269）· 5年历史分位")
+    st.caption("数据源：理杏仁 Open API · 中证红利低波动指数（H30269）· 5年历史分位 · akshare中国10Y国债")
 
     _div_data_dir = os.path.dirname(csv_path)
 
     _div_refresh = st.button('🔄 刷新', key='div_refresh')
     if _div_refresh or 'div_monitor' not in st.session_state:
-        with st.spinner('拉取理杏仁数据…'):
+        with st.spinner('拉取理杏仁 & 国债数据…'):
             from dividend_monitor import get_dividend_monitor_data, signal_label as _div_signal
             _div = get_dividend_monitor_data(_div_data_dir, force_refresh=_div_refresh)
             st.session_state['div_monitor'] = _div
@@ -3717,13 +3717,12 @@ with tab_market:
         st.error(_div['error_msg'])
     else:
         _idx = _div['index']
-        _rfr = _div.get('risk_free_rate')
-        _spd = _div.get('spread')
-
         st.caption(f"数据日期：{_idx['date']}  ·  缓存：{_div.get('updated','')[:16]}")
 
-        # ── 512890 / H30269 完整指标 ──
+        # ── 512890 / H30269 ──────────────────────────────────
         st.markdown("**华泰柏瑞中证红利低波动ETF（512890）· H30269**")
+
+        # 行一：三大估值指标
         _dc1, _dc2, _dc3 = st.columns(3)
 
         _dyr_label, _dyr_color = _div_signal(_idx['dyr_pct5'], invert=True)
@@ -3747,16 +3746,41 @@ with tab_market:
             st.caption("分位越高 = PB 越高 = 通常越贵")
 
         with _dc3:
+            _spd    = _idx.get('spread')
+            _rfr    = _idx.get('risk_free_rate')
+            _spd5   = _idx.get('spread_pct5')
             if _spd is not None and _rfr is not None:
-                st.metric('股息率 − 国债利差', f"{_spd*100:.2f}%",
+                _spd_label, _spd_color = _div_signal(_spd5, invert=True) if _spd5 is not None else ('N/A', '#999')
+                st.metric('股息率 − 国债利差',
+                          f"{_spd*100:.2f}%",
                           help=f"股息率 {_idx['dyr']*100:.2f}% − 10Y国债 {_rfr*100:.2f}%")
-                st.caption("利差越大，相对债券越有吸引力")
+                if _spd5 is not None:
+                    st.markdown(
+                        f"5年分位：**{_spd5*100:.1f}%**　"
+                        f"<span style='color:{_spd_color}'>{_spd_label}</span>",
+                        unsafe_allow_html=True,
+                    )
+                st.caption("利差分位越低 = 补偿越少 = 相对债券越不吸引")
             else:
                 st.metric('股息率 − 国债利差', 'N/A')
-                st.caption('国债利率数据暂无')
+                st.caption('国债历史数据暂无')
 
+        # 行二：风险背景
+        _rv1, _rv2 = st.columns(2)
+        with _rv1:
+            _vol = _idx.get('vol3y')
+            st.metric('3年年化波动率',
+                      f"{_vol*100:.1f}%" if _vol is not None else 'N/A',
+                      help='近3年日收益率标准差×√252，反映价格日常起伏')
+        with _rv2:
+            _dd = _idx.get('max_dd')
+            st.metric('历史最大回撤',
+                      f"{_dd*100:.1f}%" if _dd is not None else 'N/A',
+                      help='2016年以来峰谷最大跌幅，了解过去极端损失')
+
+        # 展开：全历史参考
         with st.expander("📊 全历史参考数据", expanded=False):
-            _hc1, _hc2 = st.columns(2)
+            _hc1, _hc2, _hc3 = st.columns(3)
             with _hc1:
                 st.markdown("**股息率（dyr）**")
                 st.markdown(f"- 历史均值：{_idx['dyr_mean_all']*100:.2f}%")
@@ -3769,6 +3793,16 @@ with tab_market:
                 st.markdown(f"- 历史最低：{_idx['pb_min_all']:.3f}")
                 st.markdown(f"- 历史最高：{_idx['pb_max_all']:.3f}")
                 st.markdown(f"- 全历史分位：{_idx['pb_pct_all']*100:.1f}%")
+            with _hc3:
+                _sm = _idx.get('spread_mean_all')
+                _sn = _idx.get('spread_min_all')
+                _sx = _idx.get('spread_max_all')
+                _sa = _idx.get('spread_pct_all')
+                st.markdown("**股债利差**")
+                st.markdown(f"- 历史均值：{_sm*100:.2f}%" if _sm is not None else "- 历史均值：N/A")
+                st.markdown(f"- 历史最低：{_sn*100:.2f}%" if _sn is not None else "- 历史最低：N/A")
+                st.markdown(f"- 历史最高：{_sx*100:.2f}%" if _sx is not None else "- 历史最高：N/A")
+                st.markdown(f"- 全历史分位：{_sa*100:.1f}%" if _sa is not None else "- 全历史分位：N/A")
             st.caption(
                 f"历史数据范围：{_idx['history_start']} ~ {_idx['date']}，共 {_idx['history_n']} 个交易日。"
                 f"5年窗口：{_idx['window5_start']} 起，{_idx['window5_n']} 个交易日。"

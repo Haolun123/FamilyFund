@@ -1,7 +1,15 @@
 """dividend_monitor.py — 红利低波估值温度计。
 
-数据源：理杏仁 Open API（H30269 中证红利低波动指数）
-指标：股息率（dyr.mcw）、PB（pb.mcw），5年历史分位 + 股债利差
+数据源：
+  - 理杏仁 Open API：H30269 历史 dyr / pb / cp（收盘价）
+  - akshare bond_zh_us_rate：中国10Y国债历史收益率
+
+指标：
+  - 股息率5年历史分位（主展示）
+  - 股息率-国债利差5年历史分位（相对价值）
+  - PB5年历史分位（交叉验证）
+  - 3年年化波动率（风险背景）
+  - 历史最大回撤（风险背景）
 
 使用方式：
     from dividend_monitor import get_dividend_monitor_data
@@ -11,17 +19,21 @@
 import json
 import os
 import datetime
+import math
 import requests
 
 
 # ── 常量 ──────────────────────────────────────────────────────
-LIXINGER_API = 'https://open.lixinger.com/api/cn/index/fundamental'
+LIXINGER_API   = 'https://open.lixinger.com/api/cn/index/fundamental'
 CACHE_FILENAME = 'dividend_monitor_cache.json'
-CACHE_TTL_HOURS = 12   # 缓存有效期，盘中不频繁刷新
+BOND_CACHE_FILENAME = 'bond_yield_cache.json'
+CACHE_TTL_HOURS      = 12
+BOND_CACHE_TTL_HOURS = 24   # 国债数据每日更新一次即可
 
-INDEX_H30269 = 'H30269'
-HISTORY_START = '2016-01-01'
+INDEX_H30269    = 'H30269'
+HISTORY_START   = '2016-01-01'
 PERCENTILE_YEARS = 5
+VOL_YEARS        = 3    # 年化波动率计算窗口
 
 
 # ── 配置加载 ──────────────────────────────────────────────────
@@ -38,6 +50,10 @@ def _load_lixinger_token(data_dir: str) -> str | None:
 
 def _cache_path(data_dir: str) -> str:
     return os.path.join(data_dir, 'cache', CACHE_FILENAME)
+
+
+def _bond_cache_path(data_dir: str) -> str:
+    return os.path.join(data_dir, 'cache', BOND_CACHE_FILENAME)
 
 
 def _load_cache(data_dir: str) -> dict | None:
@@ -66,16 +82,61 @@ def _save_cache(data_dir: str, data: dict):
         json.dump(data, f, ensure_ascii=False, indent=2, default=str)
 
 
+# ── 国债历史收益率 ─────────────────────────────────────────────
+def _fetch_bond_yield_history(data_dir: str) -> dict[str, float]:
+    """
+    返回 {日期str: 10Y国债收益率(小数)} 字典，有本地缓存则优先读缓存。
+    使用 akshare bond_zh_us_rate。
+    """
+    cache_path = _bond_cache_path(data_dir)
+    # 读缓存
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, encoding='utf-8') as f:
+                c = json.load(f)
+            updated = c.get('updated', '')
+            age = (datetime.datetime.now() - datetime.datetime.fromisoformat(updated)).total_seconds()
+            if age < BOND_CACHE_TTL_HOURS * 3600:
+                return c.get('data', {})
+        except Exception:
+            pass
+
+    # 重新拉取
+    import akshare as ak
+    df = ak.bond_zh_us_rate(start_date=HISTORY_START.replace('-', ''))
+    if df.empty:
+        return {}
+    col = '中国国债收益率10年'
+    if col not in df.columns:
+        return {}
+    result = {}
+    for _, row in df.iterrows():
+        date_str = str(row['日期'])[:10]
+        val = row[col]
+        if val is not None and str(val) not in ('nan', 'None', ''):
+            try:
+                result[date_str] = float(val) / 100  # 转为小数
+            except (ValueError, TypeError):
+                pass
+
+    # 保存缓存
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    with open(cache_path, 'w', encoding='utf-8') as f:
+        json.dump({'updated': datetime.datetime.now().isoformat(), 'data': result},
+                  f, ensure_ascii=False, indent=2)
+    return result
+
+
 # ── 理杏仁数据拉取 ────────────────────────────────────────────
 def _fetch_lixinger(token: str) -> list[dict]:
-    """拉取 H30269 全部历史 dyr + pb，返回按日期升序的 list。"""
+    """拉取 H30269 全部历史 dyr + pb + cp，返回按日期升序的 list。"""
     today = datetime.date.today().isoformat()
     payload = {
         'token': token,
         'stockCodes': [INDEX_H30269],
         'startDate': HISTORY_START,
         'endDate': today,
-        'metricsList': ['dyr.mcw', 'pb.mcw'],
+        'metricsList': ['dyr.mcw', 'pb.mcw', 'cp'],
     }
     headers = {
         'Content-Type': 'application/json',
@@ -87,95 +148,166 @@ def _fetch_lixinger(token: str) -> list[dict]:
     if resp.get('code') != 1:
         raise ValueError(f"理杏仁 API 返回错误：{resp.get('message', resp.get('error'))}")
     rows = resp.get('data', [])
-    # 解析日期，升序排列，过滤缺失值
     parsed = []
     for row in rows:
         dyr = row.get('dyr.mcw')
         pb  = row.get('pb.mcw')
+        cp  = row.get('cp')
         if dyr is None or pb is None:
             continue
         parsed.append({
             'date': row['date'][:10],
             'dyr':  float(dyr),
             'pb':   float(pb),
+            'cp':   float(cp) if cp is not None else None,
         })
     parsed.sort(key=lambda x: x['date'])
     return parsed
 
 
+# ── 风险指标计算 ──────────────────────────────────────────────
+def _calc_volatility(prices: list[float], years: int = VOL_YEARS) -> float | None:
+    """年化波动率（日收益率标准差 × √252），取最近 years 年。"""
+    if len(prices) < 2:
+        return None
+    n = min(len(prices), years * 252)
+    recent = prices[-n:]
+    returns = [(recent[i] - recent[i-1]) / recent[i-1]
+               for i in range(1, len(recent))
+               if recent[i-1] > 0]
+    if len(returns) < 10:
+        return None
+    mean = sum(returns) / len(returns)
+    variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+    return math.sqrt(variance) * math.sqrt(252)
+
+
+def _calc_max_drawdown(prices: list[float]) -> float | None:
+    """历史最大回撤（负数表示下跌幅度）。"""
+    if len(prices) < 2:
+        return None
+    peak = prices[0]
+    max_dd = 0.0
+    for p in prices[1:]:
+        if p > peak:
+            peak = p
+        dd = (p - peak) / peak
+        if dd < max_dd:
+            max_dd = dd
+    return max_dd
+
+
 # ── 分位数计算 ────────────────────────────────────────────────
 def _percentile_rank(series: list[float], value: float) -> float:
-    """经验分位数（严格小于）：value 在 series 中排在第几百分位。"""
+    """经验分位数（严格小于）。"""
     if not series:
         return float('nan')
     return sum(1 for v in series if v < value) / len(series)
 
 
-def _compute_metrics(rows: list[dict]) -> dict:
-    """基于全量历史数据，计算当前值 + 5年分位 + 全量统计。"""
+def _window(rows_or_dict: list | dict, cutoff: str) -> list:
+    """从 list[dict] 或 {date: val} 中过滤出 date >= cutoff 的数据。"""
+    if isinstance(rows_or_dict, dict):
+        return [v for k, v in rows_or_dict.items() if k >= cutoff]
+    return [r for r in rows_or_dict if r['date'] >= cutoff]
+
+
+# ── 主计算 ────────────────────────────────────────────────────
+def _compute_metrics(rows: list[dict], bond_history: dict[str, float]) -> dict:
+    """计算全部指标。"""
     if not rows:
         return {}
 
-    latest = rows[-1]
-    today  = datetime.date.fromisoformat(latest['date'])
-    cutoff = (today - datetime.timedelta(days=PERCENTILE_YEARS * 365)).isoformat()
+    latest      = rows[-1]
+    latest_date = latest['date']
+    today       = datetime.date.fromisoformat(latest_date)
+    cutoff5     = (today - datetime.timedelta(days=PERCENTILE_YEARS * 365)).isoformat()
 
-    window = [r for r in rows if r['date'] >= cutoff]
-    dyr_window = [r['dyr'] for r in window]
-    pb_window  = [r['pb']  for r in window]
+    # ── 基础序列 ──
+    window5    = [r for r in rows if r['date'] >= cutoff5]
     dyr_all    = [r['dyr'] for r in rows]
     pb_all     = [r['pb']  for r in rows]
+    dyr_win5   = [r['dyr'] for r in window5]
+    pb_win5    = [r['pb']  for r in window5]
 
-    dyr_pct5 = _percentile_rank(dyr_window, latest['dyr'])
-    pb_pct5  = _percentile_rank(pb_window,  latest['pb'])
-    dyr_pct_all = _percentile_rank(dyr_all, latest['dyr'])
-    pb_pct_all  = _percentile_rank(pb_all,  latest['pb'])
+    # ── 利差序列（逐日对齐国债） ──
+    spread_all  = {}
+    spread_win5 = {}
+    for r in rows:
+        bond = bond_history.get(r['date'])
+        if bond is not None:
+            s = r['dyr'] - bond
+            spread_all[r['date']] = s
+            if r['date'] >= cutoff5:
+                spread_win5[r['date']] = s
+
+    current_bond   = bond_history.get(latest_date)
+    current_spread = (latest['dyr'] - current_bond) if current_bond is not None else None
+
+    # 利差分位（5年）
+    spread_win5_vals = list(spread_win5.values())
+    spread_all_vals  = list(spread_all.values())
+    spread_pct5  = _percentile_rank(spread_win5_vals, current_spread) if current_spread is not None and spread_win5_vals else None
+    spread_pct_all = _percentile_rank(spread_all_vals, current_spread) if current_spread is not None and spread_all_vals else None
+
+    # ── 波动率 & 最大回撤 ──
+    prices = [r['cp'] for r in rows if r.get('cp') is not None]
+    vol3y    = _calc_volatility(prices, years=VOL_YEARS)
+    max_dd   = _calc_max_drawdown(prices)
 
     return {
-        'date':         latest['date'],
-        'dyr':          latest['dyr'],
-        'pb':           latest['pb'],
+        'date':    latest_date,
+        'dyr':     latest['dyr'],
+        'pb':      latest['pb'],
         # 5年分位（主展示）
-        'dyr_pct5':     dyr_pct5,
-        'pb_pct5':      pb_pct5,
-        'window5_start': window[0]['date'] if window else None,
-        'window5_n':    len(window),
-        # 全历史分位（展开详情用）
-        'dyr_pct_all':  dyr_pct_all,
-        'pb_pct_all':   pb_pct_all,
-        'history_start': rows[0]['date'],
-        'history_n':    len(rows),
-        # 全历史统计（10年均值参考）
+        'dyr_pct5':    _percentile_rank(dyr_win5, latest['dyr']),
+        'pb_pct5':     _percentile_rank(pb_win5,  latest['pb']),
+        'spread':      current_spread,
+        'spread_pct5': spread_pct5,
+        'window5_start': window5[0]['date'] if window5 else None,
+        'window5_n':   len(window5),
+        # 全历史分位
+        'dyr_pct_all':    _percentile_rank(dyr_all, latest['dyr']),
+        'pb_pct_all':     _percentile_rank(pb_all,  latest['pb']),
+        'spread_pct_all': spread_pct_all,
+        'history_start':  rows[0]['date'],
+        'history_n':      len(rows),
+        # 全历史统计
         'dyr_mean_all': sum(dyr_all) / len(dyr_all),
         'dyr_min_all':  min(dyr_all),
         'dyr_max_all':  max(dyr_all),
         'pb_mean_all':  sum(pb_all) / len(pb_all),
         'pb_min_all':   min(pb_all),
         'pb_max_all':   max(pb_all),
+        'spread_mean_all': sum(spread_all_vals) / len(spread_all_vals) if spread_all_vals else None,
+        'spread_min_all':  min(spread_all_vals) if spread_all_vals else None,
+        'spread_max_all':  max(spread_all_vals) if spread_all_vals else None,
+        # 风险指标
+        'vol3y':    vol3y,
+        'max_dd':   max_dd,
+        # 国债参考
+        'risk_free_rate': current_bond,
     }
 
 
 # ── 对外接口 ──────────────────────────────────────────────────
 def get_dividend_monitor_data(data_dir: str, force_refresh: bool = False) -> dict:
     """
-    获取红利低波估值温度计数据。有缓存则直接返回，否则调用理杏仁 API。
+    获取红利低波估值温度计数据。有缓存则直接返回，否则调用 API。
 
     返回结构：
     {
         'status': 'ok' | 'no_token' | 'error',
-        'error_msg': str,          # status != ok 时
-        'index': {                 # H30269 指标
-            'date', 'dyr', 'pb',
-            'dyr_pct5', 'pb_pct5',   # 5年分位（主展示）
-            'dyr_pct_all', 'pb_pct_all',
-            'dyr_mean_all', 'dyr_min_all', 'dyr_max_all',
-            'pb_mean_all',  'pb_min_all',  'pb_max_all',
-            'window5_start', 'window5_n',
-            'history_start', 'history_n',
+        'error_msg': str,
+        'index': {
+            date, dyr, pb,
+            dyr_pct5, pb_pct5, spread, spread_pct5,
+            dyr_pct_all, pb_pct_all, spread_pct_all,
+            dyr_mean/min/max_all, pb_mean/min/max_all, spread_mean/min/max_all,
+            vol3y, max_dd, risk_free_rate,
+            window5_start, window5_n, history_start, history_n,
         },
-        'spread': float | None,    # dyr - 10Y国债
-        'risk_free_rate': float | None,
-        'updated': str,            # 缓存时间
+        'updated': str,
     }
     """
     if not force_refresh:
@@ -185,34 +317,27 @@ def get_dividend_monitor_data(data_dir: str, force_refresh: bool = False) -> dic
 
     token = _load_lixinger_token(data_dir)
     if not token:
-        return {'status': 'no_token', 'error_msg': '未配置理杏仁 token，请在 data/config/lixinger_config.json 填入 token'}
+        return {'status': 'no_token',
+                'error_msg': '未配置理杏仁 token，请在 data/config/lixinger_config.json 填入 token'}
 
     try:
         rows = _fetch_lixinger(token)
     except Exception as e:
-        result = {'status': 'error', 'error_msg': f'理杏仁 API 请求失败：{e}'}
-        return result
+        return {'status': 'error', 'error_msg': f'理杏仁 API 请求失败：{e}'}
 
-    metrics = _compute_metrics(rows)
+    try:
+        bond_history = _fetch_bond_yield_history(data_dir)
+    except Exception:
+        bond_history = {}
+
+    metrics = _compute_metrics(rows, bond_history)
     if not metrics:
         return {'status': 'error', 'error_msg': '理杏仁返回空数据'}
 
-    # 读国债收益率
-    risk_free = None
-    spread    = None
-    try:
-        from nav_engine import _load_risk_free_rate
-        risk_free = _load_risk_free_rate(data_dir)
-        spread    = metrics['dyr'] - risk_free
-    except Exception:
-        pass
-
     result = {
-        'status':          'ok',
-        'error_msg':       '',
-        'index':           metrics,
-        'spread':          spread,
-        'risk_free_rate':  risk_free,
+        'status':    'ok',
+        'error_msg': '',
+        'index':     metrics,
     }
     _save_cache(data_dir, result)
     return result
@@ -221,17 +346,16 @@ def get_dividend_monitor_data(data_dir: str, force_refresh: bool = False) -> dic
 def signal_label(pct: float, invert: bool = False) -> tuple[str, str]:
     """
     根据分位返回 (标签, 颜色)。
-    invert=True 用于 dyr（分位低=贵，与PB相反）。
+    invert=True：低分位=贵（用于dyr；spread分位高=便宜，不需要invert）
+    invert=False：低分位=便宜（用于pb）
+    spread 分位：高=便宜（spread高=股票相对债券越有吸引力），与dyr方向一致，也用invert=True
     """
-    # dyr: 低分位=低股息率=贵；高分位=高股息率=便宜
-    # pb:  低分位=低PB=便宜；高分位=高PB=贵
-    # invert=True 时翻转信号（用于dyr）
     if invert:
-        cheap = pct >= 0.8    # dyr高分位=便宜
-        dear  = pct <= 0.2    # dyr低分位=贵
+        cheap = pct >= 0.8
+        dear  = pct <= 0.2
     else:
-        cheap = pct <= 0.2    # pb低分位=便宜
-        dear  = pct >= 0.8    # pb高分位=贵
+        cheap = pct <= 0.2
+        dear  = pct >= 0.8
 
     if cheap:
         return '低位 · 相对便宜', '#2e7d32'
