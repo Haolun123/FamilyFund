@@ -161,8 +161,8 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_son, tab_sap, tab_market, tab_research, tab_backtest, tab_quarterly, tab_planning, tab_tenth = st.tabs(
-    ["Portfolio", "Ledger", "Son Fund", "SAP", "Market", "Research", "Backtest", "Quarterly", "Planning", "10th Man"]
+tab_dashboard, tab_update, tab_son, tab_sap, tab_market, tab_planning, tab_research, tab_backtest, tab_quarterly, tab_tenth = st.tabs(
+    ["Portfolio", "Ledger", "Son Fund", "SAP", "Market", "Planning", "Research", "Backtest", "Quarterly", "10th Man"]
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -1510,6 +1510,135 @@ with tab_update:
                 st.success(f"已解析 {len(parsed_df)} 行")
                 st.rerun()
 
+    def _parse_dca_text(text, template_df):
+        """
+        解析定投文本格式，返回 (entries, errors)。
+        格式：
+            code: 022523
+            100,45.14,2.2155
+            100,45.56,2.1947
+
+            code: 007194
+            10000,7944.05,1.2583
+        每行三列：金额(CNY), 份额, 净值。
+        只支持已建仓标的（code 必须存在于 template_df）。
+        """
+        import re as _re
+        entries = []
+        errors = []
+
+        # 构建 code → name 映射（排除 Cash）
+        code_to_name = {
+            str(row['Code']): str(row['Name'])
+            for _, row in template_df[template_df['Asset_Class'] != 'Cash'].iterrows()
+            if pd.notna(row['Code']) and pd.notna(row['Name'])
+        }
+
+        # 按空行分块
+        blocks = _re.split(r'\n\s*\n', text.strip())
+        for block in blocks:
+            lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
+            if not lines:
+                continue
+
+            # 第一行必须是 code: xxx
+            code_match = _re.match(r'^code\s*:\s*(\S+)$', lines[0], _re.IGNORECASE)
+            if not code_match:
+                errors.append(f"无法识别代码行：「{lines[0]}」")
+                continue
+
+            code = code_match.group(1)
+            if code not in code_to_name:
+                errors.append(f"代码 {code} 不在当前持仓中，跳过")
+                continue
+
+            name = code_to_name[code]
+
+            # 后续每行解析三列
+            for row_idx, row_line in enumerate(lines[1:], start=1):
+                parts = row_line.split(',')
+                if len(parts) != 3:
+                    errors.append(f"{code} 第{row_idx}行列数不对（需3列）：「{row_line}」")
+                    continue
+                try:
+                    amount = float(parts[0])
+                    shares = float(parts[1])
+                    nav    = float(parts[2])
+                except ValueError:
+                    errors.append(f"{code} 第{row_idx}行数值解析失败：「{row_line}」")
+                    continue
+
+                entries.append({
+                    'type':        '买入',
+                    'asset_name':  name,
+                    'asset_label': f"{name} ({code})",
+                    'asset_code':  code,
+                    'amount':      amount,
+                    'price':       nav,
+                    'fee':         0.0,
+                    'shares':      shares,
+                    'is_new':      False,
+                    'new_asset':   {},
+                })
+
+        return entries, errors
+
+    # ─── 📋 定投记录导入（无短信标的）───────────────────────────
+    st.subheader("📋 步骤一（补充）：导入定投记录（无短信标的）")
+    st.caption("对于没有短信通知的标的（如天弘标普500、长城短债），在此粘贴定投记录，格式：每个标的以 `code: <代码>` 开头，后接每笔买入的「金额,份额,净值」。")
+
+    dca_text = st.text_area(
+        "定投记录",
+        height=120,
+        key="dca_input",
+        placeholder="code: 022523\n100,45.14,2.2155\n100,45.56,2.1947\n\ncode: 007194\n10000,7944.05,1.2583",
+    )
+    if st.button("🔍 解析定投记录", key="dca_parse", type="primary"):
+        if dca_text.strip():
+            _entries, _errs = _parse_dca_text(dca_text, st.session_state['update_template'])
+            st.session_state['dca_parsed'] = {'entries': _entries, 'errors': _errs}
+            st.rerun()
+        else:
+            st.warning("请先粘贴定投记录")
+
+    if 'dca_parsed' in st.session_state:
+        _dp = st.session_state['dca_parsed']
+        _dp_entries = _dp['entries']
+        _dp_errors  = _dp['errors']
+
+        for _err in _dp_errors:
+            st.warning(f"⚠️ {_err}")
+
+        if _dp_entries:
+            st.markdown(f"**解析结果：共 {len(_dp_entries)} 条买入记录**")
+            _preview_rows = [
+                {
+                    '代码':   e['asset_code'],
+                    '名称':   e['asset_name'],
+                    '金额':   f"¥{e['amount']:,.2f}",
+                    '份额':   e['shares'],
+                    '净值':   e['price'],
+                }
+                for e in _dp_entries
+            ]
+            st.dataframe(_preview_rows, use_container_width=True, hide_index=True)
+
+            if st.button("✅ 应用到调仓辅助器", key="dca_apply", type="primary"):
+                for e in _dp_entries:
+                    st.session_state['rebalance_entries'].append(e)
+                _n = len(_dp_entries)
+                del st.session_state['dca_parsed']
+                st.success(f"✅ 已登记 {_n} 条交易到调仓辅助器，请在步骤二确认后点「应用到持仓表」")
+                st.rerun()
+        else:
+            st.info("没有可导入的记录")
+
+        if st.button("清除解析结果", key="dca_clear"):
+            del st.session_state['dca_parsed']
+            st.rerun()
+
+    st.divider()
+
     # ─── 📱 短信解析（第一步）───────────────────────────────
     st.subheader("📱 步骤一：导入定投确认短信")
     st.caption("粘贴本周所有定投确认短信，系统自动更新份额、净值，并登记调仓记录。完成后再手动补充其余持仓价格。")
@@ -1718,119 +1847,6 @@ with tab_update:
                 st.rerun()
         else:
             st.caption("暂无记录。手动匹配或新建仓确认后自动保存。")
-
-    # ─── 合成标普β定投建议（道指预付池 + 纳指类超额镜像抵扣）───
-    with st.expander("🔀 合成标普β定投建议（建信纳指 + 道指预付池）", expanded=False):
-        st.caption(
-            "QDII 额度受限 + 场内溢价 8-12% 的替代方案：用「场外纳指基金 + 场内道指ETF」拼类标普β。"
-            "标普比纳指难买，道指专补标普缺口——只有【纳指买够自己目标后的超额】才算帮标普拼，"
-            "道指 1:1 镜像这个帮补量（纳指没买够→道指不扣）。道指走预付池（一次性买入避开手续费墙）。"
-        )
-        try:
-            from synthetic_sp import (
-                load_prepaid, compute_synthetic_dca, compute_dow_deduct,
-                estimate_coverage, consume_prepaid, topup_prepaid,
-            )
-            _syn_data_dir = os.path.dirname(csv_path)
-            _syn_md = get_market_data()
-            _syn_state = load_prepaid(_syn_data_dir)
-            _syn_cfg = _syn_state['config']
-            _syn = compute_synthetic_dca(_syn_md, _syn_cfg)
-            _syn_balance = _syn_state['dow_prepaid'].get('balance', 0.0)
-
-            # 从短信解析结果分两类累加本周实际投入
-            _code2class = dict(zip(raw_df['Code'].astype(str), raw_df['Asset_Class']))
-            _sp_actual_auto = 0.0   # US_Blend_Fund 纯标普
-            _ndx_actual_auto = 0.0  # US_Growth_Fund 全体纳指
-            for _p in st.session_state.get('sms_parsed', []):
-                if _p.get('parse_error') or not _p.get('matched_code') or not _p.get('amount'):
-                    continue
-                _cls = _code2class.get(str(_p['matched_code']))
-                if _cls == 'US_Blend_Fund':
-                    _sp_actual_auto += float(_p['amount'])
-                elif _cls == 'US_Growth_Fund':
-                    _ndx_actual_auto += float(_p['amount'])
-
-            if _sp_actual_auto == 0 and _ndx_actual_auto == 0:
-                st.info("尚未解析到美股类定投短信。可在步骤一先解析短信，或在下方手动输入本周标普/纳指实际投入。")
-
-            _in1, _in2 = st.columns(2)
-            _sp_actual = _in1.number_input(
-                "本周标普类实际投入（纯标普）",
-                min_value=0.0, value=float(_sp_actual_auto), step=100.0, key="syn_sp_actual",
-                help="US_Blend_Fund：博时/摩根标普等。自动从短信累加，可手改",
-            )
-            _ndx_actual = _in2.number_input(
-                "本周纳指类实际投入（全部纳指）",
-                min_value=0.0, value=float(_ndx_actual_auto), step=100.0, key="syn_ndx_actual",
-                help="US_Growth_Fund：建信/南方/摩根等所有纳指。自动从短信累加，可手改",
-            )
-
-            _dd = compute_dow_deduct(_syn_md, _syn_cfg, sp_actual=_sp_actual, ndx_actual=_ndx_actual)
-            _syn_cover = estimate_coverage(_syn_balance, _dd['dow_deduct'])
-
-            _c1, _c2, _c3, _c4 = st.columns(4)
-            _c1.metric("标普缺口", f"¥{_dd['sp_gap']:,.0f}",
-                       help=f"标普目标 ¥{_dd['sp_target']:,.0f}（{_dd['sp_multiplier']}x）− 实际 ¥{_sp_actual:,.0f}")
-            _c2.metric("纳指超额", f"¥{_dd['ndx_surplus']:,.0f}",
-                       help=f"纳指目标 ¥{_dd['ndx_target']:,.0f}（{_dd['ndx_multiplier']}x）；超出部分才帮标普")
-            _c3.metric("道指应抵扣", f"¥{_dd['dow_deduct']:,.0f}",
-                       help=f"= min(纳指超额, 标普缺口×道指占比 ¥{_dd['ndx_leg_needed']:,.0f})")
-            _c4.metric("道指预付池余额", f"¥{_syn_balance:,.0f}")
-
-            if _dd['dow_deduct'] == 0:
-                if _dd['sp_gap'] == 0:
-                    st.info("标普已买满，无缺口，道指本周不抵扣")
-                else:
-                    st.info("纳指未买够自己目标，尚无超额帮标普，道指本周不抵扣")
-            elif _syn_cover >= 0:
-                if _syn_cover <= 2:
-                    st.error(f"⚠️ 预付池按本周抵扣仅够 {_syn_cover} 周，需尽快补仓道指ETF")
-                else:
-                    st.info(f"预付池按本周抵扣可覆盖约 {_syn_cover} 周")
-
-            if _dd['ndx_extra_surplus'] > 0:
-                st.caption(
-                    f"ℹ️ 纳指超额中有 ¥{_dd['ndx_extra_surplus']:,.0f} 已超过帮标普额度，"
-                    "默认记为纯纳指超配（道指不再多扣）。如需这部分也拼标普，请在下方手动调高抵扣。"
-                )
-
-            st.markdown(
-                f"**建信纳指本周参考**：¥{_syn['jianxin_weekly']:,.0f}"
-                f"（照此去基金APP下单，实际以短信解析登记为准）"
-            )
-
-            _b1, _b2 = st.columns(2)
-            with _b1:
-                _dow_deduct = st.number_input(
-                    "本周道指抵扣（默认按模型算，可手改）",
-                    min_value=0.0, value=float(_dd['dow_deduct']), step=10.0, key="syn_dow_deduct",
-                )
-                if st.button("✅ 确认本周道指抵扣", key="syn_consume",
-                             disabled=(_dow_deduct <= 0)):
-                    from datetime import date as _date
-                    _r = consume_prepaid(
-                        _syn_data_dir, _date.today().strftime('%Y-%m-%d'),
-                        dow_weekly=_dow_deduct, sp_multiplier=_dd['sp_multiplier'],
-                    )
-                    if _r['need_topup']:
-                        st.warning(f"已扣减 ¥{_r['consumed']:,.0f}，余额 ¥{_r['balance_after']:,.0f}。预付池将耗尽，请补仓！")
-                    else:
-                        st.success(f"已扣减 ¥{_r['consumed']:,.0f}，预付池余额 ¥{_r['balance_after']:,.0f}")
-                    st.rerun()
-            with _b2:
-                _topup_amt = st.number_input("道指补仓金额（券商实际买入后登记）",
-                                             min_value=0.0, value=5000.0, step=1000.0, key="syn_topup_amt")
-                if st.button("🔺 登记道指补仓", key="syn_topup"):
-                    from datetime import date as _date
-                    _r = topup_prepaid(_syn_data_dir, _date.today().strftime('%Y-%m-%d'), _topup_amt)
-                    st.success(f"预付池已补至 ¥{_r['balance']:,.0f}")
-                    st.rerun()
-
-            if not _syn_cfg.get('jianxin_code') or not _syn_cfg.get('dow_code'):
-                st.caption("⚙️ 提示：`dca_prepaid.json` 的 jianxin_code / dow_code 尚未配置具体基金代码。")
-        except Exception as _syn_e:
-            st.warning(f"合成标普β模块加载失败：{_syn_e}")
 
     st.divider()
 
@@ -2646,53 +2662,8 @@ with tab_update:
     # ─── Save ───
     st.divider()
 
-    # 检查合成标普β抵扣是否已完成
-    # 触发条件：本周纳指类（US_Growth_Fund）实际买入 > ndx_target_base × 实时ndx_multiplier
-    # 即纳指有超额，才需要抵扣；没有超额则不 block
-    _dca_block = False
-    _dca_block_msg = ''
-    try:
-        import json as _json
-        _dca_path = os.path.join(os.path.dirname(csv_path), 'dca_prepaid.json')
-        with open(_dca_path, encoding='utf-8') as _f:
-            _dca_data = _json.load(_f)
-        _dca_cfg = _dca_data.get('config', {})
-        _ndx_base = float(_dca_cfg.get('ndx_target_base', 2500))
-
-        # 本周纳指类实际买入（从 pending_transactions 里算）
-        _code2class = dict(zip(raw_df['Code'].astype(str), raw_df['Asset_Class']))
-        _ndx_actual_week = sum(
-            float(t.get('Amount_CNY', 0))
-            for t in _pending_tx
-            if t.get('Type') == '买入' and _code2class.get(str(t.get('Code', ''))) == 'US_Growth_Fund'
-        )
-
-        # 实时 ndx_multiplier（从市场温度计查表）
-        from synthetic_sp import _matrix_multiplier
-        _syn_md = st.session_state.get('market_data_cache', {})
-        _ndx_mult = _matrix_multiplier(_syn_md, 'ndx100') if _syn_md else 1.0
-        _ndx_target_week = _ndx_base * _ndx_mult
-
-        _ndx_surplus = _ndx_actual_week - _ndx_target_week
-        if _ndx_surplus > 0:
-            # 纳指有超额，检查本周是否已抵扣
-            _log = _dca_data.get('dow_prepaid', {}).get('consumption_log', [])
-            _week_deducted = any(x['date'] >= last_snapshot_date for x in _log)
-            if not _week_deducted:
-                _dca_block = True
-                _dca_block_msg = (
-                    f'⚠️ 本周纳指类买入 ¥{_ndx_actual_week:,.0f}，'
-                    f'超出目标 ¥{_ndx_target_week:,.0f}（超额 ¥{_ndx_surplus:,.0f}），'
-                    f'请先到**步骤一「合成标普β」**完成抵扣，再保存快照。'
-                )
-    except Exception:
-        pass  # 读取/计算失败不阻断
-
-    if _dca_block:
-        st.warning(_dca_block_msg)
-
-    if errors or _dca_block:
-        st.button("保存到 CSV", disabled=True, help="请先修正错误" if errors else "请先完成合成标普β抵扣")
+    if errors:
+        st.button("保存到 CSV", disabled=True, help="请先修正错误")
     else:
         confirm = st.checkbox("我已确认数据无误")
         if st.button("保存到 CSV", type="primary", disabled=not confirm):
@@ -5465,7 +5436,312 @@ with tab_quarterly:
 
 with tab_planning:
     st.header("Planning")
-    st.caption("人生阶段支出规划 · 财务独立测算 · 储蓄率追踪")
+    st.caption("QDII定投决策 · 人生阶段支出规划 · 财务独立测算 · 储蓄率追踪")
+
+    # ─── Section: QDII额度 + 场内溢价决策 ───
+    st.subheader("🌐 QDII额度 & 场内溢价决策")
+    st.caption("周内决策辅助：场外额度够不够？不够时场内怎么补？溢价请自行在集思录/东方财富核查。")
+
+    _qdii_data_dir = os.path.dirname(csv_path)
+
+    # ── 限额管理（可展开编辑）────────────────────────────────
+    with st.expander("⚙️ 管理场外基金限额", expanded=False):
+        import json as _json_qdii
+
+        _quota_path = os.path.join(_qdii_data_dir, 'config', 'qdii_quota.json')
+
+        def _load_quota():
+            with open(_quota_path, 'r', encoding='utf-8') as _f:
+                return _json_qdii.load(_f)
+
+        def _save_quota(data):
+            import datetime as _dt_qdii
+            data['_last_updated'] = _dt_qdii.date.today().isoformat()
+            with open(_quota_path, 'w', encoding='utf-8') as _f:
+                _json_qdii.dump(data, _f, ensure_ascii=False, indent=2)
+
+        _quota_cfg = _load_quota()
+        _quota_funds = _quota_cfg.get('funds', [])
+
+        st.caption(f"最后更新：{_quota_cfg.get('_last_updated', '未知')}  ·  共 {len(_quota_funds)} 只基金")
+
+        # 列头
+        _hcols = st.columns([3, 2, 2, 2, 2, 1])
+        for _htxt in ['基金名称', '代码', '指数', '日限额(元)/关闭', '平台', '']:
+            _hcols[['基金名称', '代码', '指数', '日限额(元)/关闭', '平台', ''].index(_htxt)].caption(_htxt)
+
+        _INDEX_OPTIONS = ['NDX100', 'SP500']
+        _edited_funds = []
+        _del_idx = None
+
+        for _qi, _qf in enumerate(_quota_funds):
+            _qcols = st.columns([3, 2, 2, 2, 2, 1])
+            with _qcols[0]:
+                _qname = st.text_input('名称', value=_qf.get('name', ''), key=f'qname_{_qi}', label_visibility='collapsed')
+            with _qcols[1]:
+                _qcode = st.text_input('代码', value=_qf.get('code', ''), key=f'qcode_{_qi}', label_visibility='collapsed')
+            with _qcols[2]:
+                _qidx = st.selectbox('指数', _INDEX_OPTIONS,
+                    index=_INDEX_OPTIONS.index(_qf.get('index', 'NDX100')) if _qf.get('index') in _INDEX_OPTIONS else 0,
+                    key=f'qidx_{_qi}', label_visibility='collapsed')
+            with _qcols[3]:
+                _raw_limit = _qf.get('limit_cny_per_day')
+                _limit_str = '关闭' if str(_raw_limit).strip() == '关闭' else ('' if _raw_limit is None else str(int(_raw_limit)))
+                _qlimit = st.text_input('日限额', value=_limit_str, key=f'qlimit_{_qi}', label_visibility='collapsed')
+            with _qcols[4]:
+                _qplatform = st.text_input('平台', value=_qf.get('platform', ''), key=f'qplat_{_qi}', label_visibility='collapsed')
+            with _qcols[5]:
+                if st.button('🗑️', key=f'qdel_{_qi}', help='删除'):
+                    _del_idx = _qi
+
+            _parsed_limit = None
+            if _qlimit.strip() == '关闭':
+                _parsed_limit = '关闭'
+            elif _qlimit.strip():
+                try:
+                    _parsed_limit = float(_qlimit.strip())
+                except ValueError:
+                    _parsed_limit = None
+
+            _edited_funds.append({**_qf, 'name': _qname, 'code': _qcode,
+                                   'index': _qidx, 'limit_cny_per_day': _parsed_limit,
+                                   'platform': _qplatform})
+
+        if _del_idx is not None:
+            _edited_funds.pop(_del_idx)
+
+        st.markdown("---")
+        st.markdown("**新增基金**")
+        _nadd = st.columns([3, 2, 2, 2, 2])
+        with _nadd[0]:
+            _new_name = st.text_input('基金名称', key='qnew_name', placeholder='南方纳指100 I类')
+        with _nadd[1]:
+            _new_code = st.text_input('基金代码', key='qnew_code', placeholder='021000')
+        with _nadd[2]:
+            _new_idx = st.selectbox('指数', _INDEX_OPTIONS, key='qnew_idx')
+        with _nadd[3]:
+            _new_limit = st.text_input('日限额(元)/关闭', key='qnew_limit', placeholder='1000')
+        with _nadd[4]:
+            _new_platform = st.text_input('平台(可选)', key='qnew_platform', placeholder='南方基金APP')
+
+        _save_col, _add_col, _ = st.columns([1, 1, 2])
+        with _add_col:
+            if st.button('➕ 添加', key='qadd_fund'):
+                if _new_name and _new_code:
+                    _pl = None
+                    if _new_limit.strip() == '关闭':
+                        _pl = '关闭'
+                    elif _new_limit.strip():
+                        try:
+                            _pl = float(_new_limit.strip())
+                        except ValueError:
+                            _pl = None
+                    _edited_funds.append({
+                        'name': _new_name, 'code': _new_code,
+                        'index': _new_idx, 'limit_cny_per_day': _pl,
+                        'platform': _new_platform, 'note': '',
+                    })
+                    st.rerun()
+                else:
+                    st.warning('名称和代码不能为空')
+        with _save_col:
+            if st.button('💾 保存', key='qsave_quota', type='primary'):
+                _quota_cfg['funds'] = _edited_funds
+                _save_quota(_quota_cfg)
+                st.success('已保存')
+                st.rerun()
+
+    # ── 决策主界面（Tab 加载时自动计算）────────────────────────
+    from qdii_quota_engine import compute_qdii_quota_report, PREMIUM_THRESHOLD as _PT
+
+    def _calc_qdii():
+        _md = get_market_data()
+        _pe_sp  = ((_md.get('pe_sp500')  or {}).get('manual_override')
+                   or (_md.get('pe_sp500')  or {}).get('value'))
+        _pe_ndx = ((_md.get('pe_ndx100') or {}).get('manual_override')
+                   or (_md.get('pe_ndx100') or {}).get('value'))
+        _vix = (_md.get('vix') or {}).get('price')
+        _vxn = (_md.get('vxn') or {}).get('price')
+        _ms  = lookup_multiplier(_pe_sp,  _vix, 'sp500')
+        _mn  = lookup_multiplier(_pe_ndx, _vxn, 'ndx100')
+        try:
+            _ms = float(str(_ms).replace('x', '').replace('顶格', '2.0').replace('暂停', '0').replace('—', '1.0'))
+        except (TypeError, ValueError):
+            _ms = 1.0
+        try:
+            _mn = float(str(_mn).replace('x', '').replace('顶格', '2.0').replace('暂停', '0').replace('—', '1.0'))
+        except (TypeError, ValueError):
+            _mn = 1.0
+        _rpt = compute_qdii_quota_report(_qdii_data_dir, _mn, _ms)
+        st.session_state['qdii_report'] = _rpt
+        st.session_state['qdii_mult_ndx'] = _mn
+        st.session_state['qdii_mult_sp']  = _ms
+
+    # 首次加载或强制刷新时计算
+    if 'qdii_report' not in st.session_state:
+        with st.spinner('计算中…'):
+            _calc_qdii()
+
+    _col_btn, _ = st.columns([1, 4])
+    if _col_btn.button('🔄 刷新', key='qdii_calc'):
+        with st.spinner('计算中…'):
+            _calc_qdii()
+
+    _rpt      = st.session_state['qdii_report']
+    _mult_ndx = st.session_state.get('qdii_mult_ndx', 1.0)
+    _mult_sp  = st.session_state.get('qdii_mult_sp',  1.0)
+
+    for _err in _rpt.errors:
+        st.warning(_err)
+
+    st.caption(f"本周矩阵倍数：纳指 **{_mult_ndx:.1f}x** · 标普 **{_mult_sp:.1f}x**  ·  限额表更新日期：{_rpt.quota_last_updated}")
+
+    # ── 纳指 / 标普 并排 ──
+    _col_ndx, _col_sp = st.columns(2)
+
+    def _render_index_card(col, result, title):
+        with col:
+            st.markdown(f"**{title}**")
+            _m1, _m2, _m3 = st.columns(3)
+            _m1.metric('本周目标', f'¥{result.weekly_target:,.0f}')
+            _m2.metric('场外上限', f'¥{result.offmarket_capacity:,.0f}')
+            _shortfall_label = f'¥{result.shortfall:,.0f}' if result.shortfall > 0 else '✅ 无缺口'
+            _m3.metric('缺口', _shortfall_label)
+
+            _thresh_pct = _PT[result.index] * 100
+            st.caption(
+                f"场内 **{result.etf_code}**  ·  溢价阈值 **{_thresh_pct:.0f}%**  ·  "
+                f"请自行核查当前溢价（集思录 / 东方财富）"
+            )
+
+            if result.shortfall > 0:
+                if result.suggestion_amount > 0:
+                    st.success(result.suggestion)
+                elif result.below_min_trade:
+                    st.info(result.suggestion)
+                else:
+                    st.warning(result.suggestion)
+            else:
+                st.success(result.suggestion)
+
+    _render_index_card(_col_ndx, _rpt.ndx, '📈 纳指100')
+    _render_index_card(_col_sp, _rpt.sp, '📊 标普500')
+
+    # ── 合成标普 / 道指追加建议 ──
+    if _rpt.synthetic is not None:
+        st.markdown("**🔀 合成标普 & 道指建议**")
+        _syn = _rpt.synthetic
+        _s1, _s2, _s3, _s4 = st.columns(4)
+        _s1.metric('纳指超额量', f'¥{_syn.ndx_surplus:,.0f}')
+        _s2.metric('可合成覆盖', f'¥{_syn.synthetic_coverage:,.0f}')
+        _s3.metric('道指需追加', f'¥{_syn.dow_to_buy:,.0f}',
+                   help='纳指超额 N 元需同时买入道指 N 元，合成 2N 元标普敞口')
+        _s4.metric('道指溢价阈值', f'{_PT["DOW"]*100:.0f}%  — 请自行核查')
+        if _syn.uncovered > 0:
+            st.warning(_syn.suggestion)
+        elif _syn.ndx_surplus > 0:
+            st.info(_syn.suggestion)
+
+    # ── 合成标普计算器 ──────────────────────────────────────────
+    st.markdown("**🧮 合成标普计算器**")
+    st.caption("输入本周实际投入金额，算出纳指超额量和道指应追加量。")
+
+    try:
+        from synthetic_sp import load_prepaid, compute_dow_deduct, estimate_coverage
+
+        _calc_prepaid = load_prepaid(_qdii_data_dir)
+        _calc_cfg     = _calc_prepaid['config']
+        _calc_balance = _calc_prepaid['dow_prepaid'].get('balance', 0.0)
+
+        _ci1, _ci2 = st.columns(2)
+        _calc_sp_actual = _ci1.number_input(
+            '本周标普类实际投入（US_Blend_Fund）',
+            min_value=0.0, value=0.0, step=100.0, key='calc_sp_actual',
+            help='博时/摩根/天弘标普等场外基金合计',
+        )
+        _calc_ndx_actual = _ci2.number_input(
+            '本周纳指类实际投入（US_Growth_Fund）',
+            min_value=0.0, value=0.0, step=100.0, key='calc_ndx_actual',
+            help='南方/建信/大成/摩根等所有纳指基金合计',
+        )
+
+        _dd = compute_dow_deduct(
+            get_market_data(), _calc_cfg,
+            sp_actual=_calc_sp_actual, ndx_actual=_calc_ndx_actual,
+            sp_multiplier=_mult_sp, ndx_multiplier=_mult_ndx,
+        )
+        _calc_cover = estimate_coverage(_calc_balance, _dd['dow_deduct'])
+
+        _cm1, _cm2, _cm3, _cm4, _cm5 = st.columns(5)
+        _cm1.metric('标普目标', f'¥{_dd["sp_target"]:,.0f}',
+                    help=f'{_mult_sp:.1f}x × ¥{_calc_cfg.get("sp_target_base",2500):,.0f}')
+        _cm2.metric('标普缺口', f'¥{_dd["sp_gap"]:,.0f}')
+        _cm3.metric('纳指目标', f'¥{_dd["ndx_target"]:,.0f}',
+                    help=f'{_mult_ndx:.1f}x × ¥{_calc_cfg.get("ndx_target_base",2500):,.0f}')
+        _cm4.metric('纳指超额', f'¥{_dd["ndx_surplus"]:,.0f}',
+                    help='超出纳指目标、可用于合成标普的部分')
+        _cm5.metric('道指应追加', f'¥{_dd["dow_deduct"]:,.0f}',
+                    help='= 纳指超额中帮标普的部分（1:1镜像）')
+
+        if _dd['dow_deduct'] == 0:
+            if _dd['sp_gap'] == 0:
+                st.info('标普已买满，无缺口，道指本周无需追加。')
+            elif _dd['ndx_surplus'] == 0:
+                st.info('纳指未超额，道指本周无需追加。')
+            else:
+                st.info('纳指有超额但未达到帮标普的门槛，道指本周无需追加。')
+        else:
+            if _calc_cover <= 0:
+                st.error(f'道指需追加 ¥{_dd["dow_deduct"]:,.0f}，预付池余额 ¥{_calc_balance:,.0f} 已不足，请尽快补仓。')
+            elif _calc_cover <= 2:
+                st.warning(f'道指需追加 ¥{_dd["dow_deduct"]:,.0f}，预付池余额可覆盖约 {_calc_cover} 周，建议补仓。')
+            else:
+                st.success(f'道指需追加 ¥{_dd["dow_deduct"]:,.0f}，预付池余额 ¥{_calc_balance:,.0f} 可覆盖约 {_calc_cover} 周。')
+
+        if _dd['ndx_extra_surplus'] > 0:
+            st.caption(
+                f'纳指超额中有 ¥{_dd["ndx_extra_surplus"]:,.0f} 超过帮标普额度，'
+                '记为纯纳指超配，道指不额外追加。'
+            )
+
+        # ── 预付池管理 ──
+        st.markdown("**道指预付池管理**")
+        _pb1, _pb2 = st.columns(2)
+        with _pb1:
+            st.metric('当前余额', f'¥{_calc_balance:,.0f}')
+            _topup_amt = st.number_input(
+                '补仓金额（券商买入道指ETF后登记）',
+                min_value=0.0, value=5000.0, step=1000.0, key='plan_topup_amt',
+            )
+            if st.button('🔺 登记道指补仓', key='plan_topup'):
+                from synthetic_sp import topup_prepaid
+                from datetime import date as _dt
+                _r = topup_prepaid(_qdii_data_dir, _dt.today().strftime('%Y-%m-%d'), _topup_amt)
+                st.success(f'预付池已补至 ¥{_r["balance"]:,.0f}')
+                st.rerun()
+        with _pb2:
+            _consume_amt = st.number_input(
+                '本周道指抵扣金额（确认后从余额扣减）',
+                min_value=0.0, value=float(_dd['dow_deduct']), step=10.0, key='plan_consume_amt',
+            )
+            if st.button('✅ 确认本周道指抵扣', key='plan_consume',
+                         disabled=(_consume_amt <= 0)):
+                from synthetic_sp import consume_prepaid
+                from datetime import date as _dt
+                _r = consume_prepaid(
+                    _qdii_data_dir, _dt.today().strftime('%Y-%m-%d'),
+                    dow_weekly=_consume_amt, sp_multiplier=_mult_sp,
+                )
+                if _r['need_topup']:
+                    st.warning(f'已扣减 ¥{_r["consumed"]:,.0f}，余额 ¥{_r["balance_after"]:,.0f}，预付池将耗尽，请补仓！')
+                else:
+                    st.success(f'已扣减 ¥{_r["consumed"]:,.0f}，余额 ¥{_r["balance_after"]:,.0f}')
+                st.rerun()
+
+    except Exception as _calc_e:
+        st.warning(f'合成标普计算器加载失败：{_calc_e}')
+
+    st.divider()
 
     # ─── Section 7: 人生阶段规划 ───
     st.divider()
