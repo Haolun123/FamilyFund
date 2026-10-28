@@ -291,6 +291,21 @@ def _compute_metrics(rows: list[dict], bond_history: dict[str, float]) -> dict:
 
 
 # ── 对外接口 ──────────────────────────────────────────────────
+
+def _inject_risk_free(result: dict, data_dir: str):
+    """从nav_engine实时读取无风险利率，注入result['index']，无论缓存里是否有旧值。"""
+    try:
+        from nav_engine import _load_risk_free_rate
+        rfr = _load_risk_free_rate(data_dir)
+        idx = result.get('index', {})
+        idx['risk_free_rate'] = rfr
+        dyr = idx.get('dyr')
+        if dyr is not None and rfr is not None:
+            idx['spread'] = dyr - rfr
+        else:
+            idx['spread'] = None
+    except Exception:
+        pass
 def get_dividend_monitor_data(data_dir: str, force_refresh: bool = False) -> dict:
     """
     获取红利低波估值温度计数据。有缓存则直接返回，否则调用 API。
@@ -313,6 +328,8 @@ def get_dividend_monitor_data(data_dir: str, force_refresh: bool = False) -> dic
     if not force_refresh:
         cache = _load_cache(data_dir)
         if cache and cache.get('status') == 'ok':
+            # 国债利率实时更新，不依赖缓存里的旧值
+            _inject_risk_free(cache, data_dir)
             return cache
 
     token = _load_lixinger_token(data_dir)
@@ -339,6 +356,7 @@ def get_dividend_monitor_data(data_dir: str, force_refresh: bool = False) -> dic
         'error_msg': '',
         'index':     metrics,
     }
+    _inject_risk_free(result, data_dir)
     _save_cache(data_dir, result)
     return result
 
