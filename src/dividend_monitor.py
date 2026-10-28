@@ -241,7 +241,14 @@ def _compute_metrics(rows: list[dict], bond_history: dict[str, float]) -> dict:
             if r['date'] >= cutoff5:
                 spread_win5[r['date']] = s
 
-    current_bond   = bond_history.get(latest_date)
+    current_bond = bond_history.get(latest_date)
+    # 当天国债数据缺失时（T-1延迟），向前最多找5个交易日
+    if current_bond is None and bond_history:
+        for i in range(1, 6):
+            fallback = (datetime.date.fromisoformat(latest_date) - datetime.timedelta(days=i)).isoformat()
+            current_bond = bond_history.get(fallback)
+            if current_bond is not None:
+                break
     current_spread = (latest['dyr'] - current_bond) if current_bond is not None else None
 
     # 利差分位（5年）
