@@ -4142,6 +4142,42 @@ with tab_market:
     # ═══════════════════════════════════════════════════════════
 
     st.divider()
+    st.subheader("🛢️ Brent 原油")
+    st.caption("辅助观察指标——不直接触发买卖，用于中海油等能源持仓的背景参考。")
+
+    _brent_entry = market_data.get('brent', {})
+    _brent_val   = _brent_entry.get('price')
+
+    if _brent_val:
+        _bc1, _bc2, _bc3 = st.columns(3)
+        _bc1.metric('Brent (USD/桶)', f"${_brent_val:.1f}")
+
+        # 历史分位（从 vol_history.json 里的 brent 序列）
+        _brent_hist_path = os.path.join(os.path.dirname(csv_path), 'cache', 'vol_history.json')
+        _brent_pct = None
+        if os.path.exists(_brent_hist_path):
+            try:
+                with open(_brent_hist_path, encoding='utf-8') as _bf:
+                    _brent_hist = json.load(_bf).get('brent', [])
+                if len(_brent_hist) >= 20:
+                    _vals = [r['value'] for r in _brent_hist if r.get('value')]
+                    _brent_pct = sum(1 for v in _vals if v <= _brent_val) / len(_vals) * 100
+            except Exception:
+                pass
+
+        if _brent_pct is not None:
+            _bc2.metric('历史分位', f"{_brent_pct:.0f}%",
+                        help=f"基于 {len(_brent_hist)} 个历史记录点")
+        else:
+            _bc2.metric('历史分位', '积累中')
+
+        # 与中海油买入线的关系提示
+        _bc3.metric('中海油触发价参考', 'HKD 16',
+                    help='基于悲观情景（Brent 65/派息30%/PE8x）要求8%年化的买入线，非价格预测')
+    else:
+        st.info("Brent 数据暂无，请刷新市场数据。")
+
+    st.divider()
     st.subheader("📅 定投计划管理")
     st.caption("本周建议 = 基础金额 × 市场温度计倍数，取整到10元。执行后正常维护 Weekly Update，无额外步骤。")
 

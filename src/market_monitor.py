@@ -497,7 +497,17 @@ def get_market_data(force_refresh: bool = False) -> dict:
         except Exception:
             pass
 
-    # ── A股PE（akshare，不支持手动覆盖）──
+    # ── Brent 原油（USD/桶）──
+    if _should_fetch('brent'):
+        try:
+            series = _fetch_yfinance('BZ=F', period='5d')
+            if series is not None and not series.empty:
+                val = round(float(series.dropna().iloc[-1]), 2)
+                cache['brent'] = {'price': val}
+                cache['brent_updated'] = today
+                cache_dirty = True
+        except Exception:
+            pass
     for pe_key, ak_symbol, source_note in [
         ('pe_csi300',   '沪深300', 'akshare 沪深300 滚动PE'),
         ('pe_csi_a500', '中证500', 'akshare 中证500 滚动PE（A500代理，待A500积累3年数据后切换）'),
@@ -520,7 +530,7 @@ def get_market_data(force_refresh: bool = False) -> dict:
             pass
 
     # ── 组装结果 ──
-    all_keys = list(TARGETS.keys()) + ['vix', 'vxn', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500', 'treasury_10y', 'cn_treasury_10y']
+    all_keys = list(TARGETS.keys()) + ['vix', 'vxn', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500', 'treasury_10y', 'cn_treasury_10y', 'brent']
     result = {}
     for key in all_keys:
         result[key] = cache.get(key)
@@ -592,6 +602,13 @@ def append_vol_snapshot(data_dir: str, market_data: dict):
         records = history.setdefault('qvix', [])
         if not records or records[-1].get('date') != today:
             records.append({'date': today, 'value': qvix_val})
+            dirty = True
+
+    brent_val = (market_data.get('brent') or {}).get('price')
+    if brent_val is not None:
+        records = history.setdefault('brent', [])
+        if not records or records[-1].get('date') != today:
+            records.append({'date': today, 'value': brent_val})
             dirty = True
 
     if dirty:
