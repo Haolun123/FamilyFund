@@ -132,21 +132,25 @@ beginAtZero: false
 
 def _build_class_nav_chart(class_nav_dict: Dict[str, pd.DataFrame]) -> str:
     """分类净值多线对比图（Obsidian Charts 格式）。"""
-    # 取所有类别的日期并集，以最新行对齐
     classes = [c for c in class_nav_dict if c not in EXCLUDE_FROM_CLASS]
     if not classes:
         return ''
 
-    # 用第一个类别的日期序列作为 X 轴（所有类别日期相同）
-    ref = class_nav_dict[classes[0]]
-    labels = [str(d)[:10] for d in ref['Date'].tolist()]
+    # 取所有类别日期的并集，以最长序列为X轴（避免某类别缺失最新快照导致X轴截短）
+    all_dates: set = set()
+    for cls in classes:
+        all_dates.update(str(d)[:10] for d in class_nav_dict[cls]['Date'].tolist())
+    labels = sorted(all_dates)
     labels_str = ', '.join(f'"{l}"' for l in labels)
 
     series_lines = []
     for cls in classes:
         nav_df = class_nav_dict[cls]
-        navs = [round(float(v), 4) for v in nav_df['NAV'].tolist()]
-        navs_str = ', '.join(str(v) for v in navs)
+        date_to_nav = {str(d)[:10]: round(float(v), 4)
+                       for d, v in zip(nav_df['Date'], nav_df['NAV'])}
+        # 缺失日期用 null（Obsidian Charts 会断线处理）
+        navs = [str(date_to_nav[d]) if d in date_to_nav else 'null' for d in labels]
+        navs_str = ', '.join(navs)
         display = CLASS_DISPLAY.get(cls, cls)
         series_lines.append(f'  - title: {display}\n    data: [{navs_str}]')
 
