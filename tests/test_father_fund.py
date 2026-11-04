@@ -252,3 +252,36 @@ def test_default_record_time_is_beijing_even_if_host_uses_utc(monkeypatch):
     monkeypatch.setattr(ff,'datetime',FixedClock)
     assert ff.now_beijing().isoformat()=='2026-11-04T01:00:00'
     assert ff.event('CASH','2026-11-04',dict(action='入金',amount='1'))['recorded_at'].startswith('2026-11-04T01:00:00')
+
+
+def test_snapshot_requires_complete_unique_quotes_and_one_per_day(tmp_path):
+    ff.commit_events(tmp_path,[opening()]);before=(tmp_path/'ledger.csv').read_bytes()
+    quote=dict(code='002277',price='6',fx='1',as_of='2026-11-02')
+    for quotes in [[],[quote,quote],[dict(quote,code='not-held')]]:
+        with pytest.raises(ff.LedgerError,match='完整覆盖'):
+            ff.commit_events(tmp_path,[ff.event('SNAPSHOT','2026-11-02',dict(quotes=quotes))])
+        assert (tmp_path/'ledger.csv').read_bytes()==before
+    ff.commit_events(tmp_path,[ff.event('SNAPSHOT','2026-11-02',dict(quotes=[quote]))])
+    with pytest.raises(ff.LedgerError,match='已有快照'):
+        ff.commit_events(tmp_path,[ff.event('SNAPSHOT','2026-11-02T23:59:59',dict(quotes=[quote]))])
+
+
+def test_expected_ids_checked_under_account_lock(tmp_path):
+    op=opening();ff.commit_events(tmp_path,[op])
+    ff.commit_events(tmp_path,[ff.event('CASH','2026-11-02',dict(action='入金',amount='10'))])
+    with pytest.raises(ff.LedgerError,match='流水已更新'):
+        ff.commit_events(tmp_path,[trade()],expected_ids=[op['event_id']])
+    assert len(ff.read_events(tmp_path))==2
+
+
+def test_backdated_trade_does_not_replace_later_saved_valuation():
+    quote=ff.event('QUOTE','2026-11-03',dict(quotes=[dict(code='002277',price='7',fx='1',as_of='2026-11-03')]))
+    state=ff.replay([opening(),quote,trade(at='2026-11-02',price='3',cash_cny='300')])
+    assert state['positions']['002277']['price']==7
+    assert state['market']==1400
+
+
+def test_stale_cny_snapshot_with_invalid_fx_is_rejected():
+    bad=ff.event('SNAPSHOT','2026-11-03',dict(quotes=[dict(code='002277',price='6',fx='.9',as_of='2026-11-01')]))
+    with pytest.raises(ff.LedgerError,match='人民币报价汇率'):
+        ff.replay([opening(),trade(),bad])

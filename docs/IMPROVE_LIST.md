@@ -10,7 +10,8 @@
 
 | 功能 | 实现位置 |
 |------|---------|
-| Father Fund独立账户：Markdown期初/成交导入、即时记账、仓位目标、纠错、估值及券商对账 | `src/father_fund.py` + `dashboard/father_tab.py`，见 `DESIGN_FATHER_FUND.md`；实际期初和交割明细待用户补齐 |
+| Father Fund独立账户：Markdown初始化、仓位目标、纠错及券商对账 | `src/father_fund.py` + `dashboard/father_tab.py`，见 `DESIGN_FATHER_FUND.md`；实际期初和交割明细待用户补齐 |
+| Father Fund快照流程及净值展示：交易CSV、标的识别与API验证、独立映射、一次行情刷新失败手填、统一保存及接手盈亏/净值 | `src/father_workflow.py` + `dashboard/father_tab.py`；保留Father历史，主基金/Son不变，见`DESIGN_FATHER_FUND.md` |
 | 年化收益率（TWR）/ 最大回撤 / XIRR / 夏普 / 卡尔马 | `src/nav_engine.py` |
 | 数据原子写入 + 自动备份（保留30份） | `nav_engine._atomic_write_csv` |
 | 基准对比（CSI300/S&P500/CPI/M2） | `src/benchmark.py` |

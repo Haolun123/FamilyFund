@@ -1,6 +1,6 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v2.2
+> **版本**: v2.4
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
 > **最后更新**: 2026-11-04
@@ -10,7 +10,11 @@
 
 ## Father Fund 独立账户（2026-11-04）
 
-新增 Father Fund 标签页，以 `src/father_fund.py` 的单文件追加式流水推算持仓与现金，页面位于 `dashboard/father_tab.py`。成交立即保存，独立于主账户 Weekly Update；数据在主数据目录的 `father/ledger.csv`，不进入主账户或 Son Fund 的收益核算。支持 Markdown 初始化、实际人民币收付、逐项估值、计划状态、保留原记录的纠错以及券商时点对账。详见 [DESIGN_FATHER_FUND.md](DESIGN_FATHER_FUND.md)。
+Father Fund标签页的交易文本、标的确认、价格刷新、保存及业绩展示全部在`dashboard/father_tab.py`中完成。主基金和Son Fund的界面、记账流程及数据保持原样。
+
+`src/father_fund.py`保留`father/ledger.csv`追加式事实源；新增`SNAPSHOT`事件覆盖非零持仓的估值。`src/father_workflow.py`负责六列CSV解析、草稿构建、只读标的匹配、API身份验证、独立`father/instrument_map.json`及快照派生计算。交易、资金和估值先留在会话草稿，最后在账户锁内校验版本并将整批记录原子保存到同一流水文件，避免多个金融数据文件部分保存。重试幂等，旧流水不迁移、不重复导入。
+
+净值及持仓盈亏由流水派生内存快照，调用现有`compute_fund_nav()`及`compute_cost_basis()`；Cash的NCF只记外部入金/出金，资产NCF按人民币交易净收付记账。原主基金计算引擎无需改动。行情复用现有拉取路由，主动拉取一次，失败手填；主基金资料仅读取，确认后在Father目录保存独立副本。详见 [DESIGN_FATHER_FUND.md](DESIGN_FATHER_FUND.md)。本轮不写入Obsidian或真实账户数据。
 
 ---
 

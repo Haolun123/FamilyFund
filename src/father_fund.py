@@ -101,7 +101,7 @@ def replay(events, as_of=None):
         if not e.get('event_id') or e['event_id'] in by_id:
             raise LedgerError('流水编号重复或为空')
         timestamp(e['effective_at'])
-        if e['kind'] not in {'OPEN', 'TRADE', 'CASH', 'QUOTE', 'PLAN', 'BROKER', 'VOID'}:
+        if e['kind'] not in {'OPEN', 'TRADE', 'CASH', 'QUOTE', 'PLAN', 'BROKER', 'VOID', 'SNAPSHOT'}:
             raise LedgerError('未知流水类型')
         by_id[e['event_id']] = e
     voided = set()
@@ -129,7 +129,7 @@ def replay(events, as_of=None):
         if not active:
             return None
     state = dict(cash=Decimal(0), positions={}, plans={}, broker=None, external_flow=Decimal(0),
-                 initial_total=Decimal(0), as_of=opening['effective_at'], voided=voided, trades=[])
+                 initial_total=Decimal(0), as_of=opening['effective_at'], voided=voided, trades=[], snapshots=[])
     references = set()
     for _,e in active:
         p,kind = e['payload'],e['kind']
@@ -169,7 +169,8 @@ def replay(events, as_of=None):
                 state['positions'][ins['code']]=pos
             pos['quantity'] += qty if side=='买入' else -qty
             # Trade price is an observation at the execution time, never the historical cost.
-            pos.update(price=ins['price'],fx=ins['fx'],quoted_at=e['effective_at'])
+            if e['effective_at'] >= pos['quoted_at']:
+                pos.update(price=ins['price'],fx=ins['fx'],quoted_at=e['effective_at'])
             state['cash'] += -cash if side=='买入' else cash
             state['trades'].append(e)
         elif kind == 'CASH':
@@ -181,7 +182,15 @@ def replay(events, as_of=None):
             state['cash']+=signed
             if action in {'入金','出金'}:
                 state['external_flow']+=signed
-        elif kind == 'QUOTE':
+        elif kind in {'QUOTE', 'SNAPSHOT'}:
+            if kind == 'SNAPSHOT':
+                expected={c for c,p in state['positions'].items() if p['quantity']>0}
+                supplied=[str(q.get('code')) for q in p.get('quotes',[])]
+                if set(supplied)!=expected or len(supplied)!=len(expected):
+                    raise LedgerError('快照报价须完整覆盖所有非零持仓，不能重复或遗漏')
+                if any(s['effective_at'][:10]==e['effective_at'][:10] for s in state['snapshots']):
+                    raise LedgerError('该日期已有快照；请先在流水页撤销原快照')
+                state['snapshots'].append(e)
             for q in p.get('quotes',[]):
                 price=number(q.get('price'),'估值价格','0.00000001')
                 fx=number(q.get('fx'),'估值汇率','0.00000001')
@@ -189,9 +198,9 @@ def replay(events, as_of=None):
                 if quoted_at > e['effective_at']:
                     raise LedgerError('报价日期不能晚于估值记录日期')
                 pos=state['positions'].get(str(q.get('code')))
+                if pos and pos['currency']=='CNY' and fx!=1:
+                    raise LedgerError('人民币报价汇率必须为1')
                 if pos and quoted_at >= pos['quoted_at']:
-                    if pos['currency']=='CNY' and fx!=1:
-                        raise LedgerError('人民币报价汇率必须为1')
                     pos.update(price=price,fx=fx,quoted_at=quoted_at)
         elif kind == 'PLAN':
             if not p.get('code') or p.get('status') not in PLAN_STATUSES:
@@ -220,7 +229,7 @@ def replay(events, as_of=None):
     return state
 
 
-def commit_events(data_dir, additions):
+def commit_events(data_dir, additions, expected_ids=None):
     """Serialize read/validate/append/write as one transaction, with idempotency."""
     if not additions:
         raise LedgerError('没有需要保存的记录')
@@ -236,6 +245,8 @@ def commit_events(data_dir, additions):
                 raise LedgerError('同一请求编号对应了不同内容')
             if any(e['event_id'] in known for e in additions):
                 raise LedgerError('批次部分已存在，拒绝重复提交')
+            if expected_ids is not None and [e['event_id'] for e in current] != expected_ids:
+                raise LedgerError('账户流水已更新，请重新读取后核对草稿')
             combined=current+additions
             result=replay(combined)
             path=root/'ledger.csv'
