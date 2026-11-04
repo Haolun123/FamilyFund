@@ -1,12 +1,16 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v2.5
+> **版本**: v2.6
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
 > **最后更新**: 2026-11-04
 > **状态**: 活跃迭代中
 
 ---
+
+## Son Fund记账修复（2026-11-04）
+
+Son Fund保留原Weekly Update页面，新增src/son_bookkeeping.py负责买入/入金草稿、Cash单位规范化、真实交易记录、快照日期校验及保存。数据仍在son/portfolio.csv与son/transaction.csv。Date记录所属快照，Trade_Date保留实际确认日期。保存持有账户锁，检查草稿基准，两文件逐个原子写入，异常恢复原文备份；不改主基金或Father Fund账本。详见[DESIGN_SON_BOOKKEEPING.md](DESIGN_SON_BOOKKEEPING.md)。
 
 ## Father Fund 独立账户（2026-11-04）
 

@@ -6849,6 +6849,8 @@ with tab_research:
 # ═══════════════════════════════════════════════════════════
 with tab_son:
     import math as _math_son
+    from son_bookkeeping import (normalize_cash, apply_buys, apply_deposit, frame_signature,
+                                 prepare_snapshot, save_update, today_beijing)
 
     SON_DATA_DIR = os.environ.get('FAMILYFUND_SON_DATA', os.path.join(os.path.dirname(csv_path), 'son'))
     SON_CSV = os.path.join(SON_DATA_DIR, 'portfolio.csv')
@@ -6989,15 +6991,14 @@ with tab_son:
                 'Asset_Class','Platform','Name','Code','Currency',
                 'Exchange_Rate','Shares','Current_Price','Total_Value','Net_Cash_Flow'
             ])
-        st.session_state['son_update_template'] = _son_template
+        st.session_state['son_update_template'] = normalize_cash(_son_template)
+        st.session_state['son_base_signature'] = frame_signature(son_df if son_df is not None else pd.DataFrame())
 
-    # 快照日期（默认取本周五）
+    # 快照日期不得默认跳到未来
     _son_last_snapshot = son_df['Date'].max() if son_df is not None and not son_df.empty else '（无快照）'
     st.caption(f"上次快照：{_son_last_snapshot}")
-    _today = pd.Timestamp.now().date()
-    _days_to_friday = (4 - _today.weekday()) % 7  # 0=Mon...4=Fri
-    _this_friday = _today + pd.Timedelta(days=_days_to_friday) if _days_to_friday > 0 else _today
-    _son_new_date = st.date_input("本次快照日期（建议用每周五）", value=_this_friday, key="son_new_date")
+    _today = today_beijing()
+    _son_new_date = st.date_input("本次快照日期（请选实际估值日期）", value=_today, max_value=_today, key="son_new_date")
     _son_new_date_str = str(_son_new_date)
 
     # 步骤一：短信解析
@@ -7041,43 +7042,21 @@ with tab_son:
                             _son_code2class[str(_p['code'])] = _p['asset_class']
                 except Exception:
                     pass
-                _applied = 0
-                _total_bought = 0.0
-                for r in _son_parsed:
-                    if r.get('parse_error') or not r['matched_code']:
-                        continue
-                    _mask = _son_template['Code'].astype(str) == str(r['matched_code'])
-                    if _mask.any():
-                        idx = _son_template[_mask].index[0]
-                        _son_template.at[idx, 'Shares'] = round(
-                            float(_son_template.at[idx, 'Shares'] or 0) + float(r['shares']), 6)
-                        _son_template.at[idx, 'Current_Price'] = float(r['nav'])
-                        _son_template.at[idx, 'Net_Cash_Flow'] = round(
-                            float(_son_template.at[idx, 'Net_Cash_Flow'] or 0) + float(r['amount']), 2)
-                    else:
-                        _ac = _son_code2class.get(str(r['matched_code']), 'US_Growth_Fund')
-                        _son_template = pd.concat([_son_template, pd.DataFrame([{
-                            'Asset_Class': _ac,
-                            'Platform': '纳指场外',
-                            'Name': r['matched_name'], 'Code': r['matched_code'],
-                            'Currency': 'CNY', 'Exchange_Rate': 1.0,
-                            'Shares': float(r['shares']),
-                            'Current_Price': float(r['nav']),
-                            'Total_Value': 0.0,
-                            'Net_Cash_Flow': float(r['amount']),
-                        }])], ignore_index=True)
-                    _applied += 1
-                    _total_bought += float(r['amount'])
-                # 从 Cash 扣减买入金额
-                _cash_mask = _son_template['Code'].astype(str) == 'CASH'
-                if _cash_mask.any() and _total_bought > 0:
-                    _ci = _son_template[_cash_mask].index[0]
-                    _son_template.at[_ci, 'Total_Value'] = round(
-                        float(_son_template.at[_ci, 'Total_Value'] or 0) - _total_bought, 2)
-                st.session_state['son_update_template'] = _son_template
-                del st.session_state['son_sms_parsed']
-                st.session_state['_son_sms_applied'] = _applied
-                st.rerun()
+                purchases=[dict(code=str(r['matched_code']),name=r['matched_name'],
+                    shares=r['shares'],amount=r['amount'],nav=r['nav'],trade_date=r['confirm_date'],
+                    asset_class=_son_code2class.get(str(r['matched_code']),'US_Growth_Fund'),note='短信确认')
+                    for r in _son_parsed if not r.get('parse_error') and r.get('matched_code')]
+                try:
+                    if not purchases: raise ValueError('没有可应用的已匹配交易')
+                    _son_template,transactions=apply_buys(_son_template,purchases,_son_new_date_str)
+                    st.session_state['son_update_template']=_son_template
+                    st.session_state.setdefault('son_pending_transactions',[]).extend(transactions)
+                    st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
+                    del st.session_state['son_sms_parsed']
+                    st.session_state['_son_sms_applied']=len(transactions)
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
 
     if st.session_state.get('_son_sms_applied') is not None:
         st.success(f"✅ 短信解析已应用 {st.session_state.pop('_son_sms_applied')} 条")
@@ -7091,26 +7070,16 @@ with tab_son:
         _son_deposit = st.number_input("本周打入专属账户金额（¥）", min_value=0.0, value=0.0,
                                         step=1000.0, key="son_deposit_amount")
         if st.button("✅ 登记入金", key="son_apply_deposit") and _son_deposit > 0:
-            _son_template = st.session_state['son_update_template'].copy()
-            _cash_mask = _son_template['Code'].astype(str) == 'CASH'
-            if _cash_mask.any():
-                idx = _son_template[_cash_mask].index[0]
-                _son_template.at[idx, 'Net_Cash_Flow'] = round(
-                    float(_son_template.at[idx, 'Net_Cash_Flow'] or 0) + _son_deposit, 2)
-                _son_template.at[idx, 'Total_Value'] = round(
-                    float(_son_template.at[idx, 'Total_Value'] or 0) + _son_deposit, 2)
-            else:
-                # Cash 行不存在则新建
-                _son_template = pd.concat([_son_template, pd.DataFrame([{
-                    'Asset_Class': 'Cash', 'Platform': '专属账户',
-                    'Name': 'Son Fund现金', 'Code': 'CASH',
-                    'Currency': 'CNY', 'Exchange_Rate': 1.0,
-                    'Shares': 1.0, 'Current_Price': _son_deposit,
-                    'Total_Value': _son_deposit, 'Net_Cash_Flow': _son_deposit,
-                }])], ignore_index=True)
-            st.session_state['son_update_template'] = _son_template
-            st.session_state['_son_deposit_applied'] = _son_deposit
-            st.rerun()
+            try:
+                _son_template,transactions=apply_deposit(st.session_state['son_update_template'],
+                    _son_deposit,_son_new_date_str,trade_date=str(_today))
+                st.session_state['son_update_template']=_son_template
+                st.session_state.setdefault('son_pending_transactions',[]).extend(transactions)
+                st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
+                st.session_state['_son_deposit_applied']=_son_deposit
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
 
         if st.session_state.get('_son_deposit_applied') is not None:
             st.success(f"✅ 已登记入金 ¥{st.session_state.pop('_son_deposit_applied'):,.0f}")
@@ -7124,7 +7093,7 @@ with tab_son:
                 st.session_state['son_buy_entries'] = []
             st.session_state['son_buy_entries'].append(
                 {'code': '', 'name': '', 'asset_class': 'US_Growth_Fund',
-                 'platform': '纳指场外', 'amount': 0.0, 'shares': 0.0, 'nav': 0.0})
+                 'platform': '纳指场外', 'amount': 0.0, 'shares': 0.0, 'nav': 0.0, 'trade_date':str(_today)})
             st.rerun()
 
         _son_entries = st.session_state.get('son_buy_entries', [])
@@ -7134,43 +7103,23 @@ with tab_son:
             e['name']   = ec2.text_input("Name", value=e['name'], key=f"son_e_name_{i}")
             e['amount'] = ec3.number_input("金额(¥)", value=e['amount'], min_value=0.0, key=f"son_e_amt_{i}")
             e['shares'] = ec4.number_input("份额", value=e['shares'], min_value=0.0, key=f"son_e_shares_{i}")
+            e['trade_date']=str(st.date_input('成交确认日期',value=pd.Timestamp(e.get('trade_date',_today)).date(),
+                                              max_value=_today,key=f'son_e_date_{i}'))
             if ec5.button("✕", key=f"son_e_del_{i}"):
                 st.session_state['son_buy_entries'].pop(i)
                 st.rerun()
 
         if _son_entries and st.button("✅ 应用买入", key="son_apply_buy", type="primary"):
-            _son_template = st.session_state['son_update_template'].copy()
-            _total_bought = 0.0
-            for e in _son_entries:
-                if not e['code'] or not e['name']:
-                    continue
-                _mask = _son_template['Code'].astype(str) == str(e['code'])
-                if _mask.any():
-                    idx = _son_template[_mask].index[0]
-                    _son_template.at[idx, 'Shares'] = round(
-                        float(_son_template.at[idx, 'Shares'] or 0) + e['shares'], 6)
-                    _son_template.at[idx, 'Net_Cash_Flow'] = round(
-                        float(_son_template.at[idx, 'Net_Cash_Flow'] or 0) + e['amount'], 2)
-                else:
-                    _son_template = pd.concat([_son_template, pd.DataFrame([{
-                        'Asset_Class': e.get('asset_class', 'US_Growth_Fund'),
-                        'Platform': e.get('platform', '纳指场外'),
-                        'Name': e['name'], 'Code': e['code'],
-                        'Currency': 'CNY', 'Exchange_Rate': 1.0,
-                        'Shares': e['shares'], 'Current_Price': e.get('nav', 0.0),
-                        'Total_Value': 0.0, 'Net_Cash_Flow': e['amount'],
-                    }])], ignore_index=True)
-                _total_bought += float(e['amount'])
-            # 从 Cash 扣减买入金额
-            _cash_mask = _son_template['Code'].astype(str) == 'CASH'
-            if _cash_mask.any() and _total_bought > 0:
-                _ci = _son_template[_cash_mask].index[0]
-                _son_template.at[_ci, 'Total_Value'] = round(
-                    float(_son_template.at[_ci, 'Total_Value'] or 0) - _total_bought, 2)
-            st.session_state['son_update_template'] = _son_template
-            st.session_state['son_buy_entries'] = []
-            st.session_state['_son_buy_applied'] = True
-            st.rerun()
+            try:
+                _son_template,transactions=apply_buys(st.session_state['son_update_template'],_son_entries,_son_new_date_str)
+                st.session_state['son_update_template']=_son_template
+                st.session_state.setdefault('son_pending_transactions',[]).extend(transactions)
+                st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
+                st.session_state['son_buy_entries']=[]
+                st.session_state['_son_buy_applied']=True
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
 
         if st.session_state.pop('_son_buy_applied', False):
             st.success("✅ 买入已应用")
@@ -7201,7 +7150,8 @@ with tab_son:
                         _son_ok += 1
                 except Exception:
                     pass
-        st.session_state['son_update_template'] = _son_tmpl
+        st.session_state['son_update_template'] = normalize_cash(_son_tmpl)
+        st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
         st.success(f"已刷新 {_son_ok} 个标的")
         st.rerun()
 
@@ -7210,7 +7160,7 @@ with tab_son:
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
-        key="son_weekly_editor",
+        key=f"son_weekly_editor_{st.session_state.get('son_editor_version',0)}",
         column_config={
             "Asset_Class": st.column_config.SelectboxColumn("Asset_Class", options=sorted(VALID_ASSET_CLASSES)),
             "Currency": st.column_config.SelectboxColumn("Currency", options=["CNY","HKD","EUR","USD"]),
@@ -7224,51 +7174,65 @@ with tab_son:
 
     # 重算市值
     if st.button("🔄 重算市值", key="son_recalc", type="secondary"):
-        _son_r = _son_edited.copy()
-        for i, row in _son_r.iterrows():
-            if str(row.get('Code', '')) != 'CASH':
-                _son_r.at[i, 'Total_Value'] = round(
-                    float(row.get('Shares') or 0) * float(row.get('Current_Price') or 0) * float(row.get('Exchange_Rate') or 1), 2)
-        st.session_state['son_update_template'] = _son_r
-        st.rerun()
-
-    # 保存快照
-    st.divider()
-    _son_confirm = st.checkbox("确认子基金数据无误", key="son_confirm")
-    if st.button("💾 保存子基金快照", type="primary", disabled=not _son_confirm, key="son_save"):
-        _son_save_df = _son_edited.copy()
-        _son_save_df.insert(0, 'Date', _son_new_date_str)
-        _son_save_df['Code'] = _son_save_df['Code'].fillna('').astype(str)
-
-        if os.path.exists(SON_CSV) and os.path.getsize(SON_CSV) > 50:
-            _son_existing = pd.read_csv(SON_CSV, dtype={'Code': str})
-            _son_combined = pd.concat([_son_existing, _son_save_df], ignore_index=True)
-        else:
-            _son_combined = _son_save_df
-
-        _atomic_write_csv(_son_combined, SON_CSV)
-
-        # 写入 transaction_son.csv
-        _son_pending_tx = st.session_state.get('son_pending_transactions', [])
-        if _son_pending_tx:
-            _son_tx_df = pd.DataFrame(_son_pending_tx)
-            if os.path.exists(SON_TX_CSV):
-                _son_existing_tx = pd.read_csv(SON_TX_CSV)
-                _son_tx_df = pd.concat([_son_existing_tx, _son_tx_df], ignore_index=True)
-            _son_tx_df.to_csv(SON_TX_CSV, index=False)
-            st.session_state['son_pending_transactions'] = []
-
-        # 生成子基金周报
         try:
-            from weekly_report import generate_weekly_report
-            _son_report = generate_weekly_report(data_dir=SON_DATA_DIR, this_week=_son_new_date_str)
-            st.info(f"📝 子基金周报已生成：{os.path.basename(_son_report)}")
-        except Exception:
-            pass
+            _son_r = _son_edited.copy()
+            for i, row in _son_r.iterrows():
+                if str(row.get('Code', '')) != 'CASH':
+                    _son_r.at[i, 'Total_Value'] = round(
+                        float(row.get('Shares') or 0) * float(row.get('Current_Price') or 0) * float(row.get('Exchange_Rate') or 1), 2)
+            st.session_state['son_update_template'] = normalize_cash(_son_r)
+            st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
+            st.rerun()
 
-        # 重置模板
-        del st.session_state['son_update_template']
+        except (ValueError,TypeError) as exc:
+            st.error(f'请核对持仓和现金数据：{exc}')
+
+    # 保存前预览与对账：现金余额不会从旧Shares恢复。
+    _pending=st.session_state.get('son_pending_transactions',[])
+    if _pending:
+        st.caption(f'本期有{len(_pending)}条流水待保存；应用后仍未落盘。')
+        st.dataframe(pd.DataFrame([dict(成交日期=t['Trade_Date'],方向=t['Type'],标的=t['Name'],
+            金额=t['Amount_CNY'],份额=t['Shares']) for t in _pending]),hide_index=True,use_container_width=True)
+    else:
+        st.caption('本期暂无待保存流水。新增交易请使用短信解析或手动登记，直接改表格不会生成逐笔流水。')
+    if son_df is not None and not son_df.empty:
+        _last=son_df[son_df.Date==son_df.Date.max()]
+        _old_cash=float(_last.loc[_last.Code=='CASH','Total_Value'].sum())
+        _deposits=sum(t['Amount_CNY'] for t in _pending if t['Type']=='入金')
+        _buys=sum(t['Amount_CNY'] for t in _pending if t['Type']=='买入')
+        _actual_cash=float(_son_edited.loc[_son_edited.Code=='CASH','Total_Value'].sum())
+        st.caption(f'现金核对：上期 ¥{_old_cash:,.2f}＋本期入金 ¥{_deposits:,.2f}－买入 ¥{_buys:,.2f}＝¥{_old_cash+_deposits-_buys:,.2f}；表内余额 ¥{_actual_cash:,.2f}')
+        if abs(_actual_cash-(_old_cash+_deposits-_buys))>.01:
+            st.warning('现金余额与本期登记记录不一致，请核对是否漏记或重复操作。')
+    _son_error=None
+    try:
+        prepare_snapshot(_son_edited,_son_new_date_str,son_df if son_df is not None else pd.DataFrame(),_pending)
+    except ValueError as exc:
+        _son_error=str(exc); st.error(_son_error)
+    st.divider()
+    if st.button('重置子基金本期草稿',key='son_reset'):
+        for key in ['son_update_template','son_base_signature','son_pending_transactions','son_buy_entries','son_sms_parsed','son_confirm']:
+            st.session_state.pop(key,None)
+        st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
         load_son_data.clear()
-        st.success(f"✅ 子基金快照已保存（{_son_new_date_str}）")
-        st.balloons()
         st.rerun()
+    _son_confirm=st.checkbox('确认子基金数据无误',key='son_confirm')
+    if st.button('💾 保存子基金快照',type='primary',disabled=not _son_confirm or bool(_son_error),key='son_save'):
+        try:
+            save_update(SON_DATA_DIR,_son_edited,_son_new_date_str,_pending,
+                        st.session_state['son_base_signature'])
+        except (ValueError,OSError) as exc:
+            st.error(f'保存失败，草稿已保留：{exc}')
+        else:
+            st.session_state['son_pending_transactions']=[]
+            try:
+                from weekly_report import generate_weekly_report
+                _son_report=generate_weekly_report(data_dir=SON_DATA_DIR,this_week=_son_new_date_str)
+            except Exception:
+                pass
+            del st.session_state['son_update_template']
+            st.session_state.pop('son_base_signature',None)
+            st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
+            load_son_data.clear()
+            st.success(f'✅ 子基金快照与流水已保存（{_son_new_date_str}）')
+            st.rerun()

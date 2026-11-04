@@ -12,6 +12,7 @@
 |------|---------|
 | Father Fund独立账户：Markdown初始化、仓位目标、纠错及券商对账 | `src/father_fund.py` + `dashboard/father_tab.py`，见 `DESIGN_FATHER_FUND.md`；实际期初和交割明细待用户补齐 |
 | Father Fund快照流程及净值展示：交易CSV、标的识别与API验证、独立映射、一次行情刷新失败手填、统一保存及接手盈亏/净值 | `src/father_workflow.py` + `dashboard/father_tab.py`；保留Father历史，主基金/Son不变，见`DESIGN_FATHER_FUND.md` |
+| Son Fund记账修复：短信/手工/入金写入真实流水、Cash份额同步余额、禁止未来/重复快照日期、保存前现金核对与失败回滚 | src/son_bookkeeping.py + dashboard/app.py Son Tab；见DESIGN_SON_BOOKKEEPING.md |
 | 年化收益率（TWR）/ 最大回撤 / XIRR / 夏普 / 卡尔马 | `src/nav_engine.py` |
 | 数据原子写入 + 自动备份（保留30份） | `nav_engine._atomic_write_csv` |
 | 基准对比（CSI300/S&P500/CPI/M2） | `src/benchmark.py` |
@@ -76,7 +77,6 @@
 | 11 | **子基金：儿子教育/安家基金（独立CSV）** | 见下方详述 | 待实现；先手动在基金App定投，时机合适再接入FamilyFund跟踪 |
 | 12 | **数据目录重构** | 见下方详述 | 子基金上线后再做；主基金稳定运行中，不急 |
 | 9 | ~~**短信解析自定义模板**（新基金公司格式自助配置）~~ | 不做：新格式频率低（1-2次/年），靠 Claude Code 加正则永久覆盖，性价比更高 | 2026-10-23 决定不做 |
-| 13 | **Son Fund 步骤三对账提示**：保存前显示"Cash 应为 = 上周余额 + 本周入金 - 本周买入合计"，让用户确认一遍，防止入金重复登记或漏扣买入 | — | 2026-09-19 发现；入金重复登记导致 NAV 失真 |
 
 ### P3 — 需前置数据积累
 
