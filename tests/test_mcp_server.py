@@ -16,6 +16,22 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, 'src'))
 
 
+def test_retired_review_removed_from_mcp_and_dashboard():
+    import ast
+    from pathlib import Path
+    import mcp_server
+
+    tools={tool.name for tool in mcp_server.mcp._tool_manager.list_tools()}
+    assert tools=={'get_portfolio_snapshot','get_market_signals','get_ammo_status',
+                   'get_fi_status','get_cost_basis','run_backtest'}
+    tree=ast.parse((Path(ROOT)/'dashboard/app.py').read_text())
+    tabs=next(node for node in ast.walk(tree) if isinstance(node,ast.Call)
+              and isinstance(node.func,ast.Attribute) and node.func.attr=='tabs'
+              and isinstance(node.func.value,ast.Name) and node.func.value.id=='st')
+    assert ast.literal_eval(tabs.args[0])==['Portfolio','Ledger','Son Fund','Father Fund',
+        'SAP','Market','Planning','Research','Backtest','Quarterly']
+
+
 @pytest.fixture
 def mock_portfolio_csv(tmp_path, monkeypatch):
     """创建一份小型 portfolio.csv,主要包含 Fixed_Income 大头 + 几个小头持仓。

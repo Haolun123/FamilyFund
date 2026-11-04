@@ -34,11 +34,10 @@
 | PDF 报告（6页 A4 横版） | `src/pdf_report.py` |
 | 人生阶段规划（里程碑支出曲线 + FI情景对比）| `src/life_stages_engine.py` + `dashboard/app.py` Tab1 Section7，见 `DESIGN_LIFE_STAGES.md` |
 | 定投管理模块（DCA Manager）| `src/dca_manager.py` + `dashboard/app.py` Tab5 底部，见 `DESIGN_DCA_MANAGER.md` |
-| 第十人系统（Anti-Fragile Allocation Red Teamer）| `src/tenth_man.py` + `dashboard/app.py` Tab8，见 `DESIGN_TENTH_MAN.md` |
 | 弹药池与现金流压力测试 | `dashboard/app.py` Tab5 DCA下方，见 `DESIGN_AMMO_POOL.md` |
 | Weekly Update 自动化（净值刷新 + 短信解析）| 见 `DESIGN_AUTO_WEEKLY.md` |
 | 财务独立测算 + 储蓄率追踪 | 见 `DESIGN_ANALYTICS.md` |
-| HTML/PDF 报告全面切换 | Portfolio / Quarterly / 10th Man |
+| HTML/PDF 报告全面切换 | Portfolio / Quarterly |
 | 合成标普β定投（建信纳指+道指预付池，绕开QDII溢价）| `src/synthetic_sp.py` + `dashboard/app.py` Tab2 步骤一后，见 `vault/essays/synthetic_sp500_ndx_dow_qdii_premium.md` |
 | 短信解析格式A-F（博时/南方/招行黄金/摩根/建信）| `src/sms_parser.py` 2026-08-14 |
 | SAP.DE 刷新净值同步更新 EUR/CNY 汇率 | `src/price_fetcher.py::_fetch_sap_with_fx` 2026-08-17 |
@@ -51,6 +50,10 @@
 | 芒格信号面板（4 区 2x2:估值 / 多维位置 / 质量 / 决策）| Research Tab,2026-05-23 |
 
 ---
+
+## 已移除功能
+
+- 2026-11-04：按用户要求移除10th Man标签页、专用模块及MCP审查工具。历史报告保留，AI周评及其兼容配置继续使用。
 
 ## 🔧 待实现功能
 
@@ -478,9 +481,9 @@ FamilyFund/data/
 │   └── son/           ← 儿子子基金（同结构）
 ├── sap/               ← own_sap.csv / move_sap.csv
 ├── research/          ← Finance Reports 研报库
-├── config/            ← 全局配置（dca_config/fi_config/life_stages/ah_config/tenth_man等）
+├── config/            ← 全局配置（dca_config/fi_config/life_stages/ah_config/AI周评配置等）
 ├── cache/             ← 程序生成缓存（可随时删除重建）
-└── reports/           ← 生成的报告（backtest_report/tenth_man_reports）
+└── reports/           ← 生成的报告（backtest_report等；已停用功能的历史报告保留）
 ```
 
 **工程量：** 中等。需要修改代码里几十处路径引用，以及 .env / docker-compose.yml。

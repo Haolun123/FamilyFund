@@ -17,7 +17,7 @@
 - **API**：智谱 GLM，公司设备直连可用（`open.bigmodel.cn`）
 - **费用**：免费额度内，约 ¥0/次
 - **触发**：手动点击「生成本周 AI 点评」按钮
-- **配置**：`$FAMILYFUND_DATA/tenth_man_config.json`（与第十人系统共用）
+- **配置**：`$FAMILYFUND_DATA/config/tenth_man_config.json`（历史兼容文件名；第十人功能已移除，AI周评继续使用）
 
 ---
 

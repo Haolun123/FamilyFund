@@ -1,6 +1,6 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v2.4
+> **版本**: v2.5
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
 > **最后更新**: 2026-11-04
@@ -264,7 +264,7 @@ FamilyFund/
 │   ├── DESIGN_BACKTEST.md             # 定投回测（含指标解读指南）
 │   ├── DESIGN_QUARTERLY_REPORT.md     # 季度家庭财报
 │   ├── DESIGN_AI_WEEKLY.md            # AI 周度评估
-│   ├── DESIGN_TENTH_MAN.md            # 第十人系统
+│   ├── DESIGN_TENTH_MAN.md            # 第十人功能移除说明
 │   ├── DESIGN_DCA_MANAGER.md          # 定投管理模块
 │   ├── DESIGN_AH_MONITOR.md           # AH 溢价监测
 │   ├── DESIGN_ANALYTICS.md            # 财务独立 & 储蓄率
@@ -290,17 +290,13 @@ FamilyFund/
 │   ├── dca_prepaid.json               # 合成标普β预付池状态（道指余额/抵扣日志）
 │   ├── dca_config.json                # 定投计划配置
 │   ├── fi_config.json                 # 财务独立 & 储蓄率配置
-│   ├── life_stages.json               # 人生阶段里程碑配置
-│   ├── tenth_man_config_GLM.json      # 第十人 GLM 配置（含 API Key）
-│   ├── tenth_man_config_deepseek.json # 第十人 DeepSeek 配置
-│   └── tenth_man_config_minimax.json  # 第十人 MiniMax 配置
+│   └── life_stages.json               # 人生阶段里程碑配置
 │
 ├── src/                               # 核心逻辑层（19 个模块）
 │   ├── nav_engine.py                  # ★ 多级净值核算引擎
 │   ├── market_monitor.py              # 市场温度计：PE/VIX/QVIX/乖离率矩阵
 │   ├── backtest.py                    # DCA 回测引擎
 │   ├── pdf_report.py                  # PDF 报告生成
-│   ├── tenth_man.py                   # 第十人：三 Agent LLM 审查
 │   ├── benchmark.py                   # 基准对比（7个基准，含CNY换算）
 │   ├── quarterly_engine.py            # 季度财报引擎
 │   ├── fundamentals.py                # 个股基本面 + PE历史分位
@@ -327,7 +323,7 @@ FamilyFund/
 ├── dashboard/                         # ★ 可视化仪表板
 │   └── app.py                         # Streamlit + Plotly（~4000行，8 tabs）
 │                                      # Portfolio | Ledger | SAP | Market
-│                                      # Backtest | Quarterly | Planning | 10th Man
+│                                      # Backtest | Quarterly | Planning
 │
 ├── scripts/                           # 运维脚本
 │   ├── daily_push.py                  # EC2 每日推送 + PE历史快照入口
@@ -335,7 +331,7 @@ FamilyFund/
 │
 └── tests/                             # 测试（15个文件）
     ├── test_nav_engine.py
-    ├── test_new_features.py           # 收益归因/目标配置/第十人/AI周评
+    ├── test_new_features.py           # 收益归因/目标配置/AI周评
     ├── test_market_monitor.py
     ├── test_sap_stock.py
     ├── test_fund_calculator.py
@@ -366,7 +362,7 @@ FamilyFund/
 | `dca_config.json` | CIO/UI | 增删改 | 不入 Git |
 | `fi_config.json` | CIO/UI | 增删改 | 不入 Git |
 | `life_stages.json` | CIO 手动 | 增删改 | 不入 Git |
-| `tenth_man_config_*.json` | 用户配置 | 一次性 | **不入 Git**（含 API Key） |
+| `tenth_man_config.json` | AI周评配置（历史兼容名称） | 一次性 | **不入 Git**（含 API Key） |
 | `pe_history_us.json` | EC2 自动 | 每日追加 | 不入 Git（EC2 本地积累） |
 | `portfolio_sample.csv` | 示例数据 | 只读参考 | 纳入 Git |
 | `src/*.py` | 开发维护 | 按需修改 | 纳入 Git |
@@ -672,18 +668,22 @@ graph LR
 
 ### 9.3 Phase 2+3 — Streamlit + Plotly 仪表板（已实现）
 
-位于 `dashboard/app.py`（~4000行），8个 Tab：
+位于 `dashboard/app.py`，10个 Tab：
 
 | Tab | 名称 | 主要内容 |
 |:----|:-----|:--------|
 | 1 | **Portfolio** | NAV走势+基准叠加 / 资产配置 / 持仓明细 / 风险集中度 / 货币敞口 / 盈亏分析 / 收益归因 / 再平衡建议 |
 | 2 | **Ledger** | Weekly Update（调仓辅助器+快照录入）+ 历史快照管理 |
-| 3 | **SAP** | Own/Move SAP 成本核算，ESPP/RSU 盈亏分析 |
-| 4 | **Market** | 乖离率 / VIX+QVIX / PE×VIX矩阵 / A股矩阵 / 黄金矩阵 / AH溢价 / DCA定投计划 / 弹药池 |
-| 5 | **Backtest** | 固定 vs 矩阵策略回测，5标的，XIRR+每元成本+MDD对比 |
-| 6 | **Quarterly** | 季度资产负债表 / 净资产瀑布图 / 结构对比 / PDF导出 |
-| 7 | **Planning** | 人生阶段支出曲线 / 财务独立测算（FI进度+敏感性）/ 储蓄率追踪 |
-| 8 | **10th Man** | 调仓前三 Agent LLM 强制反对审查，支持 GLM/DeepSeek/MiniMax |
+| 3 | **Son Fund** | 儿子基金独立快照与业绩 |
+| 4 | **Father Fund** | 父亲账户交易CSV、标的确认、估值快照与接手以来业绩 |
+| 5 | **SAP** | Own/Move SAP 成本核算，ESPP/RSU 盈亏分析 |
+| 6 | **Market** | 市场温度计、定投矩阵、AH溢价及弹药池 |
+| 7 | **Planning** | 人生阶段支出、财务独立测算及储蓄率 |
+| 8 | **Research** | 研报库、持仓决策及观察池 |
+| 9 | **Backtest** | 固定与矩阵策略回测 |
+| 10 | **Quarterly** | 季度资产负债表、净资产及报告 |
+
+10th Man页面、专用引擎和MCP审查入口已于2026-11-04移除。历史报告与配置保留；AI周评继续使用已有兼容配置。
 
 启动方式：
 
@@ -826,7 +826,6 @@ timeline
               : PE×VIX/QVIX 定投倍数矩阵
               : EC2 每日推送 + PE历史快照
               : DCA 回测引擎（Backtest Tab）
-              : 第十人系统（10th Man Tab）
               : AI 周度评估（GLM/DeepSeek/MiniMax）
     section Phase 5 — 家庭资产负债表（✅ 已完成）
         已完成 : 季度财报（Quarterly Tab）
@@ -862,7 +861,7 @@ timeline
 | `akshare` | A股及宏观数据（CPI/M2/CSI300/PE/QVIX） | 已使用 |
 | `yfinance` | 海外市场数据（S&P/NDX/黄金/个股）| 已使用 |
 | `scipy` | XIRR 求解 | 已使用 |
-| `openai` | 第十人系统 LLM 调用（GLM/DeepSeek/MiniMax）| 已使用 |
+| `openai` | AI周度评估 LLM 调用 | 已使用 |
 
 > **目录结构**：见 [6.1 当前结构](#61-当前结构)，已反映最新状态。
 

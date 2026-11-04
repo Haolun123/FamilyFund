@@ -4,7 +4,6 @@
 - nav_engine.compute_attribution
 - nav_engine.load_target_allocation / save_target_allocation
 - ai_weekly.build_weekly_context（结构验证）
-- tenth_man._build_decision_section / _build_market_section
 """
 import os
 import sys
@@ -152,99 +151,6 @@ class TestTargetAllocation:
         save_target_allocation(tmp_dir, alloc)
         result = load_target_allocation(tmp_dir)
         assert '_updated' not in result
-
-
-# ─── tenth_man context builders ─────────────────────────────
-
-class TestTenthManContextBuilders:
-    def test_build_decision_section(self):
-        from tenth_man import _build_decision_section
-        decision = {
-            'asset_name': '成都银行',
-            'yf_symbol': '601838.SS',
-            'direction': '买入',
-            'amount_cny': 20000,
-            'core_logic': 'PE低估',
-            'macro_assumption': '利率稳定',
-        }
-        text = _build_decision_section(decision)
-        assert '成都银行' in text
-        assert '601838.SS' in text
-        assert '买入' in text
-        assert '20,000' in text
-        assert 'PE低估' in text
-
-    def test_build_decision_section_sell(self):
-        from tenth_man import _build_decision_section
-        decision = {
-            'asset_name': '腾讯控股',
-            'yf_symbol': '0700.HK',
-            'direction': '卖出',
-            'amount_cny': 50000,
-            'core_logic': '止盈',
-            'macro_assumption': '',
-        }
-        text = _build_decision_section(decision)
-        assert '卖出' in text
-        assert '50,000' in text
-
-    def test_build_market_section_handles_none(self):
-        from tenth_man import _build_market_section
-        # 全部数据为 None（市场数据不可用）
-        empty_market = {
-            'vix': None, 'qvix': None, 'treasury_10y': None,
-            'pe_sp500': None, 'pe_ndx100': None,
-            'pe_csi300': None, 'pe_csi_a500': None,
-            'gold': None,
-        }
-        text = _build_market_section(empty_market)
-        assert '市场信号' in text  # 标题存在即可，数据可为空
-
-    def test_build_portfolio_section(self, sample_raw_df, sample_fund_nav, sample_allocation):
-        from tenth_man import _build_portfolio_section
-        text = _build_portfolio_section(sample_raw_df, sample_fund_nav, sample_allocation)
-        assert '组合状态' in text
-        assert '总资产' in text or '¥' in text
-
-    # ─── 方向感知 prompt 测试 ───
-    def test_prompt_a_buy_opposes_buying(self):
-        from tenth_man import _make_prompt_a
-        prompt = _make_prompt_a(is_buy=True)
-        assert '反对' in prompt or '买入' in prompt
-        assert '价值陷阱' in prompt
-        # 买入方向的 prompt 不应包含"反对卖出"的措辞
-        assert '反对这次卖出' not in prompt
-
-    def test_prompt_a_sell_opposes_selling(self):
-        from tenth_man import _make_prompt_a
-        prompt = _make_prompt_a(is_buy=False)
-        assert '反对' in prompt or '卖出' in prompt
-        # 卖出方向的 prompt 不应出现"价值陷阱"角色（那是买入方向的）
-        assert '价值陷阱审问官' not in prompt
-
-    def test_prompt_b_buy_stresses_against_buying(self):
-        from tenth_man import _make_prompt_b
-        prompt = _make_prompt_b(is_buy=True)
-        assert '买入' in prompt
-        assert '压测' in prompt or '压力' in prompt or '反对' in prompt
-
-    def test_prompt_b_sell_argues_against_selling(self):
-        from tenth_man import _make_prompt_b
-        prompt = _make_prompt_b(is_buy=False)
-        assert '卖出' in prompt or '减仓' in prompt
-        # 卖出方向的 Agent B 应该压测持有不卖的风险，而非找宏观利好
-        assert '持有' in prompt or '继续持有' in prompt
-
-    def test_prompt_c_buy_checks_concentration(self):
-        from tenth_man import _make_prompt_c
-        prompt = _make_prompt_c(is_buy=True)
-        assert '集中度' in prompt
-        assert '流动性' in prompt
-
-    def test_prompt_c_sell_checks_imbalance(self):
-        from tenth_man import _make_prompt_c
-        prompt = _make_prompt_c(is_buy=False)
-        assert '配置' in prompt or '失衡' in prompt
 
 
 # ─── ai_weekly context builder ──────────────────────────────

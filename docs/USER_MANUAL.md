@@ -1,5 +1,7 @@
 # FamilyFund 用户操作手册
 
+10th Man功能已于2026-11-04移除，AI周度评估仍可正常使用。
+
 ## Father Fund — 父亲账户（2026-11-04新增）
 
 入口：Dashboard → **Father Fund**。父亲账户独立保存，不影响主账户或Son Fund。

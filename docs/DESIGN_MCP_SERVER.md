@@ -2,6 +2,7 @@
 
 > **状态**：待实现（P2）
 > **日期**：2026-05-14
+> **最后更新**：2026-11-04（移除第十人审查工具）
 
 ---
 
@@ -146,26 +147,6 @@ def run_backtest(
 
 ---
 
-### T7 `ask_tenth_man`
-**用途**：调仓前强制反对审查
-
-```python
-@mcp.tool()
-def ask_tenth_man(
-    asset_name: str,
-    direction: str,        # '买入' | '卖出'
-    amount_cny: float,
-    core_logic: str,
-    macro_assumption: str = '',
-    code: str = '',
-) -> str:
-    """对调仓决策进行三角度反对审查：价值陷阱 / 宏观压测 / 流动性审计。"""
-```
-
-**实现**：`tenth_man.run_tenth_man()`，需要 `tenth_man_config_*.json` 存在
-
----
-
 ## `mcp_server.py` 骨架
 
 ```python
@@ -264,7 +245,7 @@ mcp[cli]>=1.0
 2. 实现 `mcp_server.py`，先做 T1-T4（纯读，不涉及 LLM）
 3. 配置 `.claude/mcp_config.json`，在 Claude Code 里验证 `/mcp` 工具可用
 4. 验证 WorkBuddy 接入方式（stdio vs SSE，取决于 WorkBuddy 支持的协议）
-5. T6 `run_backtest`、T7 `ask_tenth_man`（后者依赖 LLM config）
+5. T6 `run_backtest`
 6. launchd 自启（如需）
 
 ---
@@ -273,4 +254,3 @@ mcp[cli]>=1.0
 
 - **WorkBuddy 协议待确认**：如果 WorkBuddy 不支持 stdio，需改为 SSE 模式（`mcp.run(transport='sse', port=5174)`），仍然只监听 localhost
 - **akshare 在公司网络**：`get_market_signals` 拉 A 股数据可能超时（已知问题），降级返回缓存值
-- **第十人需要 LLM config**：两台 Mac 都需要有 `tenth_man_config_*.json`（iCloud 同步自动解决）
