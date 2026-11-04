@@ -1,6 +1,6 @@
 # FamilyFund 功能改进清单
 
-> **最后更新**：2026-08-17
+> **最后更新**：2026-11-04
 >
 > 本文件只做状态跟踪和优先级排序。详细设计见各 `DESIGN_XXX.md` 文件。
 
@@ -10,6 +10,7 @@
 
 | 功能 | 实现位置 |
 |------|---------|
+| Father Fund独立账户：Markdown期初/成交导入、即时记账、仓位目标、纠错、估值及券商对账 | `src/father_fund.py` + `dashboard/father_tab.py`，见 `DESIGN_FATHER_FUND.md`；实际期初和交割明细待用户补齐 |
 | 年化收益率（TWR）/ 最大回撤 / XIRR / 夏普 / 卡尔马 | `src/nav_engine.py` |
 | 数据原子写入 + 自动备份（保留30份） | `nav_engine._atomic_write_csv` |
 | 基准对比（CSI300/S&P500/CPI/M2） | `src/benchmark.py` |
@@ -51,6 +52,8 @@
 ---
 
 ## 🔧 待实现功能
+
+**测试契约待复核（2026-11-04发现）**：完整测试为566 passed / 28 skipped / 20 failed；失败涉及AH、DCA、FI、基本面历史、QVIX的config/cache路径及目录创建，旧ETF_Stock分类、NAV年化/XIRR返回预期。失败模块本轮均未改动，需另行确认应更新测试还是修复实现。Father Fund专项29项全部通过，详见 `DESIGN_FATHER_FUND.md`。
 
 ### P2 — 随时可做
 

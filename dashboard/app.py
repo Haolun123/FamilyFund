@@ -161,9 +161,13 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_son, tab_sap, tab_market, tab_planning, tab_research, tab_backtest, tab_quarterly, tab_tenth = st.tabs(
-    ["Portfolio", "Ledger", "Son Fund", "SAP", "Market", "Planning", "Research", "Backtest", "Quarterly", "10th Man"]
+tab_dashboard, tab_update, tab_son, tab_father, tab_sap, tab_market, tab_planning, tab_research, tab_backtest, tab_quarterly, tab_tenth = st.tabs(
+    ["Portfolio", "Ledger", "Son Fund", "Father Fund", "SAP", "Market", "Planning", "Research", "Backtest", "Quarterly", "10th Man"]
 )
+
+with tab_father:
+    from father_tab import render_father_fund
+    render_father_fund(os.path.dirname(csv_path))
 
 # ═══════════════════════════════════════════════════════════
 # Tab 1: Dashboard

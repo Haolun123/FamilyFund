@@ -1,10 +1,16 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v2.1
+> **版本**: v2.2
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
-> **最后更新**: 2026-08-17  
+> **最后更新**: 2026-11-04
 > **状态**: 活跃迭代中
+
+---
+
+## Father Fund 独立账户（2026-11-04）
+
+新增 Father Fund 标签页，以 `src/father_fund.py` 的单文件追加式流水推算持仓与现金，页面位于 `dashboard/father_tab.py`。成交立即保存，独立于主账户 Weekly Update；数据在主数据目录的 `father/ledger.csv`，不进入主账户或 Son Fund 的收益核算。支持 Markdown 初始化、实际人民币收付、逐项估值、计划状态、保留原记录的纠错以及券商时点对账。详见 [DESIGN_FATHER_FUND.md](DESIGN_FATHER_FUND.md)。
 
 ---
 
