@@ -10,6 +10,7 @@
 
 | 功能 | 实现位置 |
 |------|---------|
+| Portfolio基金总览展示净现金，与总资产统一使用最新快照，日期筛选仅影响折线图 | dashboard/app.py |
 | 三基金区间报表：周五边界、逐周校验、报价日期证据、链式收益、iCloud/Obsidian版本保存和同步重试 | src/three_fund_report.py + dashboard/three_fund_tab.py；见DESIGN_THREE_FUND_REPORT.md |
 | Father Fund独立账户：Markdown初始化、仓位目标、纠错及券商对账 | `src/father_fund.py` + `dashboard/father_tab.py`，见 `DESIGN_FATHER_FUND.md`；实际期初和交割明细待用户补齐 |
 | Father Fund快照流程及净值展示：交易CSV、标的识别与API验证、独立映射、一次行情刷新失败手填、统一保存及接手盈亏/净值 | `src/father_workflow.py` + `dashboard/father_tab.py`；保留Father历史，主基金/Son不变，见`DESIGN_FATHER_FUND.md` |

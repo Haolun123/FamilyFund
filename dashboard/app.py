@@ -245,9 +245,10 @@ with tab_dashboard:
     st.header("基金总览")
 
     # KPI metrics
-    latest_fund = filtered_fund.iloc[-1] if len(filtered_fund) > 0 else fund_nav_df.iloc[-1]
+    latest_fund = fund_nav_df.iloc[-1]
     latest_date = latest_fund['Date']
-    latest_holdings = raw_df[raw_df['Date'] == raw_df['Date'].max()]
+    latest_holdings = raw_df[raw_df['Date'] == latest_date]
+    net_cash = latest_holdings.loc[latest_holdings['Asset_Class'] == 'Cash', 'Total_Value'].sum()
 
     # 累计投入 = 建仓日总市值（初始本金）+ 后续历次外部入金
     # 外部入金来源(2026-05-30 修):Cash 行(银行入金)+ Company_Stock 行(SAP ESPP/RSU 归属)
@@ -263,9 +264,12 @@ with tab_dashboard:
     simple_profit = latest_fund['Total_Value'] - total_invested
     simple_return = (simple_profit / total_invested * 100) if total_invested else 0.0
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col_cash, col2, col3, col4, col5 = st.columns(6)
     with col1:
         st.metric("总资产", f"¥{latest_fund['Total_Value']:,.0f}")
+    with col_cash:
+        st.metric("净现金", f"¥{net_cash:,.0f}",
+                  help=f"截至 {latest_date}，主基金 Cash 行的 Total_Value 合计，反映已保存的现金余额。")
     with col2:
         st.metric("单位净值", f"{latest_fund['NAV']:.4f}")
     with col3:
