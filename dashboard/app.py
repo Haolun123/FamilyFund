@@ -162,7 +162,7 @@ if 'sap_price_initialized' not in st.session_state:
 # ─── Tabs ───
 
 tab_dashboard, tab_update, tab_son, tab_father, tab_sap, tab_market, tab_planning, tab_research, tab_backtest, tab_quarterly, tab_reports = st.tabs(
-    ["Portfolio", "Ledger", "Son Fund", "Father Fund", "SAP", "Market", "Planning", "Research", "Backtest", "Quarterly", "三基金报表"]
+    ["Portfolio", "Ledger", "Son Fund", "Father Fund", "SAP", "Market", "Planning", "Research", "Backtest", "Quarterly", "Reports"]
 )
 
 with tab_reports:
