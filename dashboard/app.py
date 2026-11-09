@@ -161,9 +161,13 @@ if 'sap_price_initialized' not in st.session_state:
 
 # ─── Tabs ───
 
-tab_dashboard, tab_update, tab_son, tab_father, tab_sap, tab_market, tab_planning, tab_research, tab_backtest, tab_quarterly = st.tabs(
-    ["Portfolio", "Ledger", "Son Fund", "Father Fund", "SAP", "Market", "Planning", "Research", "Backtest", "Quarterly"]
+tab_dashboard, tab_update, tab_son, tab_father, tab_sap, tab_market, tab_planning, tab_research, tab_backtest, tab_quarterly, tab_reports = st.tabs(
+    ["Portfolio", "Ledger", "Son Fund", "Father Fund", "SAP", "Market", "Planning", "Research", "Backtest", "Quarterly", "三基金报表"]
 )
+
+with tab_reports:
+    from three_fund_tab import render_three_fund_report
+    render_three_fund_report(os.path.dirname(csv_path))
 
 with tab_father:
     from father_tab import render_father_fund
@@ -2468,6 +2472,8 @@ with tab_update:
                 _manual += 1
             else:
                 _err += 1
+        from three_fund_report import stamp_quote_dates
+        _template = stamp_quote_dates(_template, _price_results)
         st.session_state['update_template'] = _template
         st.session_state['_refresh_summary'] = {'ok': _ok, 'manual': _manual, 'err': _err, 'results': _price_results}
         st.rerun()
@@ -2674,6 +2680,7 @@ with tab_update:
             # Build the final rows
             save_df = edited_df.copy()
             save_df.insert(0, 'Date', new_date_str)
+            save_df['Quote_Metadata_Version'] = 1
             save_df['Code'] = save_df['Code'].fillna('').astype(str)
             save_df['Exchange_Rate'] = save_df['Exchange_Rate'].fillna(1.0)
             save_df['Net_Cash_Flow'] = save_df['Net_Cash_Flow'].fillna(0.0)
@@ -7150,6 +7157,8 @@ with tab_son:
                         _son_ok += 1
                 except Exception:
                     pass
+        from three_fund_report import stamp_quote_dates
+        _son_tmpl = stamp_quote_dates(_son_tmpl, _son_prices)
         st.session_state['son_update_template'] = normalize_cash(_son_tmpl)
         st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
         st.success(f"已刷新 {_son_ok} 个标的")
@@ -7160,6 +7169,7 @@ with tab_son:
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
+        column_order=['Asset_Class','Platform','Name','Code','Currency','Exchange_Rate','Shares','Current_Price','Total_Value','Net_Cash_Flow'],
         key=f"son_weekly_editor_{st.session_state.get('son_editor_version',0)}",
         column_config={
             "Asset_Class": st.column_config.SelectboxColumn("Asset_Class", options=sorted(VALID_ASSET_CLASSES)),
@@ -7219,7 +7229,9 @@ with tab_son:
     _son_confirm=st.checkbox('确认子基金数据无误',key='son_confirm')
     if st.button('💾 保存子基金快照',type='primary',disabled=not _son_confirm or bool(_son_error),key='son_save'):
         try:
-            save_update(SON_DATA_DIR,_son_edited,_son_new_date_str,_pending,
+            _son_to_save=_son_edited.copy()
+            _son_to_save['Quote_Metadata_Version']=1
+            save_update(SON_DATA_DIR,_son_to_save,_son_new_date_str,_pending,
                         st.session_state['son_base_signature'])
         except (ValueError,OSError) as exc:
             st.error(f'保存失败，草稿已保留：{exc}')

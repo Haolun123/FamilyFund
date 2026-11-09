@@ -1,12 +1,18 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v2.6
+> **版本**: v2.7
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
-> **最后更新**: 2026-11-04
+> **最后更新**: 2026-11-09
 > **状态**: 活跃迭代中
 
 ---
+
+## 三基金区间报表（2026-11-09）
+
+新增独立“三基金报表”Tab，dashboard/three_fund_tab.py展示，src/three_fund_report.py负责周五边界、三账本适配、逐周校验、外部现金流剔除、链式收益及持仓贡献。父亲周末估值只在报告内存视图中规范为周五，原账簿不迁移。价格刷新记录可选Price_Date及绑定值；FX_Date只有来源给出日期时记录。历史日期未知报告注明，已知旧价拒绝生成；节假日估值日通过绑定价格的valuation_dates.csv明确确认。
+
+报告及底稿存于data/weekly_summaries，正文同步至Obsidian familyfund/weekly_summaries。同区间不覆盖，源版本变化要求重新预览；同步失败可重试同一版本。儿子基金同周周末操作在保存时按周五记账，原日期保留备注。见[DESIGN_THREE_FUND_REPORT.md](DESIGN_THREE_FUND_REPORT.md)。不增加报价请求或修改nav_engine算法。
 
 ## Son Fund记账修复（2026-11-04）
 

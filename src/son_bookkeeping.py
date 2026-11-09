@@ -1,5 +1,5 @@
 """Son Fund draft bookkeeping: cash units, real trades and snapshot saving."""
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from decimal import Decimal
@@ -135,7 +135,17 @@ def prepare_snapshot(template, day, existing, transactions, today=None):
     saved.insert(0,'Date',str(day))
     tx=[dict(t,Date=str(day)) for t in transactions]
     for t in tx:
-        if date.fromisoformat(t['Trade_Date'])>day: raise ValueError('快照日期不能早于本期成交或入金日期')
+        booking=date.fromisoformat(t['Trade_Date'])
+        if booking.weekday()>4:
+            friday=booking-timedelta(days=booking.weekday()-4)
+            snapshot_friday=day+timedelta(days=4-day.weekday())
+            if friday==snapshot_friday:
+                t['Trade_Date']=str(friday)
+                t['Note']=(t.get('Note','')+f'；周末操作原日期{booking}，按{friday}记账').lstrip('；')
+                booking=friday
+        if booking>day: raise ValueError('快照日期不能早于本期成交或入金日期')
+        if day.weekday()>=4 and booking-timedelta(days=booking.weekday())!=day-timedelta(days=day.weekday()):
+            raise ValueError('交易或入金必须归属本期同一周，不能混入其他周')
     return saved,pd.DataFrame(tx)
 
 

@@ -63,6 +63,22 @@ def test_initial_deposit_creates_cash_in_same_units():
     assert result.iloc[0].Current_Price==1
 
 
+def test_weekend_deposit_booked_on_previous_friday_without_changing_cash():
+    existing=template();existing.insert(0,'Date','2026-10-30')
+    draft,tx=sb.apply_deposit(template(),5000,'2026-11-06',trade_date='2026-11-08')
+    saved,trades=sb.prepare_snapshot(draft,'2026-11-06',existing,tx,today=date(2026,11,9))
+    assert trades.iloc[0].Trade_Date=='2026-11-06'
+    assert '原日期2026-11-08' in trades.iloc[0].Note
+    assert saved.iloc[-1].Total_Value==23666
+    assert tx[0]['Trade_Date']=='2026-11-08'
+
+
+def test_previous_week_trade_cannot_be_mixed_into_friday_snapshot():
+    existing=template();existing.insert(0,'Date','2026-10-30')
+    with pytest.raises(ValueError,match='同一周'):
+        sb.prepare_snapshot(template(),'2026-11-06',existing,[dict(Trade_Date='2026-10-29')],today=date(2026,11,9))
+
+
 @pytest.mark.parametrize('changes',[dict(amount=30000),dict(shares=0),dict(amount=float('nan')),dict(nav=-1)])
 def test_invalid_buy_preserves_original_draft(changes):
     original=template();before=original.copy()
