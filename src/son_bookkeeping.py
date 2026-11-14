@@ -56,6 +56,30 @@ def frame_signature(frame):
     return hashlib.sha256(frame.to_json(orient='split',double_precision=10).encode()).hexdigest()
 
 
+def confirm_quote_dates(frame, codes, price_date, snapshot_date, fx_date=None, today=None):
+    """Bind explicitly confirmed dates to current edited values; never infer them."""
+    result=frame.copy()
+    cutoff=min(date.fromisoformat(str(snapshot_date)),today or today_beijing())
+    price_date=date.fromisoformat(str(price_date))
+    if price_date>cutoff: raise ValueError('实际报价日期不能晚于快照日期或今天')
+    if fx_date is not None:
+        fx_date=date.fromisoformat(str(fx_date))
+        if fx_date>cutoff: raise ValueError('实际汇率日期不能晚于快照日期或今天')
+    if not codes: raise ValueError('请选择需要确认报价日期的标的')
+    for code in codes:
+        matched=result.Code.astype(str).eq(str(code)) & ~cash_rows(result)
+        if matched.sum()!=1: raise ValueError('报价日期只能确认当前唯一非现金持仓')
+        i=result[matched].index[0]
+        price=_number(result.at[i,'Current_Price'],'当前价格／净值',True)
+        result.at[i,'Price_Date']=price_date.isoformat()
+        result.at[i,'Price_Date_Value']=str(price)
+        if fx_date is not None and result.at[i,'Currency']!='CNY':
+            rate=_number(result.at[i,'Exchange_Rate'],'汇率',True)
+            result.at[i,'FX_Date']=fx_date.isoformat()
+            result.at[i,'FX_Date_Value']=str(rate)
+    return result
+
+
 def apply_buys(template, purchases, snapshot_date):
     result=normalize_cash(template); transactions=[]; total=0.
     for purchase in purchases:

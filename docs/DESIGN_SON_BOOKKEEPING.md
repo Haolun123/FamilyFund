@@ -24,6 +24,8 @@ Cash以Total_Value为真实余额，统一Shares=余额、Current_Price=1、Exch
 
 ## 定投文本与短信（2026-11-14）
 
+手动修改持仓价格不会凭空获得Price_Date。新增“确认手动报价日期”操作，复用son_bookkeeping.confirm_quote_dates绑定已明确确认的实际日期和当前价格；不能晚于快照日或今天，Cash不参与确认。数字不变，也不新增交易。价格再变化时旧日期绑定失效，仍需重新确认。历史快照只通过独立valuation_dates.csv补充，不自动回写。
+
 主基金已有的code开头、金额/份额/净值三列解析器原样提取为src/dca_text_parser.py，主基金页面保留原有工作流程。儿子基金复用该函数，按当前持仓识别代码和名称，排除Cash及未知代码；多标的空行分组，格式错误行给出提示。金额、份额及净值必须通过apply_buys的有效正数校验才能应用。新建标的仍使用已有手动登记。
 
 儿子基金的文本独立解析、预览、应用，复用apply_buys增加份额/NCF、扣减现金并创建真实流水，与短信共用son_pending_transactions及save_update。没有逐笔日期的文本将Trade_Date记为所选快照日期，并在Note明确记录；不编造逐笔发生日期。相同文本中的真实多笔成交不去重，页面提示同一笔不要跨渠道重复录入。

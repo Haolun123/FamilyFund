@@ -8,6 +8,23 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 class TestRouting:
 
+    @pytest.mark.parametrize('code',['513400','513390','513650'])
+    def test_exchange_etf_uses_market_close_not_fund_nav(self,monkeypatch,code):
+        import price_fetcher as p
+        calls=[]
+        def quote(symbol,label=''):
+            calls.append(symbol)
+            return dict(price=2.5,date='2026-11-13',status='ok',msg=label)
+        monkeypatch.setattr(p,'_fetch_yf',quote)
+        monkeypatch.setattr(p,'_fetch_eastmoney',lambda code:pytest.fail('场内ETF不能走基金净值'))
+        assert p._route(code)['price']==2.5
+        assert calls==[code+'.SS']
+
+    def test_other_fund_still_uses_fund_nav(self,monkeypatch):
+        import price_fetcher as p
+        monkeypatch.setattr(p,'_fetch_eastmoney',lambda code:dict(price=1.7,date='2026-11-12',status='ok',msg=code))
+        assert p._route('017641')['msg']=='017641'
+
     def test_cash_fixed(self):
         from price_fetcher import _route
         r = _route('CASH')
@@ -61,6 +78,18 @@ class TestRouting:
 
 
 class TestFetchLatestPrices:
+
+    def test_exchange_codes_override_optional_symbol_map(self,monkeypatch,tmp_path):
+        import pandas as pd
+        import price_fetcher as p
+        import fundamentals
+        monkeypatch.setattr(fundamentals,'load_yf_symbols',lambda path:{'513400':{'yf_symbol':'wrong'}})
+        monkeypatch.setattr(fundamentals,'get_yf_symbol',lambda raw,code:raw[code]['yf_symbol'])
+        monkeypatch.setattr(p,'_fetch_yf',lambda symbol,label='':dict(price=1.3,date='2026-11-13',status='ok',msg=symbol))
+        monkeypatch.setattr(p,'_fetch_eastmoney',lambda code:pytest.fail('场内ETF不能走基金净值'))
+        df=pd.DataFrame([dict(Date='2026-11-13',Code=c) for c in ['513400','513390','513650']])
+        result=p.fetch_latest_prices(df,str(tmp_path))
+        assert {c:r['msg'] for c,r in result.items()}=={c:c+'.SS' for c in df.Code}
 
     def test_returns_dict_with_all_codes(self, tmp_path):
         """返回字典包含所有持仓 Code"""

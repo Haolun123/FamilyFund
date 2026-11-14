@@ -77,6 +77,30 @@ def test_missing_actual_cash_and_bad_date_do_not_save(tmp_path,monkeypatch):
     assert at.error
 
 
+def test_weekend_manual_price_keeps_friday_quote_date(tmp_path,monkeypatch):
+    import father_fund
+    from datetime import datetime,date
+    monkeypatch.setattr(father_fund,'now_beijing',lambda:datetime(2026,11,14,12))
+    module=tab_module(monkeypatch)
+    monkeypatch.setattr(module,'now_beijing',lambda:datetime(2026,11,14,12))
+    at=app(tmp_path,monkeypatch,initialized=True)
+    assert widget(at.date_input,'快照日期').value==date(2026,11,14)
+    assert widget(at.date_input,'手动报价实际日期').value==date(2026,11,13)
+    # Use the existing failed-fetch manual fallback.
+    monkeypatch.setattr(module,'fetch_quote',lambda meta:dict(status='error',price=None,msg='test failure'))
+    widget(at.button,'刷新价格／净值（拉取一次）').click().run()
+    widget(at.number_input,'手动价格／净值').set_value(6).run()
+    widget(at.button,'确认手动价格').click().run()
+    assert not at.exception
+    assert at.session_state['ff_values']['002277']['date']=='2026-11-13'
+    widget(at.checkbox,'已核对本期交易、价格和汇率；接受明确标记的旧报价或估算值').check().run()
+    widget(at.button,'保存父亲账户快照').click().run()
+    assert not at.exception
+    snapshot=read_events(tmp_path/'father')[-1]
+    assert snapshot['effective_at']=='2026-11-14T23:59:59'
+    assert snapshot['payload']['quotes'][0]['as_of']=='2026-11-13T23:59:59'
+
+
 def test_csv_repeat_application_and_distinct_fills(tmp_path,monkeypatch):
     at=app(tmp_path,monkeypatch,initialized=True)
     text='2026-11-02,买入,002277,100,5,500'

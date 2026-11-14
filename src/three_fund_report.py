@@ -137,25 +137,26 @@ def _father_frame(root):
         if previous is None or e['effective_at']>previous['effective_at']:
             selected[target] = e
     chosen_ids = {e['event_id'] for e in selected.values()}
-    for e in active:
-        d = day(e['effective_at'])
-        if e['kind'] in {'TRADE','CASH'} and d.weekday()>4:
-            e['effective_at'] = week_friday(d).isoformat()+'T23:59:58'
-        if e['kind']=='SNAPSHOT' and e['event_id'] in chosen_ids:
-            e['effective_at'] = week_friday(d).isoformat()+'T23:59:59'
     active = [e for e in active if e['kind']!='SNAPSHOT' or day(e['effective_at']).weekday()<4 or e['event_id'] in chosen_ids]
+    # Replay authoritative timestamps first. Moving a Saturday snapshot before
+    # its Saturday manual quote would create an invalid journal in memory.
     try:
         frame = snapshot_portfolio(active)
     except ValueError as exc:
         raise ReportError('父亲快照及持仓无法按周重建：'+str(exc)) from exc
-    frame['Date'] = frame.Date.map(lambda x: x[:10])
     quotes = {(e['effective_at'][:10], q['code']): q for e in active if e['kind']=='SNAPSHOT' for q in e['payload']['quotes']}
     for i, row in frame.iterrows():
-        q = quotes.get((row.Date, row.Code))
+        q = quotes.get((row.Date[:10], row.Code))
         if q:
             frame.at[i, 'Price_Date'] = q['as_of'][:10]
             # Legacy father quotes have one timestamp for the composite quote.
-            frame.at[i, 'FX_Date'] = q.get('fx_as_of', q['as_of'])[:10]
+            frame.at[i, 'FX_Date'] = '' if row.Currency=='CNY' else q.get('fx_as_of', q['as_of'])[:10]
+    frame['Date'] = frame.Date.map(lambda x: week_friday(x).isoformat() if day(x).weekday()>4 else x[:10])
+    # Only reporting labels change; actual quote dates remain available for
+    # cutoff checks and explicit price-bound date evidence.
+    for e in active:
+        if e['kind'] in {'TRADE','CASH'} and day(e['effective_at']).weekday()>4:
+            e['effective_at'] = week_friday(e['effective_at']).isoformat()+'T23:59:58'
     return frame, active
 
 
@@ -304,9 +305,9 @@ def _check_snapshot(frame, at, label, evidence, warnings, opening=False):
                     raise ReportError(prefix+'新快照缺少'+field+'，请在报表页补充已核实日期')
                 warnings.append(prefix+('：报价日期未验证' if field=='Price_Date' else '：汇率日期未验证'))
             elif day(observed)<day(expected):
-                raise ReportError(prefix+f'报价／汇率过期：{observed}，期望{expected}')
+                raise ReportError(prefix+f'报价／汇率过期：{observed}，期望{expected}；若为QDII公布滞后或休市，请在报表页明确实际估值日与理由，不能直接改成周五')
             elif day(observed)>day(at):
-                raise ReportError(prefix+f'报价／汇率晚于截止日：{observed}')
+                raise ReportError(prefix+f'报价／汇率晚于截止日：{observed}；周末录入的周五价格请补充已核实日期，不能使用截止日之后的实际行情')
 
 
 def _transactions(root, key, bounds, warnings, events=None):

@@ -190,6 +190,27 @@ def test_father_weekend_snapshot_with_stale_quote_rejected(accounts):
         t.build_report(accounts,'2026-11-02','2026-11-06')
 
 
+def test_father_weekend_manual_quote_does_not_break_replay_or_hide_date_rows(accounts):
+    p=accounts/'father/ledger.csv';frame=pd.read_csv(p)
+    payload=json.loads(frame.iloc[-1].payload)
+    payload['quotes'][0]['as_of']='2026-11-08T23:59:59'
+    payload['quotes'][0]['source']='手动'
+    frame.loc[frame.index[-1],'payload']=json.dumps(payload);frame.to_csv(p,index=False)
+    original=p.read_bytes()
+    # The journal is valid on its saved Sunday; its true quote date must not
+    # become an impossible Friday timestamp during report reconstruction.
+    dates=t.date_rows(t.account_paths(accounts),'2026-11-02','2026-11-06')
+    f=dates[(dates.Fund=='father')&(dates.Date=='2026-11-06')]
+    assert len(f)==1 and f.iloc[0].Price_Date=='2026-11-08'
+    with pytest.raises(t.ReportError,match='晚于截止日'):
+        t.build_report(accounts,'2026-11-02','2026-11-06')
+    # Explicit confirmation is bound to this value, not a journal rewrite.
+    f=f.copy();f['Price_Date']='2026-11-06';f['Reason']='核对后确认实际为周五收盘价格，周日只是录入日'
+    t.save_date_rows(t.account_paths(accounts),f,t.source_versions(t.account_paths(accounts)))
+    assert t.build_report(accounts,'2026-11-02','2026-11-06')['funds'][2]['pnl']==10
+    assert p.read_bytes()==original
+
+
 def test_later_father_transaction_not_counted_into_previous_week(accounts):
     extra=event('CASH','2026-11-09T12:00:00',dict(action='入金',amount='1000'))
     commit_events(accounts/'father',[extra])

@@ -1,5 +1,6 @@
 """Father Fund: CSV drafts, quote fallback and atomic snapshot saving."""
 from decimal import Decimal
+from datetime import timedelta
 from pathlib import Path
 import hashlib
 import os
@@ -309,6 +310,12 @@ def _valuation(data_dir,parent_dir,events,state):
     st.subheader('确认持仓数据／刷新价格')
     snapshot_date=st.date_input('快照日期',value=now_beijing().date(),max_value=now_beijing().date(),key='ff_snapshot_date')
     at=str(snapshot_date)+'T23:59:59'
+    quote_default=snapshot_date-timedelta(days=max(0,snapshot_date.weekday()-4))
+    if st.session_state.get('ff_manual_quote_date',quote_default)>snapshot_date:
+        st.session_state['ff_manual_quote_date']=quote_default
+    manual_quote_date=st.date_input('手动报价实际日期',value=quote_default,
+        max_value=snapshot_date,key='ff_manual_quote_date',
+        help='填写实际收盘价／净值日期。周末补录默认前周五，录入日期与报价日期分开。')
     frame=holdings_frame(state)
     values=st.session_state.setdefault('ff_values',{})
     if not frame.empty:
@@ -333,7 +340,7 @@ def _valuation(data_dir,parent_dir,events,state):
             changed=not previous and (float(r['价格'])!=float(state['positions'][code]['price']) or float(r['折算汇率'])!=float(state['positions'][code]['fx']))
             changed=changed or bool(previous and (float(r['价格'])!=previous['price'] or float(r['折算汇率'])!=previous['fx']))
             if changed:
-                values[code]=dict(price=float(r['价格']),fx=float(r['折算汇率']),date=str(snapshot_date),source='手动')
+                values[code]=dict(price=float(r['价格']),fx=float(r['折算汇率']),date=str(manual_quote_date),source='手动')
                 st.session_state['ff_confirm_snapshot']=False
         if st.button('刷新价格／净值（拉取一次）',key='ff_refresh'):
             registry=load_registry(data_dir); results={}
@@ -355,7 +362,7 @@ def _valuation(data_dir,parent_dir,events,state):
         results=st.session_state.get('ff_refresh_results',{})
         if results:
             ok=sum(r.get('status')=='ok' for r in results.values())
-            manual=sum(r.get('status')!='ok' and values.get(c,{}).get('source')=='手动' and values[c].get('date')==str(snapshot_date) for c,r in results.items())
+            manual=sum(r.get('status')!='ok' and values.get(c,{}).get('source')=='手动' and values[c].get('date')==str(quote_default) for c,r in results.items())
             st.caption(f'自动刷新{ok}个；手动确认{manual}个；{len(results)-ok-manual}个需补充。失败不覆盖原值。')
             for code,result in results.items():
                 if code not in state['positions'] or state['positions'][code]['quantity']<=0: continue
@@ -367,7 +374,7 @@ def _valuation(data_dir,parent_dir,events,state):
                     price=st.number_input('手动价格／净值',min_value=0.,value=float(current.get('price',0)),format='%.6f',key=f'ff_manual_price_{code}')
                     rate=1. if p['currency']=='CNY' else st.number_input('手动人民币折算汇率',min_value=.00000001,value=float(current.get('fx',p['fx'])),format='%.8f',key=f'ff_manual_fx_{code}')
                     if st.button('确认手动价格',key=f'ff_manual_confirm_{code}') and price>0:
-                        values[code]=dict(price=price,fx=rate,date=str(snapshot_date),source='手动')
+                        values[code]=dict(price=price,fx=rate,date=str(manual_quote_date),source='手动')
                         st.session_state['ff_reset_confirm']=True
                         st.session_state['ff_grid_version']=st.session_state.get('ff_grid_version',0)+1
                         st.rerun()
@@ -381,7 +388,7 @@ def _valuation(data_dir,parent_dir,events,state):
         raw_date=value.get('date') or p['quoted_at']
         date=str(raw_date)[:10]
         quote_at=date+'T23:59:59' if value else p['quoted_at']
-        if date<str(snapshot_date) or not value or not value.get('date'): stale.append(p['name'])
+        if date<str(quote_default) or not value or not value.get('date'): stale.append(p['name'])
         quotes.append(dict(code=code,price=str(price),fx=str(rate),as_of=quote_at,source=value.get('source','已保存／成交估值')))
     if stale: st.warning('以下标的使用旧报价／成交估值，请手动确认或接受保留：'+'、'.join(stale))
     try:

@@ -108,6 +108,18 @@ def test_invalid_text_does_not_block_valid_sms_or_modify_draft(tmp_path,monkeypa
     assert not at.exception and len(pd.read_csv(tmp_path/'transaction.csv'))==1
 
 
+def test_manual_quote_confirmation_records_actual_day_not_snapshot_day(tmp_path,monkeypatch):
+    at=app(tmp_path,monkeypatch)
+    widget(at.multiselect,'需要确认的标的').set_value(['021000']).run()
+    widget(at.date_input,'实际净值／收盘日期').set_value(date(2026,10,29)).run()
+    widget(at.button,'确认所选标的报价日期').click().run()
+    assert not at.exception
+    row=at.session_state['son_update_template'].iloc[0]
+    assert row.Price_Date=='2026-10-29'
+    assert float(row.Price_Date_Value)==row.Current_Price
+    assert row.Shares==100 and row.Net_Cash_Flow==0
+
+
 def test_manual_buy_stages_real_transaction_with_cash_units(tmp_path,monkeypatch):
     at=app(tmp_path,monkeypatch)
     widget(at.button,'＋ 买入').click().run()

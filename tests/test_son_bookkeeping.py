@@ -31,6 +31,25 @@ def test_default_friday_uses_beijing_today_and_crosses_year(monkeypatch):
     assert sb.default_snapshot_date() == date(2027, 1, 1)
 
 
+def test_explicit_quote_date_binds_to_price_and_does_not_change_holdings():
+    original=template()
+    confirmed=sb.confirm_quote_dates(original,['021000'],'2026-11-12','2026-11-13',today=date(2026,11,14))
+    assert confirmed.iloc[0].Price_Date=='2026-11-12'
+    assert float(confirmed.iloc[0].Price_Date_Value)==original.iloc[0].Current_Price
+    pd.testing.assert_frame_equal(confirmed[original.columns],original)
+    assert 'Price_Date' not in original
+
+
+def test_quote_date_confirmation_rejects_future_cash_or_invalid_price():
+    with pytest.raises(ValueError,match='晚于'):
+        sb.confirm_quote_dates(template(),['021000'],'2026-11-14','2026-11-13',today=date(2026,11,14))
+    with pytest.raises(ValueError,match='非现金'):
+        sb.confirm_quote_dates(template(),['CASH'],'2026-11-13','2026-11-13')
+    invalid=template();invalid.loc[0,'Current_Price']=float('nan')
+    with pytest.raises(ValueError,match='正数'):
+        sb.confirm_quote_dates(invalid,['021000'],'2026-11-13','2026-11-13')
+
+
 def test_stale_shares_never_override_cash_balance():
     old=template();normalized=sb.normalize_cash(old)
     cash=normalized.iloc[-1]

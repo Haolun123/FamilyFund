@@ -6790,7 +6790,8 @@ with tab_research:
 with tab_son:
     import math as _math_son
     from son_bookkeeping import (normalize_cash, apply_buys, apply_deposit, frame_signature,
-                                 prepare_snapshot, save_update, today_beijing, default_snapshot_date)
+                                 prepare_snapshot, save_update, today_beijing, default_snapshot_date,
+                                 confirm_quote_dates)
 
     SON_DATA_DIR = os.environ.get('FAMILYFUND_SON_DATA', os.path.join(os.path.dirname(csv_path), 'son'))
     SON_CSV = os.path.join(SON_DATA_DIR, 'portfolio.csv')
@@ -7163,6 +7164,26 @@ with tab_son:
             "Net_Cash_Flow": st.column_config.NumberColumn("Net_Cash_Flow", default=0.0),
         },
     )
+
+    with st.expander('确认手动报价日期', expanded=False):
+        st.caption('手填净值不会自动证明报价日期。请按基金App显示的净值日期确认；QDII最新净值可能早于周五。')
+        _son_date_names = dict(zip(_son_edited.Code.astype(str), _son_edited.Name.astype(str)))
+        _son_date_codes = st.multiselect('需要确认的标的',
+            _son_edited.loc[_son_edited.Code.astype(str)!='CASH','Code'].astype(str).tolist(),
+            format_func=lambda code:f'{_son_date_names[code]}（{code}）', key='son_quote_codes')
+        _son_quote_limit = min(_son_new_date, _today)
+        if st.session_state.get('son_quote_day', _son_quote_limit)>_son_quote_limit:
+            st.session_state['son_quote_day'] = _son_quote_limit
+        _son_price_day = st.date_input('实际净值／收盘日期',
+            value=_son_quote_limit, max_value=_son_quote_limit, key='son_quote_day')
+        if st.button('确认所选标的报价日期', key='son_quote_confirm'):
+            try:
+                st.session_state['son_update_template'] = confirm_quote_dates(
+                    _son_edited, _son_date_codes, _son_price_day, _son_new_date)
+                st.session_state['son_editor_version'] = st.session_state.get('son_editor_version',0)+1
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
 
     # 重算市值
     if st.button("🔄 重算市值", key="son_recalc", type="secondary"):

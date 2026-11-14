@@ -1,7 +1,8 @@
 """price_fetcher.py — 一键刷新净值，按 Code 格式路由到各数据源。
 
 支持：
-- 6位纯数字 → 天天基金 API（国内公募基金）
+- 指定场内ETF（513400/513390/513650）→ yfinance交易所收盘价，包含场内溢价
+- 其他6位纯数字 → 天天基金 API（国内公募基金）
 - *.SS / *.SZ → yfinance（A股个股）
 - HK* → yfinance（港股，转换为 XXXX.HK 格式）
 - GOLD / GOLD.P → yfinance GC=F + USD/CNY 换算（元/克）
@@ -22,6 +23,13 @@
 
 import re
 from datetime import date
+
+
+EXCHANGE_TRADED_ETFS = {
+    '513400': '513400.SS',  # 道指ETF
+    '513390': '513390.SS',  # 纳指100ETF博时
+    '513650': '513650.SS',  # 标普500ETF南方
+}
 
 
 # ── 天天基金 ──────────────────────────────────────────────
@@ -206,6 +214,10 @@ def _route(code: str) -> dict:
     if code in ('GOLD', 'GOLD.P'):
         return _fetch_gold_cny()
 
+    # 场内成交价格优先，不能用基金单位净值替代可交易市值。
+    if code in EXCHANGE_TRADED_ETFS:
+        return _fetch_yf(EXCHANGE_TRADED_ETFS[code], f'场内ETF {code}')
+
     # 6位纯数字 → 国内公募基金（天天基金）
     if re.match(r'^\d{6}$', code):
         return _fetch_eastmoney(code)
@@ -271,8 +283,11 @@ def fetch_latest_prices(raw_df, data_dir: str = None) -> dict:
 
     results = {}
     for code in codes:
+        code = str(code)
         # 6位数字且在 yf_symbols 中 → A股个股，走 yfinance
-        if re.match(r'^\d{6}$', code) and code in yf_map:
+        if code in EXCHANGE_TRADED_ETFS:
+            results[code] = _route(code)
+        elif re.match(r'^\d{6}$', code) and code in yf_map:
             results[code] = _fetch_yf(yf_map[code], f'A股 {code}')
         else:
             results[code] = _route(code)

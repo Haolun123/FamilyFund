@@ -10,6 +10,7 @@
 
 | 功能 | 实现位置 |
 |------|---------|
+| 场内美股ETF三只优先用交易所价格；手填报价日期明确确认；父亲周末快照先重放再归周，不改真实报价日期 | src/price_fetcher.py、src/son_bookkeeping.py、src/three_fund_report.py及对应页面；QDII公布滞后需显式期望日，不伪造周五净值 |
 | 儿子基金周更新：默认当周周五、保留手选日期；复用主基金定投文本解析，文本/短信任选，统一生成买入流水并保存 | src/dca_text_parser.py + src/son_bookkeeping.py + dashboard/app.py；见DESIGN_SON_BOOKKEEPING.md |
 | Portfolio基金总览展示净现金，与总资产统一使用最新快照，日期筛选仅影响折线图 | dashboard/app.py |
 | 三基金区间报表：周五边界、逐周校验、报价日期证据、链式收益、iCloud/Obsidian版本保存和同步重试 | src/three_fund_report.py + dashboard/three_fund_tab.py；见DESIGN_THREE_FUND_REPORT.md |
