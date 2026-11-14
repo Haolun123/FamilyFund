@@ -1,5 +1,5 @@
 from pathlib import Path
-from datetime import date
+from datetime import date, timedelta
 import sys
 import pandas as pd
 import pytest
@@ -19,6 +19,16 @@ def template(balance=18666):
 def buy(**changes):
     row=dict(code='021000',name='南方纳指100 I类',amount=200.,shares=80.,nav=2.5,trade_date='2026-10-30',note='短信确认')
     row.update(changes);return row
+
+
+@pytest.mark.parametrize('offset', range(7))
+def test_default_date_is_current_week_friday_including_weekend(offset):
+    assert sb.default_snapshot_date(date(2026, 11, 9) + timedelta(days=offset)) == date(2026, 11, 13)
+
+
+def test_default_friday_uses_beijing_today_and_crosses_year(monkeypatch):
+    monkeypatch.setattr(sb, 'today_beijing', lambda: date(2026, 12, 31))
+    assert sb.default_snapshot_date() == date(2027, 1, 1)
 
 
 def test_stale_shares_never_override_cash_balance():

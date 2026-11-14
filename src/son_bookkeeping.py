@@ -28,6 +28,12 @@ def today_beijing():
     return datetime.now(ZoneInfo('Asia/Shanghai')).date()
 
 
+def default_snapshot_date(today=None):
+    """Friday of the current Beijing week, including its following weekend."""
+    today = today or today_beijing()
+    return today + timedelta(days=4-today.weekday())
+
+
 def cash_rows(frame):
     return frame['Code'].fillna('').astype(str).eq('CASH') | frame['Asset_Class'].eq('Cash')
 

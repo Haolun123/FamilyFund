@@ -14,9 +14,12 @@ def widget(collection,label):
     return next(w for w in collection if w.label==label)
 
 
-def app(tmp_path,monkeypatch):
+def app(tmp_path,monkeypatch, today=None, select_date=True):
     project=Path(__file__).resolve().parents[1]
     monkeypatch.setenv('FAMILYFUND_SON_DATA',str(tmp_path))
+    if today is not None:
+        import son_bookkeeping
+        monkeypatch.setattr(son_bookkeeping, 'today_beijing', lambda: today)
     pd.DataFrame([dict(Date='2026-10-24',Asset_Class='US_Growth_Fund',Platform='场外基金',Name='南方纳指100 I类',
         Code='021000',Currency='CNY',Exchange_Rate=1.,Shares=100.,Current_Price=2.,Total_Value=200.,Net_Cash_Flow=200.),
         dict(Date='2026-10-24',Asset_Class='Cash',Platform='专属账户',Name='Son Fund现金',Code='CASH',
@@ -36,8 +39,73 @@ csv_path={str(tmp_path/'main_portfolio.csv')!r}
 '''
     at=AppTest.from_string(prelude+source,default_timeout=20).run()
     assert not at.exception
-    widget(at.date_input,'本次快照日期（请选实际估值日期）').set_value(date(2026,10,30)).run()
+    if select_date:
+        widget(at.date_input,'本次快照日期（请选实际估值日期）').set_value(date(2026,10,30)).run()
     return at
+
+
+def test_weekend_defaults_to_friday_and_manual_override_survives_rerun(tmp_path,monkeypatch):
+    at=app(tmp_path,monkeypatch,today=date(2026,11,14),select_date=False)
+    day=widget(at.date_input,'本次快照日期（请选实际估值日期）')
+    assert day.value==date(2026,11,13)
+    day.set_value(date(2026,11,6)).run()
+    at.run()
+    assert widget(at.date_input,'本次快照日期（请选实际估值日期）').value==date(2026,11,6)
+    widget(at.button,'重置子基金本期草稿').click().run()
+    assert not at.exception
+    assert widget(at.date_input,'本次快照日期（请选实际估值日期）').value==date(2026,11,13)
+
+
+def test_midweek_friday_anchor_cannot_save_future_snapshot(tmp_path,monkeypatch):
+    at=app(tmp_path,monkeypatch,today=date(2026,11,11),select_date=False)
+    assert widget(at.date_input,'本次快照日期（请选实际估值日期）').value==date(2026,11,13)
+    widget(at.checkbox,'确认子基金数据无误').check().run()
+    assert widget(at.button,'💾 保存子基金快照').disabled
+    widget(at.date_input,'本次快照日期（请选实际估值日期）').set_value(date(2026,11,11)).run()
+    assert not widget(at.button,'💾 保存子基金快照').disabled
+
+
+def test_text_only_saves_five_real_trades_even_when_sms_invalid(tmp_path,monkeypatch):
+    at=app(tmp_path,monkeypatch)
+    widget(at.text_area,'粘贴定投确认短信（多条用空行分隔）').set_value('无法识别的短信')
+    widget(at.button,'🔍 解析短信').click().run()
+    text='code: 021000\n200,88.47,2.2607\n200,91.51,2.1856\n200,92.74,2.1566\n200,92.14,2.1707\n200,91.30,2.1907'
+    widget(at.text_area,'定投记录').set_value(text)
+    widget(at.button,'🔍 解析定投记录').click().run()
+    widget(at.button,'✅ 应用定投记录').click().run()
+    assert not at.exception
+    draft=at.session_state['son_update_template']
+    assert draft.iloc[0].Shares==pytest.approx(556.16)
+    assert draft.iloc[0].Net_Cash_Flow==1000
+    assert draft.iloc[-1].Total_Value==draft.iloc[-1].Shares==17666
+    assert len(at.session_state['son_pending_transactions'])==5
+    assert not (tmp_path/'transaction.csv').exists()
+    widget(at.checkbox,'确认子基金数据无误').check().run()
+    assert not widget(at.button,'💾 保存子基金快照').disabled
+    widget(at.button,'💾 保存子基金快照').click().run()
+    assert not at.exception
+    tx=pd.read_csv(tmp_path/'transaction.csv',dtype={'Code':str})
+    assert len(tx)==5 and tx.Amount_CNY.sum()==1000
+    assert tx.Code.eq('021000').all()
+    assert tx.Date.eq('2026-10-30').all() and tx.Trade_Date.eq('2026-10-30').all()
+    assert tx.Note.str.contains('未提供逐笔日期').all()
+    assert tx.Transaction_ID.nunique()==5
+
+
+def test_invalid_text_does_not_block_valid_sms_or_modify_draft(tmp_path,monkeypatch):
+    at=app(tmp_path,monkeypatch)
+    original=at.session_state['son_update_template'].copy()
+    widget(at.text_area,'定投记录').set_value('code: 999999\n200,80,2.5')
+    widget(at.button,'🔍 解析定投记录').click().run()
+    pd.testing.assert_frame_equal(original,at.session_state['son_update_template'])
+    at.session_state['son_sms_parsed']=[dict(matched_code='021000',matched_name='南方纳指100 I类',
+        confirm_date='2026-10-29',fund_name='南方纳指',shares=80.,amount=200.,nav=2.5)]
+    at.run()
+    widget(at.button,'✅ 应用解析结果').click().run()
+    widget(at.checkbox,'确认子基金数据无误').check().run()
+    assert not widget(at.button,'💾 保存子基金快照').disabled
+    widget(at.button,'💾 保存子基金快照').click().run()
+    assert not at.exception and len(pd.read_csv(tmp_path/'transaction.csv'))==1
 
 
 def test_manual_buy_stages_real_transaction_with_cash_units(tmp_path,monkeypatch):

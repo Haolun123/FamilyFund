@@ -1,9 +1,9 @@
 # FamilyFund 家庭基金管理系统 — 架构设计文档
 
-> **版本**: v2.7
+> **版本**: v2.8
 > **作者**: Family CIO  
 > **创建日期**: 2026-04-07  
-> **最后更新**: 2026-11-09
+> **最后更新**: 2026-11-14
 > **状态**: 活跃迭代中
 
 ---
@@ -15,6 +15,8 @@
 报告及底稿存于data/weekly_summaries，正文同步至Obsidian familyfund/weekly_summaries。同区间不覆盖，源版本变化要求重新预览；同步失败可重试同一版本。儿子基金同周周末操作在保存时按周五记账，原日期保留备注。见[DESIGN_THREE_FUND_REPORT.md](DESIGN_THREE_FUND_REPORT.md)。不增加报价请求或修改nav_engine算法。
 
 ## Son Fund记账修复（2026-11-04）
+
+2026-11-14：儿子基金快照默认锚定北京时间当周周五，手动选择后保持，保存或重置后恢复默认；未来快照仍禁止保存。主基金原有定投文本解析函数原样提取到src/dca_text_parser.py，主基金界面和数据行为保持原样；儿子基金复用此解析器，文本与短信独立应用到同一买入草稿及待保存流水，任一种有效即可保存，无需同时填写。文本没有逐笔日期时按所选快照日期记账并注明来源。
 
 Son Fund保留原Weekly Update页面，新增src/son_bookkeeping.py负责买入/入金草稿、Cash单位规范化、真实交易记录、快照日期校验及保存。数据仍在son/portfolio.csv与son/transaction.csv。Date记录所属快照，Trade_Date保留实际确认日期。保存持有账户锁，检查草稿基准，两文件逐个原子写入，异常恢复原文备份；不改主基金或Father Fund账本。详见[DESIGN_SON_BOOKKEEPING.md](DESIGN_SON_BOOKKEEPING.md)。
 

@@ -1,6 +1,6 @@
 # FamilyFund 功能改进清单
 
-> **最后更新**：2026-11-09
+> **最后更新**：2026-11-14
 >
 > 本文件只做状态跟踪和优先级排序。详细设计见各 `DESIGN_XXX.md` 文件。
 
@@ -10,6 +10,7 @@
 
 | 功能 | 实现位置 |
 |------|---------|
+| 儿子基金周更新：默认当周周五、保留手选日期；复用主基金定投文本解析，文本/短信任选，统一生成买入流水并保存 | src/dca_text_parser.py + src/son_bookkeeping.py + dashboard/app.py；见DESIGN_SON_BOOKKEEPING.md |
 | Portfolio基金总览展示净现金，与总资产统一使用最新快照，日期筛选仅影响折线图 | dashboard/app.py |
 | 三基金区间报表：周五边界、逐周校验、报价日期证据、链式收益、iCloud/Obsidian版本保存和同步重试 | src/three_fund_report.py + dashboard/three_fund_tab.py；见DESIGN_THREE_FUND_REPORT.md |
 | Father Fund独立账户：Markdown初始化、仓位目标、纠错及券商对账 | `src/father_fund.py` + `dashboard/father_tab.py`，见 `DESIGN_FATHER_FUND.md`；实际期初和交割明细待用户补齐 |

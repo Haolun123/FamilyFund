@@ -1522,78 +1522,7 @@ with tab_update:
                 st.success(f"已解析 {len(parsed_df)} 行")
                 st.rerun()
 
-    def _parse_dca_text(text, template_df):
-        """
-        解析定投文本格式，返回 (entries, errors)。
-        格式：
-            code: 022523
-            100,45.14,2.2155
-            100,45.56,2.1947
-
-            code: 007194
-            10000,7944.05,1.2583
-        每行三列：金额(CNY), 份额, 净值。
-        只支持已建仓标的（code 必须存在于 template_df）。
-        """
-        import re as _re
-        entries = []
-        errors = []
-
-        # 构建 code → name 映射（排除 Cash）
-        code_to_name = {
-            str(row['Code']): str(row['Name'])
-            for _, row in template_df[template_df['Asset_Class'] != 'Cash'].iterrows()
-            if pd.notna(row['Code']) and pd.notna(row['Name'])
-        }
-
-        # 按空行分块
-        blocks = _re.split(r'\n\s*\n', text.strip())
-        for block in blocks:
-            lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
-            if not lines:
-                continue
-
-            # 第一行必须是 code: xxx
-            code_match = _re.match(r'^code\s*:\s*(\S+)$', lines[0], _re.IGNORECASE)
-            if not code_match:
-                errors.append(f"无法识别代码行：「{lines[0]}」")
-                continue
-
-            code = code_match.group(1)
-            if code not in code_to_name:
-                errors.append(f"代码 {code} 不在当前持仓中，跳过")
-                continue
-
-            name = code_to_name[code]
-
-            # 后续每行解析三列
-            for row_idx, row_line in enumerate(lines[1:], start=1):
-                parts = row_line.split(',')
-                if len(parts) != 3:
-                    errors.append(f"{code} 第{row_idx}行列数不对（需3列）：「{row_line}」")
-                    continue
-                try:
-                    amount = float(parts[0])
-                    shares = float(parts[1])
-                    nav    = float(parts[2])
-                except ValueError:
-                    errors.append(f"{code} 第{row_idx}行数值解析失败：「{row_line}」")
-                    continue
-
-                entries.append({
-                    'type':        '买入',
-                    'asset_name':  name,
-                    'asset_label': f"{name} ({code})",
-                    'asset_code':  code,
-                    'amount':      amount,
-                    'price':       nav,
-                    'fee':         0.0,
-                    'shares':      shares,
-                    'is_new':      False,
-                    'new_asset':   {},
-                })
-
-        return entries, errors
+    from dca_text_parser import parse_dca_text as _parse_dca_text
 
     # ─── 📋 定投记录导入（无短信标的）───────────────────────────
     st.subheader("📋 步骤一（补充）：导入定投记录（无短信标的）")
@@ -6861,7 +6790,7 @@ with tab_research:
 with tab_son:
     import math as _math_son
     from son_bookkeeping import (normalize_cash, apply_buys, apply_deposit, frame_signature,
-                                 prepare_snapshot, save_update, today_beijing)
+                                 prepare_snapshot, save_update, today_beijing, default_snapshot_date)
 
     SON_DATA_DIR = os.environ.get('FAMILYFUND_SON_DATA', os.path.join(os.path.dirname(csv_path), 'son'))
     SON_CSV = os.path.join(SON_DATA_DIR, 'portfolio.csv')
@@ -7005,12 +6934,61 @@ with tab_son:
         st.session_state['son_update_template'] = normalize_cash(_son_template)
         st.session_state['son_base_signature'] = frame_signature(son_df if son_df is not None else pd.DataFrame())
 
-    # 快照日期不得默认跳到未来
+    # 默认当周周五；手动选择后保留，保存时仍禁止未来快照。
     _son_last_snapshot = son_df['Date'].max() if son_df is not None and not son_df.empty else '（无快照）'
     st.caption(f"上次快照：{_son_last_snapshot}")
     _today = today_beijing()
-    _son_new_date = st.date_input("本次快照日期（请选实际估值日期）", value=_today, max_value=_today, key="son_new_date")
+    _son_friday = default_snapshot_date(_today)
+    if not st.session_state.get('son_date_manual', False):
+        st.session_state['son_new_date'] = _son_friday
+    def _son_date_changed():
+        st.session_state['son_date_manual'] = True
+    _son_new_date = st.date_input("本次快照日期（请选实际估值日期）",
+        max_value=max(_today, _son_friday), key="son_new_date", on_change=_son_date_changed,
+        help="默认当周周五，周末归刚结束的一周。可手动改选；未来日期不能保存。")
     _son_new_date_str = str(_son_new_date)
+
+    # 文本和短信各自解析、各自应用，任一种有效即可进入保存流程。
+    with st.expander("📋 步骤一：导入定投记录", expanded=False):
+        st.caption("格式与主基金一致：code: <代码>，后接每笔金额,份额,净值；多标的用空行分隔。只支持当前持仓，文本与短信任选，勿重复录入同一笔交易。")
+        _son_dca_text = st.text_area("定投记录", height=160, key="son_dca_input",
+            placeholder="code: 021000\n200,88.47,2.2607\n200,91.51,2.1856\n200,92.74,2.1566\n200,92.14,2.1707\n200,91.30,2.1907")
+        if st.button("🔍 解析定投记录", key="son_dca_parse"):
+            from dca_text_parser import parse_dca_text
+            _entries, _errors = parse_dca_text(_son_dca_text, st.session_state['son_update_template'])
+            st.session_state['son_dca_parsed'] = dict(entries=_entries, errors=_errors)
+            st.rerun()
+        if 'son_dca_parsed' in st.session_state:
+            _son_dca = st.session_state['son_dca_parsed']
+            for _err in _son_dca['errors']:
+                st.warning(_err)
+            if _son_dca['entries']:
+                st.dataframe([dict(代码=e['asset_code'],名称=e['asset_name'],金额=e['amount'],
+                    份额=e['shares'],净值=e['price']) for e in _son_dca['entries']],
+                    hide_index=True,use_container_width=True)
+                st.caption("文本未提供逐笔日期，按所选快照日期记账，流水注明来源。")
+                if st.button("✅ 应用定投记录", key="son_dca_apply", type="primary"):
+                    _purchases = [dict(code=e['asset_code'],name=e['asset_name'],amount=e['amount'],
+                        shares=e['shares'],nav=e['price'],trade_date=_son_new_date_str,
+                        note='定投文本导入；未提供逐笔日期，按快照日期记账') for e in _son_dca['entries']]
+                    try:
+                        _draft, _transactions = apply_buys(st.session_state['son_update_template'],
+                            _purchases, _son_new_date_str)
+                        st.session_state['son_update_template'] = _draft
+                        st.session_state.setdefault('son_pending_transactions', []).extend(_transactions)
+                        st.session_state['son_editor_version'] = st.session_state.get('son_editor_version', 0) + 1
+                        del st.session_state['son_dca_parsed']
+                        st.session_state['_son_dca_applied'] = len(_transactions)
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+            else:
+                st.info("没有可导入的记录；可以改用短信解析或手动登记。")
+            if st.button("清除定投解析结果", key="son_dca_clear"):
+                del st.session_state['son_dca_parsed']
+                st.rerun()
+    if st.session_state.get('_son_dca_applied') is not None:
+        st.success(f"✅ 定投记录已应用 {st.session_state.pop('_son_dca_applied')} 条")
 
     # 步骤一：短信解析
     with st.expander("📱 步骤一：短信解析", expanded=False):
@@ -7208,7 +7186,7 @@ with tab_son:
         st.dataframe(pd.DataFrame([dict(成交日期=t['Trade_Date'],方向=t['Type'],标的=t['Name'],
             金额=t['Amount_CNY'],份额=t['Shares']) for t in _pending]),hide_index=True,use_container_width=True)
     else:
-        st.caption('本期暂无待保存流水。新增交易请使用短信解析或手动登记，直接改表格不会生成逐笔流水。')
+        st.caption('本期暂无待保存流水。新增交易请使用定投文本、短信解析或手动登记，直接改表格不会生成逐笔流水。')
     if son_df is not None and not son_df.empty:
         _last=son_df[son_df.Date==son_df.Date.max()]
         _old_cash=float(_last.loc[_last.Code=='CASH','Total_Value'].sum())
@@ -7225,9 +7203,10 @@ with tab_son:
         _son_error=str(exc); st.error(_son_error)
     st.divider()
     if st.button('重置子基金本期草稿',key='son_reset'):
-        for key in ['son_update_template','son_base_signature','son_pending_transactions','son_buy_entries','son_sms_parsed','son_confirm']:
+        for key in ['son_update_template','son_base_signature','son_pending_transactions','son_buy_entries','son_sms_parsed','son_dca_parsed','son_confirm']:
             st.session_state.pop(key,None)
         st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
+        st.session_state['son_date_manual'] = False
         load_son_data.clear()
         st.rerun()
     _son_confirm=st.checkbox('确认子基金数据无误',key='son_confirm')
@@ -7246,6 +7225,9 @@ with tab_son:
                 _son_report=generate_weekly_report(data_dir=SON_DATA_DIR,this_week=_son_new_date_str)
             except Exception:
                 pass
+            st.session_state['son_date_manual'] = False
+            st.session_state.pop('son_dca_parsed', None)
+            st.session_state.pop('son_sms_parsed', None)
             del st.session_state['son_update_template']
             st.session_state.pop('son_base_signature',None)
             st.session_state['son_editor_version']=st.session_state.get('son_editor_version',0)+1
