@@ -235,7 +235,7 @@ A股PE历史极差巨大（沪深300 历史范围 8x–51x），绝对值阈值�
 独立缓存文件（不与 benchmark_cache 合并）：
 
 ```
-$FAMILYFUND_DATA/market_cache.json
+$FAMILYFUND_DATA/cache/market_cache.json
 ```
 
 ```json
@@ -252,9 +252,12 @@ $FAMILYFUND_DATA/market_cache.json
 ```
 
 规则：
-- 当天已更新 → 直接读缓存，不发网络请求
-- 过期 → 尝试拉新；失败时 fallback 到旧缓存，UI 标注"数据陈旧 (YYYY-MM-DD)"
-- `manual_override` 非 null 时，PE 使用手动值，忽略自动值（用于网络不可达时）
+- 当天已有有效值 → 普通页面重绘读取缓存；无效值（NaN／无穷／非正数）不算新鲜缓存
+- 过期或点击刷新 → 尝试拉新；失败保留旧值及时间，UI 逐项标注失败；无有效旧值则返回 None，不参与矩阵
+- 手动和自动值统一记录带时区的 `updated_at`，表示手动录入／自动拉取成功的时间，较新的记录生效。`manual_override` 仅标记当前值来自手动输入，不阻止之后的刷新。手动值当天沿用缓存，强制刷新或次日自动获取成功后替换较旧的手动值；失败不丢失手动值
+- 清除手动值同时失效当日缓存，包括 PE，确保下一次读取立即尝试自动获取
+- `price_date` 单独记录来源提供的行情日期，缺失时标未知；不得用拉取时间补造。QVIX 按行情日期排序，跳过末尾空行并选择最近有效收盘值
+- 返回 `refresh_status`：updated（成功）、cached（当日缓存）、manual（保留手动值）、fallback（获取失败保留旧值）、unavailable（无有效数据）；UI 提供逐项状态与北京时间明细
 - 各标的独立更新，某个接口失败不影响其他
 
 ---

@@ -1,6 +1,10 @@
 import os
 import sys
 import pytest
+from datetime import date
+from types import SimpleNamespace
+
+import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -316,3 +320,136 @@ class TestFetchYfinanceSingleRow:
         assert len(result) > 0  # 之前这里 TypeError
         latest = round(float(result.iloc[-1]), 3)
         assert latest == 4.25
+
+
+@pytest.fixture
+def market_refresh_env(tmp_path, monkeypatch):
+    """隔离缓存与所有外部接口，检验完整刷新流程。"""
+    import market_monitor as m
+    monkeypatch.setattr(m, 'CACHE_PATH', str(tmp_path / 'market_cache.json'))
+    for name in ('_fetch_akshare', '_fetch_yfinance', '_fetch_vxn', '_fetch_qvix',
+                 '_fetch_pe', '_fetch_akshare_pe'):
+        monkeypatch.setattr(m, name, lambda *args, **kwargs: None)
+    monkeypatch.setitem(sys.modules, 'akshare', SimpleNamespace(
+        bond_zh_us_rate=lambda **kwargs: pd.DataFrame(),
+    ))
+    return m
+
+
+class TestQvixMissingRows:
+    @pytest.mark.parametrize('bad', [float('nan'), float('inf'), 0, -1, None, ''])
+    def test_trailing_invalid_close_uses_latest_valid_date(self, monkeypatch, bad):
+        import market_monitor as m
+        frame = pd.DataFrame({
+            'date': ['2026-11-18', '2026-11-17', '2026-11-19'],
+            'close': [20.46, 20.3, bad],
+        })
+        monkeypatch.setitem(sys.modules, 'akshare', SimpleNamespace(
+            index_option_300etf_qvix=lambda: frame,
+        ))
+        assert m._fetch_qvix() == {'price': 20.46, 'price_date': '2026-11-18'}
+
+    def test_all_invalid_closes_return_no_data(self, monkeypatch):
+        import market_monitor as m
+        frame = pd.DataFrame({'date': ['2026-11-19'], 'close': [float('nan')]})
+        monkeypatch.setitem(sys.modules, 'akshare', SimpleNamespace(
+            index_option_300etf_qvix=lambda: frame,
+        ))
+        assert m._fetch_qvix() is None
+
+
+class TestMarketRefresh:
+    @pytest.mark.parametrize('key,setter', [
+        ('vix', 'vol'), ('vxn', 'vol'), ('pe_sp500', 'pe'), ('pe_ndx100', 'pe'),
+    ])
+    def test_new_automatic_value_replaces_manual_on_force_refresh(self, market_refresh_env, monkeypatch, key, setter):
+        m = market_refresh_env
+        if setter == 'pe':
+            m.set_pe_override(key.removeprefix('pe_'), 40)
+        else:
+            m.set_vol_override(key, 40)
+        before = m._load_cache()[key]['updated_at']
+        # 当日正常重绘保留刚录入的手动值；显式刷新不能被手动标志阻止。
+        assert m.get_market_data()['refresh_status'][key] == 'manual'
+        monkeypatch.setattr(m, '_fetch_yfinance', lambda *a, **k: pd.Series([22.5], index=['2026-11-20']))
+        monkeypatch.setattr(m, '_fetch_vxn', lambda: 22.5)
+        monkeypatch.setattr(m, '_fetch_pe', lambda ticker: 22.5)
+        result = m.get_market_data(force_refresh=True)
+        field = 'value' if setter == 'pe' else 'price'
+        assert result[key][field] == 22.5
+        assert not result[key].get('manual_override')
+        assert result[key]['updated_at'] >= before
+        assert result['refresh_status'][key] == 'updated'
+        assert m._load_cache()[key] == result[key]
+
+    @pytest.mark.parametrize('key', ['vix', 'vxn', 'pe_sp500', 'pe_ndx100'])
+    def test_failed_refresh_keeps_manual_value_and_timestamp(self, market_refresh_env, key):
+        m = market_refresh_env
+        if key.startswith('pe_'):
+            m.set_pe_override(key.removeprefix('pe_'), 40)
+        else:
+            m.set_vol_override(key, 40)
+        before = m._load_cache()[key]
+        result = m.get_market_data(force_refresh=True)
+        assert result[key] == before
+        assert result['refresh_status'][key] == 'fallback'
+
+    def test_previous_day_manual_value_is_automatically_refreshed(self, market_refresh_env, monkeypatch):
+        m = market_refresh_env
+        m.set_vol_override('vix', 40)
+        cache = m._load_cache()
+        cache['vix_updated'] = '2020-01-01'
+        m._save_cache(cache)
+        monkeypatch.setattr(m, '_fetch_yfinance', lambda *a, **k: pd.Series([22.5], index=['2026-11-20']))
+        result = m.get_market_data()
+        assert result['vix']['price'] == 22.5
+        assert result['refresh_status']['vix'] == 'updated'
+
+    def test_older_automatic_timestamp_cannot_replace_newer_manual(self, market_refresh_env, monkeypatch):
+        m = market_refresh_env
+        monkeypatch.setattr(m, '_updated_at', lambda: '2030-01-01T12:00:00+00:00')
+        m.set_vol_override('vix', 40)
+        monkeypatch.setattr(m, '_updated_at', lambda: '2030-01-01T11:00:00+00:00')
+        monkeypatch.setattr(m, '_fetch_yfinance', lambda *a, **k: pd.Series([22.5], index=['2026-11-20']))
+        result = m.get_market_data(force_refresh=True)
+        assert result['vix']['price'] == 40
+        assert result['refresh_status']['vix'] == 'manual'
+
+    def test_clear_pe_override_invalidates_today_cache(self, market_refresh_env, monkeypatch):
+        m = market_refresh_env
+        m.set_pe_override('ndx100', 40)
+        m.set_pe_override('ndx100', None)
+        monkeypatch.setattr(m, '_fetch_pe', lambda ticker: 25.06)
+        result = m.get_market_data()
+        assert result['pe_ndx100']['value'] == 25.06
+        assert result['refresh_status']['pe_ndx100'] == 'updated'
+
+    @pytest.mark.parametrize('bad', [float('nan'), float('inf'), None])
+    def test_invalid_today_cache_is_retried(self, market_refresh_env, monkeypatch, bad):
+        m = market_refresh_env
+        m._save_cache({'qvix': {'price': bad}, 'qvix_updated': date.today().isoformat()})
+        monkeypatch.setattr(m, '_fetch_qvix', lambda: {'price': 20.46, 'price_date': '2026-11-18'})
+        result = m.get_market_data()
+        assert result['qvix'] == m._load_cache()['qvix']
+        assert result['qvix']['price'] == 20.46
+        assert result['qvix']['price_date'] == '2026-11-18'
+        assert result['refresh_status']['qvix'] == 'updated'
+
+    def test_invalid_response_does_not_replace_valid_cache(self, market_refresh_env, monkeypatch):
+        m = market_refresh_env
+        old = {'price': 20.46, 'price_date': '2026-11-18'}
+        m._save_cache({'qvix': old, 'qvix_updated': '2026-11-18'})
+        monkeypatch.setattr(m, '_fetch_qvix', lambda: {'price': float('nan')})
+        result = m.get_market_data(force_refresh=True)
+        assert result['qvix'] == old
+        assert result['meta']['qvix_updated'] == '2026-11-18'
+        assert result['refresh_status']['qvix'] == 'fallback'
+
+    def test_invalid_cache_and_failed_fetch_do_not_feed_matrix(self, market_refresh_env):
+        m = market_refresh_env
+        m._save_cache({'qvix': {'price': float('nan')}, 'qvix_updated': date.today().isoformat()})
+        result = m.get_market_data()
+        assert result['qvix'] is None
+        assert result['meta']['qvix_updated'] == '未知'
+        assert result['refresh_status']['qvix'] == 'unavailable'
+        assert m.lookup_a_share_multiplier(15, (result['qvix'] or {}).get('price'), 'csi300') == '—'

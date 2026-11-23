@@ -27,15 +27,16 @@ A股定投倍数矩阵说明：
   - PE分档：<30th 低估, 30-60th 合理, 60-80th 偏贵, >80th 高估
 
 缓存策略：
-  - 缓存文件：$FAMILYFUND_DATA/market_cache.json（iCloud 目录）
+  - 缓存文件：$FAMILYFUND_DATA/cache/market_cache.json（iCloud 目录）
   - 当天已更新则直接读缓存；过期则尝试拉新，失败时 fallback 到旧缓存
-  - manual_override 非 null 时 PE 使用手动值
+  - 手动与自动值按 updated_at 比较；手动录入不阻止之后的自动刷新
   - 各标的独立更新，某个接口失败不影响其他
 """
 
 import json
+import math
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pandas as pd
 
@@ -240,10 +241,38 @@ def _save_cache(cache: dict):
 
 
 def _cache_is_fresh(cache: dict, key: str) -> bool:
+    entry = cache.get(key) or {}
+    if not _valid_market_value(entry.get('value' if key.startswith('pe_') else 'price')):
+        return False
     ts = cache.get(f'{key}_updated')
     if not ts:
         return False
     return ts == date.today().isoformat()
+
+
+def _valid_market_value(value) -> bool:
+    """行情值必须是有限正数，NaN 不能视为一次成功刷新。"""
+    try:
+        return math.isfinite(float(value)) and float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _updated_at() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec='microseconds')
+
+
+def _entry_time(entry: dict) -> datetime:
+    try:
+        ts = datetime.fromisoformat(entry['updated_at'])
+        return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+    except (KeyError, TypeError, ValueError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _valid_closes(series: pd.Series) -> pd.Series:
+    values = pd.to_numeric(series, errors='coerce')
+    return values[values.map(_valid_market_value)].sort_index()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -326,12 +355,20 @@ def _fetch_akshare_pe(symbol: str) -> float | None:
         return None
 
 
-def _fetch_qvix() -> float | None:
-    """拉取 A股 QVIX（300ETF期权隐含波动率指数，最新收盘值）。"""
+def _fetch_qvix() -> dict | None:
+    """拉取 QVIX 最新有效收盘值，保留行情日期并跳过尾部空行。"""
     try:
         import akshare as ak
         df = ak.index_option_300etf_qvix()
-        return round(float(df['close'].iloc[-1]), 2)
+        dates = pd.to_datetime(df['date'], errors='coerce')
+        values = pd.to_numeric(df['close'], errors='coerce')
+        valid = pd.DataFrame({'date': dates, 'close': values})
+        valid = valid[dates.notna() & values.map(_valid_market_value)].sort_values('date')
+        if valid.empty:
+            return None
+        row = valid.iloc[-1]
+        return {'price': round(float(row['close']), 2),
+                'price_date': row['date'].strftime('%Y-%m-%d')}
     except Exception:
         return None
 
@@ -348,15 +385,17 @@ def _fetch_vxn() -> float | None:
         r = requests.get(url, timeout=10)
         if r.ok:
             data = r.json().get('data', [])
-            if data:
+            if data and _valid_market_value(data[-1].get('close')):
                 return round(float(data[-1]['close']), 2)
     except Exception:
         pass
 
     # 备用：yfinance（复用 _fetch_yfinance 正确处理 MultiIndex）
     series = _fetch_yfinance('^VXN', period='5d')
-    if series is not None and len(series) > 0:
-        return round(float(series.iloc[-1]), 2)
+    if series is not None:
+        series = _valid_closes(series)
+        if not series.empty:
+            return round(float(series.iloc[-1]), 2)
 
     return None
 
@@ -373,10 +412,14 @@ def _entry_from_series(series: pd.Series) -> dict | None:
     """从价格序列提取 price/ma60/ma200。"""
     if series is None or len(series) == 0:
         return None
+    series = _valid_closes(series)
+    if series.empty:
+        return None
     price = round(float(series.iloc[-1]), 4)
     ma60  = _compute_ma(series, 60)
     ma200 = _compute_ma(series, 200)
-    return {'price': price, 'ma60': ma60, 'ma200': ma200}
+    return {'price': price, 'ma60': ma60, 'ma200': ma200,
+            'price_date': str(series.index[-1])[:10]}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -399,16 +442,39 @@ def get_market_data(force_refresh: bool = False) -> dict:
             'pe_ndx100':    {...},
             'pe_csi300':    {'value': ..., 'source': 'akshare 沪深300 滚动PE', 'updated': '...'},
             'pe_csi_a500':  {'value': ..., 'source': 'akshare 中证500 滚动PE（A500代理）', 'updated': '...'},
-            'meta':         {'<key>_updated': '...', ...}
+            'meta':         {'<key>_updated': '...', ...},
+            'refresh_status': {'<key>': 'updated|cached|manual|fallback|unavailable', ...}
         }
         各字段为 None 表示完全不可用（无缓存且拉取失败）
     """
     cache = _load_cache()
     cache_dirty = False
     today = date.today().isoformat()
+    statuses = {}
 
     def _should_fetch(key: str) -> bool:
-        return force_refresh or not _cache_is_fresh(cache, key)
+        if force_refresh or not _cache_is_fresh(cache, key):
+            statuses[key] = 'fallback'  # 成功后由 _store 改为 updated
+            return True
+        statuses[key] = ('manual' if (cache.get(key) or {}).get('manual_override') is not None
+                         else 'cached')
+        return False
+
+    def _store(key: str, entry: dict | None):
+        nonlocal cache_dirty
+        if not entry or not _valid_market_value(
+            entry.get('value' if key.startswith('pe_') else 'price')
+        ):
+            return
+        entry = {**entry, 'updated_at': _updated_at()}
+        existing = cache.get(key) or {}
+        if _entry_time(entry) < _entry_time(existing):
+            statuses[key] = 'manual' if existing.get('manual_override') is not None else 'cached'
+            return
+        cache[key] = entry
+        cache[f'{key}_updated'] = today
+        statuses[key] = 'updated'
+        cache_dirty = True
 
     # ── 价格标的 ──
     for key, cfg in TARGETS.items():
@@ -418,67 +484,37 @@ def get_market_data(force_refresh: bool = False) -> dict:
             series = _fetch_akshare(cfg['symbol'])
         else:
             series = _fetch_yfinance(cfg['symbol'], period='400d')
-        entry = _entry_from_series(series)
-        if entry:
-            cache[key] = entry
-            cache[f'{key}_updated'] = today
-            cache_dirty = True
+        _store(key, _entry_from_series(series))
 
     # ── VIX ──
-    if _should_fetch('vix') and not (cache.get('vix') or {}).get('manual_override'):
+    if _should_fetch('vix'):
         series = _fetch_yfinance('^VIX', period='5d')
-        if series is not None and len(series) > 0:
-            entry = cache.get('vix', {})
-            entry['price'] = round(float(series.iloc[-1]), 2)
-            entry.pop('manual_override', None)
-            cache['vix'] = entry
-            cache['vix_updated'] = today
-            cache_dirty = True
+        entry = _entry_from_series(series)
+        if entry:
+            _store('vix', {'price': round(entry['price'], 2), 'price_date': entry['price_date']})
 
     # ── VXN（纳指专属隐含波动率，来源：CBOE）──
-    if _should_fetch('vxn') and not (cache.get('vxn') or {}).get('manual_override'):
+    if _should_fetch('vxn'):
         val = _fetch_vxn()
-        if val:
-            entry = cache.get('vxn', {})
-            entry['price'] = val
-            entry.pop('manual_override', None)
-            cache['vxn'] = entry
-            cache['vxn_updated'] = today
-            cache_dirty = True
+        _store('vxn', {'price': val})
 
     # ── QVIX（A股隐含波动率，300ETF期权）──
     if _should_fetch('qvix'):
-        val = _fetch_qvix()
-        if val:
-            cache['qvix'] = {'price': val}
-            cache['qvix_updated'] = today
-            cache_dirty = True
+        _store('qvix', _fetch_qvix())
 
-    # ── 美股PE（仅在无 manual_override 时自动拉取）──
+    # ── 美股PE（刷新成功后用较新的自动值替换手动值）──
     for pe_key, ticker in [('pe_sp500', 'VOO'), ('pe_ndx100', 'QQQ')]:
-        existing = cache.get(pe_key, {})
-        if existing.get('manual_override') is not None:
-            continue  # 手动值优先，不覆盖
         if not _should_fetch(pe_key):
             continue
         val = _fetch_pe(ticker)
-        if val:
-            cache[pe_key] = {
-                'value': val,
-                'source': f'{ticker} trailingPE',
-                'manual_override': existing.get('manual_override'),
-                'updated': today,
-            }
-            cache[f'{pe_key}_updated'] = today
-            cache_dirty = True
+        _store(pe_key, {'value': val, 'source': f'{ticker} trailingPE', 'updated': today})
 
     # ── 美债10年期收益率（^TNX，仅展示，不参与矩阵计算）──
     if _should_fetch('treasury_10y'):
         series = _fetch_yfinance('^TNX', period='5d')
-        if series is not None and len(series) > 0:
-            cache['treasury_10y'] = {'price': round(float(series.iloc[-1]), 3)}
-            cache['treasury_10y_updated'] = today
-            cache_dirty = True
+        entry = _entry_from_series(series)
+        if entry:
+            _store('treasury_10y', {'price': round(entry['price'], 3), 'price_date': entry['price_date']})
 
     # ── 中国10Y国债收益率（akshare bond_zh_us_rate）──
     if _should_fetch('cn_treasury_10y'):
@@ -489,11 +525,9 @@ def get_market_data(force_refresh: bool = False) -> dict:
             ).strftime('%Y%m%d'))
             col = '中国国债收益率10年'
             if df_bond is not None and col in df_bond.columns:
-                val = pd.to_numeric(df_bond[col], errors='coerce').dropna()
+                val = _valid_closes(df_bond[col])
                 if len(val) > 0:
-                    cache['cn_treasury_10y'] = {'price': round(float(val.iloc[-1]), 3)}
-                    cache['cn_treasury_10y_updated'] = today
-                    cache_dirty = True
+                    _store('cn_treasury_10y', {'price': round(float(val.iloc[-1]), 3)})
         except Exception:
             pass
 
@@ -501,11 +535,9 @@ def get_market_data(force_refresh: bool = False) -> dict:
     if _should_fetch('brent'):
         try:
             series = _fetch_yfinance('BZ=F', period='5d')
-            if series is not None and not series.empty:
-                val = round(float(series.dropna().iloc[-1]), 2)
-                cache['brent'] = {'price': val}
-                cache['brent_updated'] = today
-                cache_dirty = True
+            entry = _entry_from_series(series)
+            if entry:
+                _store('brent', {'price': round(entry['price'], 2), 'price_date': entry['price_date']})
         except Exception:
             pass
     for pe_key, ak_symbol, source_note in [
@@ -515,10 +547,7 @@ def get_market_data(force_refresh: bool = False) -> dict:
         if not _should_fetch(pe_key):
             continue
         val = _fetch_akshare_pe(ak_symbol)
-        if val:
-            cache[pe_key] = {'value': val, 'source': source_note}
-            cache[f'{pe_key}_updated'] = today
-            cache_dirty = True
+        _store(pe_key, {'value': val, 'source': source_note})
 
     if cache_dirty:
         try:
@@ -533,19 +562,24 @@ def get_market_data(force_refresh: bool = False) -> dict:
     all_keys = list(TARGETS.keys()) + ['vix', 'vxn', 'qvix', 'pe_sp500', 'pe_ndx100', 'pe_csi300', 'pe_csi_a500', 'treasury_10y', 'cn_treasury_10y', 'brent']
     result = {}
     for key in all_keys:
-        result[key] = cache.get(key)
+        entry = cache.get(key) or {}
+        valid = _valid_market_value(entry.get('value' if key.startswith('pe_') else 'price'))
+        result[key] = entry if valid else None
+        if not valid:
+            statuses[key] = 'unavailable'
 
     # meta：各项数据的更新时间
     meta = {}
     for key in all_keys:
-        meta[f'{key}_updated'] = cache.get(f'{key}_updated', '未知')
+        meta[f'{key}_updated'] = cache.get(f'{key}_updated', '未知') if result[key] else '未知'
     result['meta'] = meta
+    result['refresh_status'] = statuses
 
     return result
 
 
 def set_pe_override(target: str, value: float | None):
-    """设置 PE 手动覆盖值。target: 'sp500' 或 'ndx100'。value=None 清除覆盖。"""
+    """记录 PE 手动值及时间；下次成功刷新可替换。None 清除当日缓存有效期。"""
     key = f'pe_{target}'
     cache = _load_cache()
     entry = cache.get(key, {})
@@ -553,22 +587,25 @@ def set_pe_override(target: str, value: float | None):
     if value is not None:
         entry['source'] = '手动输入'
         entry['value'] = value
+        entry['updated_at'] = _updated_at()
+        entry['updated'] = date.today().isoformat()
+    cache[f'{key}_updated'] = date.today().isoformat() if value is not None else None
     cache[key] = entry
     _save_cache(cache)
 
 
 def set_vol_override(target: str, value: float | None):
-    """设置 VIX/VXN 手动覆盖值。target: 'vix' 或 'vxn'。value=None 清除覆盖。"""
+    """记录 VIX/VXN 手动值及时间；下次成功刷新可替换。None 清除当日缓存有效期。"""
     cache = _load_cache()
     if value is not None:
-        cache[target] = {'price': value, 'manual_override': value}
-        cache[f'{target}_updated'] = 'manual'
+        cache[target] = {'price': value, 'manual_override': value, 'updated_at': _updated_at()}
+        cache[f'{target}_updated'] = date.today().isoformat()
     else:
-        # 清除：删除 manual_override，保留上次自动拉取的值
+        # 保留当前值作为失败回退，等待下次自动获取。
         entry = cache.get(target, {})
         entry.pop('manual_override', None)
         cache[target] = entry
-        cache[f'{target}_updated'] = '已清除（等待下次自动获取）'
+        cache[f'{target}_updated'] = None
     _save_cache(cache)
 
 

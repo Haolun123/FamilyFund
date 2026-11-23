@@ -3269,14 +3269,57 @@ with tab_market:
 
     with st.spinner("加载市场数据..."):
         market_data = get_market_data(force_refresh=force)
+    for _data_key, _widget_key in [('pe_sp500', 'pe_sp_override'), ('pe_ndx100', 'pe_ndx_override'),
+                                   ('vix', 'vix_override'), ('vxn', 'vxn_override')]:
+        if market_data.get('refresh_status', {}).get(_data_key) == 'updated':
+            st.session_state.pop(_widget_key, None)
 
     meta = market_data.get('meta', {})
 
-    # 显示最后更新时间（取各标的最新时间）
-    update_times = [v for k, v in meta.items() if k.endswith('_updated') and v != '未知']
+    # 仅比较日期，旧缓存中的 manual / 清除提示不属于时间。
+    update_times = []
+    for key, value in meta.items():
+        if key.endswith('_updated') and isinstance(value, str):
+            try:
+                update_times.append(date.fromisoformat(value).isoformat())
+            except ValueError:
+                pass
     last_update  = max(update_times) if update_times else '未知'
     with top_col1:
-        st.caption(f"数据更新时间: {last_update}　｜　数据来自公开市场，存在延迟")
+        st.caption(f"最近记录日期: {last_update}　｜　各项行情日期与刷新结果见下方")
+
+    _market_names = {key: cfg['name'] for key, cfg in TARGETS.items()}
+    _market_names.update({
+        'vix': 'VIX 标普波动率', 'vxn': 'VXN 纳指波动率', 'qvix': 'QVIX A股波动率',
+        'pe_sp500': '标普500 PE', 'pe_ndx100': '纳指100 PE',
+        'pe_csi300': '沪深300 PE', 'pe_csi_a500': '中证A500代理 PE',
+        'treasury_10y': '美债10Y', 'cn_treasury_10y': '中国10Y国债', 'brent': 'Brent 原油',
+    })
+    _market_status = market_data.get('refresh_status', {})
+    _failed = [_market_names[k] for k, v in _market_status.items() if v == 'fallback']
+    _missing = [_market_names[k] for k, v in _market_status.items() if v == 'unavailable']
+    _manual = [_market_names[k] for k in _market_names
+               if (market_data.get(k) or {}).get('manual_override') is not None]
+    if _failed:
+        st.warning('本次获取失败，保留上次记录：' + '、'.join(_failed))
+    if _missing:
+        st.warning('暂无有效数据：' + '、'.join(_missing))
+    if _manual:
+        st.info('当前手动值：' + '、'.join(_manual) + '。刷新会尝试获取自动值，按记录时间采用较新的值；失败时保留原值。')
+    if force and not _failed and not _missing:
+        st.success('市场数据刷新完成')
+    with st.expander('各项数据状态与时间', expanded=False):
+        _status_labels = {'updated': '已获取', 'cached': '当日缓存', 'manual': '手动值',
+                          'fallback': '获取失败，保留原值', 'unavailable': '暂无有效数据'}
+        _status_rows = []
+        for key, name in _market_names.items():
+            entry = market_data.get(key) or {}
+            timestamp = pd.to_datetime(entry.get('updated_at'), utc=True, errors='coerce')
+            record_time = (timestamp.tz_convert('Asia/Shanghai').strftime('%Y-%m-%d %H:%M:%S')
+                           if pd.notna(timestamp) else meta.get(f'{key}_updated', '未知'))
+            _status_rows.append({'指标': name, '状态': _status_labels.get(_market_status.get(key), '未知'),
+                                 '记录时间（北京时间）': record_time, '行情日期': entry.get('price_date', '未知')})
+        st.dataframe(pd.DataFrame(_status_rows), hide_index=True, use_container_width=True)
 
     st.divider()
 
@@ -3426,6 +3469,7 @@ with tab_market:
     with kpi3:
         st.metric("QVIX A股波动率", f"{qvix_val:.1f}" if qvix_val else "—")
         st.markdown(f"{qvix_emoji} **{qvix_label}**")
+        st.caption(f"行情日期: {(qvix_entry or {}).get('price_date', '未知')}")
         from market_monitor import get_qvix_percentile
         _qvix_pct = get_qvix_percentile(os.path.dirname(csv_path), qvix_val)
         if _qvix_pct:
@@ -3469,27 +3513,27 @@ with tab_market:
             st.caption("数据不完整")
 
     # 手动覆盖（折叠）
-    with st.expander("手动覆盖（网络不可达时使用）", expanded=False):
-        st.caption("填入后点击应用；留空或填0表示清除手动值，恢复自动获取。")
+    with st.expander("手动输入（网络不可达时使用）", expanded=False):
+        st.caption("仅填写需要手动更新的项；0表示自动获取。手动值记录当前时间，点击刷新或次日自动获取成功后采用较新的自动值；失败保留原值。")
         ov_col1, ov_col2, ov_col3, ov_col4, ov_col5 = st.columns([2, 2, 2, 2, 1])
         with ov_col1:
             sp_ov = st.number_input(
-                "标普PE (VOO)", value=float(pe_sp) if pe_sp else 0.0,
+                "标普PE (VOO)", value=float((pe_sp_entry or {}).get('manual_override') or 0),
                 min_value=0.0, step=0.1, format="%.1f", key="pe_sp_override",
             )
         with ov_col2:
             ndx_ov = st.number_input(
-                "纳指PE (QQQ)", value=float(pe_ndx) if pe_ndx else 0.0,
+                "纳指PE (QQQ)", value=float((pe_ndx_entry or {}).get('manual_override') or 0),
                 min_value=0.0, step=0.1, format="%.1f", key="pe_ndx_override",
             )
         with ov_col3:
             vix_ov = st.number_input(
-                "VIX", value=float(vix_val) if vix_val else 0.0,
+                "VIX", value=float((vix_entry or {}).get('manual_override') or 0),
                 min_value=0.0, step=0.1, format="%.1f", key="vix_override",
             )
         with ov_col4:
             vxn_ov = st.number_input(
-                "VXN", value=float(vxn_val) if vxn_val else 0.0,
+                "VXN", value=float((vxn_entry or {}).get('manual_override') or 0),
                 min_value=0.0, step=0.1, format="%.1f", key="vxn_override",
             )
         with ov_col5:
@@ -3501,11 +3545,13 @@ with tab_market:
                 set_vol_override('vxn',   vxn_ov if vxn_ov > 0 else None)
                 st.success("已保存手动值")
                 st.rerun()
-            if st.button("清除全部", key="override_clear"):
+            if st.button("全部恢复自动", key="override_clear"):
                 set_pe_override('sp500',  None)
                 set_pe_override('ndx100', None)
                 set_vol_override('vix',   None)
                 set_vol_override('vxn',   None)
+                for _override_key in ('pe_sp_override', 'pe_ndx_override', 'vix_override', 'vxn_override'):
+                    del st.session_state[_override_key]
                 st.success("已清除，将恢复自动获取")
                 st.rerun()
 
